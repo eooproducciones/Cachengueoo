@@ -1,0 +1,10 @@
+{
+  "name": "CACHENGUEOO - Mendoza Club & Match",
+  "description": "Plataforma oficial de CACHENGUEOO Mendoza. Cachengueoo Match, entradas, beneficios exclusivos de barra, Club Cachengueoo y cumpleaños.",
+  "requestFramePermissions": [
+    "geolocation"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
