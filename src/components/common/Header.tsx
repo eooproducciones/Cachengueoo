@@ -85,7 +85,7 @@ export const Header: React.FC<HeaderProps> = ({
               currentTab === 'membresia' ? 'text-white font-semibold' : 'text-zinc-400 hover:text-white'
             }`}
           >
-            Club Cachengueoo
+            Cachengueoo Club
           </button>
           <button
             onClick={() => onTabChange('cumpleanos')}
@@ -104,21 +104,31 @@ export const Header: React.FC<HeaderProps> = ({
           <span className="px-2.5 py-1 rounded-full bg-[#F39200]/15 border border-[#F39200]/30 text-[#F39200] text-[10px] font-black uppercase tracking-wider">
             PANEL STAFF
           </span>
+        ) : currentUser ? (
+          <button
+            onClick={() => onTabChange('perfil')}
+            className="flex items-center gap-2 cursor-pointer p-1 rounded-full hover:ring-2 hover:ring-[#F39200]/40 transition-all active:scale-95"
+            aria-label="Ir a Mi Perfil"
+          >
+            <img
+              src={currentUser.avatarUrl}
+              alt={currentUser.nickname}
+              referrerPolicy="no-referrer"
+              className="w-8 h-8 rounded-full object-cover border border-zinc-700"
+            />
+            {currentUser.isAdmin && (
+              <span className="hidden sm:inline-flex px-2 py-0.5 rounded-full bg-[#F39200]/20 text-[#F39200] text-[10px] font-bold border border-[#F39200]/30">
+                Admin
+              </span>
+            )}
+          </button>
         ) : (
-          currentUser && (
-            <button
-              onClick={() => onTabChange('perfil')}
-              className="flex items-center gap-2 cursor-pointer p-1 rounded-full hover:ring-2 hover:ring-[#F39200]/40 transition-all active:scale-95"
-              aria-label="Ir a Mi Perfil"
-            >
-              <img
-                src={currentUser.avatarUrl}
-                alt={currentUser.nickname}
-                referrerPolicy="no-referrer"
-                className="w-8 h-8 rounded-full object-cover border border-zinc-700"
-              />
-            </button>
-          )
+          <button
+            onClick={() => onTabChange('perfil')}
+            className="px-3 py-1.5 rounded-xl bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 hover:border-[#F39200]/50 text-xs font-bold text-zinc-300 hover:text-white cursor-pointer transition-colors"
+          >
+            Ingresar
+          </button>
         )}
       </div>
     </header>

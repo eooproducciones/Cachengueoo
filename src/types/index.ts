@@ -52,6 +52,19 @@ export interface UserProfile {
 
 export type ValidationMode = 'GPS_OR_QR' | 'GPS_ONLY' | 'QR_ONLY' | 'GPS_AND_QR';
 
+export interface VenueLocation {
+  id: string;
+  name: string;
+  address?: string;
+  city: string;
+  province: string;
+  country: string;
+  latitude: number;
+  longitude: number;
+  radiusMeters: number;
+  isActive: boolean;
+}
+
 export interface VenueConfig {
   name: string;
   city: string;
@@ -60,6 +73,7 @@ export interface VenueConfig {
   latitude: number;
   longitude: number;
   radiusMeters: number;
+  locations?: VenueLocation[];
 }
 
 export interface ClubEvent {

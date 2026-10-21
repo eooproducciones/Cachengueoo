@@ -30,6 +30,8 @@ import {
   Tag,
   Percent,
   MessageCircle,
+  LogOut,
+  ArrowLeft,
 } from 'lucide-react';
 import { ClubEvent, ValidationMode, VenueConfig, BirthdayRequest, ClubBenefit } from '../../types';
 import { eventService } from '../../services/eventService';
@@ -47,6 +49,7 @@ import {
   getSupabaseClient,
 } from '../../services/supabaseClient';
 import { passlineParser, FOUR_PRESET_FLYERS } from '../../services/passlineParser';
+import { VenueMapEditor } from './VenueMapEditor';
 
 // Imágenes de alta resolución predeterminadas para aliados comerciales
 export const PRESET_BENEFIT_IMAGES = [
@@ -68,10 +71,15 @@ export const PRESET_BENEFIT_IMAGES = [
   },
 ];
 
-export const AdminDashboard: React.FC = () => {
+export interface AdminDashboardProps {
+  onExitAdmin?: () => void;
+  onLogout?: () => void;
+}
+
+export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onExitAdmin, onLogout }) => {
   const [adminTab, setAdminTab] = useState<
-    'presencia' | 'eventos' | 'beneficios' | 'entradas' | 'usuarios' | 'cumpleanos' | 'venue' | 'supabase'
-  >('presencia');
+    'eventos' | 'beneficios' | 'presencia' | 'entradas' | 'usuarios' | 'cumpleanos' | 'venue' | 'supabase'
+  >('eventos');
 
   // Events state
   const [events, setEvents] = useState<ClubEvent[]>(() => eventService.getEvents());
@@ -455,29 +463,52 @@ export const AdminDashboard: React.FC = () => {
           <h1 className="text-2xl font-black text-white font-display uppercase tracking-tight">
             PANEL ADMINISTRATIVO <span className="text-[#F39200]">CACHENGUEOO</span>
           </h1>
-          <p className="text-xs text-zinc-400 mt-1">
-            Gestión en tiempo real de eventos, validación de presencia, Match, entradas y base de datos.
-          </p>
         </div>
 
-        <div className="flex items-center gap-2 bg-zinc-900 border border-zinc-800 p-2.5 rounded-2xl text-xs">
-          <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse"></span>
-          <span className="text-zinc-300 font-medium">Evento activo hoy:</span>
-          <strong className="text-white truncate max-w-[140px]">{activeEvent.title}</strong>
+        <div className="flex flex-wrap items-center gap-2.5">
+          {onExitAdmin && (
+            <button
+              type="button"
+              onClick={onExitAdmin}
+              className="h-10 px-3.5 rounded-xl bg-zinc-900 hover:bg-zinc-800 border border-zinc-700 hover:border-[#F39200] text-zinc-200 hover:text-white text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer transition-all active:scale-95 shadow-sm"
+              title="Volver a la vista normal de la aplicación"
+            >
+              <ArrowLeft className="w-3.5 h-3.5 text-[#F39200]" />
+              <span>Volver a la App</span>
+            </button>
+          )}
+
+          <button
+            type="button"
+            onClick={() => {
+              if (onLogout) {
+                onLogout();
+              } else {
+                authService.logout();
+                window.location.hash = '';
+                window.location.reload();
+              }
+            }}
+            className="h-10 px-3.5 rounded-xl bg-red-950/40 border border-red-500/40 hover:bg-red-900/60 text-red-300 hover:text-red-100 text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer transition-all active:scale-95 shadow-sm"
+            title="Cerrar sesión de administrador"
+          >
+            <LogOut className="w-3.5 h-3.5 text-red-400" />
+            <span>Cerrar sesión</span>
+          </button>
         </div>
       </div>
 
       {/* Admin Tab Navigation */}
       <div className="flex gap-1.5 overflow-x-auto no-scrollbar p-1 bg-zinc-900/80 border border-zinc-800 rounded-2xl">
         {[
-          { id: 'presencia', label: 'Presencia & QR', icon: MapPin },
           { id: 'eventos', label: 'Eventos', icon: Calendar },
           { id: 'beneficios', label: 'Beneficios', icon: Gift },
-          { id: 'entradas', label: 'Control Entradas', icon: Ticket },
-          { id: 'usuarios', label: 'Usuarios & Match', icon: Users },
+          { id: 'presencia', label: 'Presencia', icon: MapPin },
+          { id: 'entradas', label: 'Control de Entradas', icon: Ticket },
+          { id: 'usuarios', label: 'Usuarios', icon: Users },
           { id: 'cumpleanos', label: 'Cumpleaños', icon: Cake },
-          { id: 'venue', label: 'Config Geográfica', icon: ScanLine },
-          { id: 'supabase', label: 'Supabase DB', icon: Database },
+          { id: 'venue', label: 'Configuración Geográfica', icon: ScanLine },
+          { id: 'supabase', label: 'Supabase', icon: Database },
         ].map((tab) => {
           const Icon = tab.icon;
           const isActive = adminTab === tab.id;
@@ -751,9 +782,6 @@ export const AdminDashboard: React.FC = () => {
               <h3 className="text-xl font-black text-white font-display uppercase tracking-tight">
                 GESTIÓN DE BENEFICIOS <span className="text-[#F39200]">CACHENGUEOO</span>
               </h3>
-              <p className="text-xs text-zinc-400 mt-1 max-w-lg leading-relaxed">
-                Administrá los convenios de la comunidad (ej. SportClub, locales, gastronomía). Podés definir el porcentaje resaltado (ej. 10% OFF), la descripción y el link donde se envía al usuario (WhatsApp o web oficial).
-              </p>
             </div>
 
             <button
@@ -1125,106 +1153,15 @@ export const AdminDashboard: React.FC = () => {
         </div>
       )}
 
-      {/* TAB: CONFIGURACIÓN GEOGRÁFICA */}
+      {/* TAB: CONFIGURACIÓN GEOGRÁFICA MULTILOCACIÓN CON MAPA INTERACTIVO */}
       {adminTab === 'venue' && (
-        <div className="p-6 rounded-3xl bg-[#121217] border border-zinc-800 space-y-5">
-          <div>
-            <h3 className="text-base font-bold text-white font-display">
-              Configuración Geográfica del Local (Mendoza)
-            </h3>
-            <p className="text-xs text-zinc-400 mt-0.5">
-              Definición central de VENUE_LOCATION sin hardcodear en componentes.
-            </p>
-          </div>
-
-          {venueSavedNotice && (
-            <div className="p-3 rounded-xl bg-emerald-950/60 border border-emerald-500/50 text-emerald-300 text-xs flex items-center gap-2">
-              <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-              Configuración de ubicación guardada con éxito en el sistema central.
-            </div>
-          )}
-
-          <form onSubmit={handleSaveVenue} className="space-y-4 text-xs">
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="text-zinc-400 block mb-1">Nombre del Local</label>
-                <input
-                  type="text"
-                  value={venueConfig.name}
-                  onChange={(e) => setVenueState({ ...venueConfig, name: e.target.value })}
-                  className="w-full h-10 px-3 rounded-xl bg-zinc-900 border border-zinc-800 text-white focus:outline-none focus:border-[#F39200]"
-                />
-              </div>
-
-              <div>
-                <label className="text-zinc-400 block mb-1">Ciudad y Provincia</label>
-                <input
-                  type="text"
-                  value={`${venueConfig.city}, ${venueConfig.province}`}
-                  onChange={(e) => {
-                    const parts = e.target.value.split(',');
-                    setVenueState({
-                      ...venueConfig,
-                      city: parts[0]?.trim() || 'Mendoza',
-                      province: parts[1]?.trim() || 'Mendoza',
-                    });
-                  }}
-                  className="w-full h-10 px-3 rounded-xl bg-zinc-900 border border-zinc-800 text-white focus:outline-none focus:border-[#F39200]"
-                />
-              </div>
-            </div>
-
-            <div className="grid grid-cols-3 gap-3">
-              <div>
-                <label className="text-zinc-400 block mb-1">Latitud</label>
-                <input
-                  type="number"
-                  step="any"
-                  value={venueConfig.latitude}
-                  onChange={(e) =>
-                    setVenueState({ ...venueConfig, latitude: parseFloat(e.target.value) || 0 })
-                  }
-                  className="w-full h-10 px-3 rounded-xl bg-zinc-900 border border-zinc-800 text-white font-mono focus:outline-none focus:border-[#F39200]"
-                />
-              </div>
-
-              <div>
-                <label className="text-zinc-400 block mb-1">Longitud</label>
-                <input
-                  type="number"
-                  step="any"
-                  value={venueConfig.longitude}
-                  onChange={(e) =>
-                    setVenueState({ ...venueConfig, longitude: parseFloat(e.target.value) || 0 })
-                  }
-                  className="w-full h-10 px-3 rounded-xl bg-zinc-900 border border-zinc-800 text-white font-mono focus:outline-none focus:border-[#F39200]"
-                />
-              </div>
-
-              <div>
-                <label className="text-zinc-400 block mb-1">Radio Permitido (metros)</label>
-                <input
-                  type="number"
-                  value={venueConfig.radiusMeters}
-                  onChange={(e) =>
-                    setVenueState({
-                      ...venueConfig,
-                      radiusMeters: parseInt(e.target.value) || 150,
-                    })
-                  }
-                  className="w-full h-10 px-3 rounded-xl bg-zinc-900 border border-zinc-800 text-white font-mono focus:outline-none focus:border-[#F39200]"
-                />
-              </div>
-            </div>
-
-            <button
-              type="submit"
-              className="h-11 px-5 rounded-xl bg-[#F39200] hover:bg-[#E08400] text-black font-bold text-xs cursor-pointer transition-colors"
-            >
-              Guardar Configuración Geográfica
-            </button>
-          </form>
-        </div>
+        <VenueMapEditor
+          venueConfig={venueConfig}
+          onSaveConfig={(updated) => {
+            saveVenueConfig(updated);
+            setVenueState(updated);
+          }}
+        />
       )}
 
       {/* TAB: SUPABASE LIVE CONNECTOR */}

@@ -505,68 +505,41 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
       </div>
 
       {/* ========================================================== */}
-      {/* BOTONES PRINCIPALES: FESTEJAR MI CUMPLEAÑOS & RESERVAR MESA */}
-      {/* (Reemplaza las tarjetas de entradas, matches y beneficios) */}
+      {/* BOTONES PRINCIPALES: FESTEJAR CUMPLEAÑOS, RESERVAR MESA Y CACHENGUEOO CLUB */}
       {/* ========================================================== */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-        {/* Botón 1: Festejar mi cumpleaños */}
+      <div className="space-y-2 pt-1">
         <button
           type="button"
           onClick={() => onNavigateTab('cumpleanos')}
-          className="p-4 rounded-3xl bg-gradient-to-br from-pink-950/40 via-zinc-900 to-zinc-900 border border-pink-500/40 hover:border-pink-400 text-left cursor-pointer transition-all hover:scale-[1.01] active:scale-[0.99] group shadow-xl relative overflow-hidden"
+          className="w-full p-4 rounded-2xl bg-[#121217] border border-zinc-800 hover:border-zinc-700 flex items-center justify-between text-xs text-white cursor-pointer transition-colors"
         >
-          <div className="flex items-center gap-3 mb-2">
-            <div className="w-10 h-10 rounded-2xl bg-pink-500/15 border border-pink-500/30 flex items-center justify-center text-pink-400 group-hover:scale-110 transition-transform">
-              <Cake className="w-5 h-5 text-pink-400" />
-            </div>
-            <div>
-              <span className="text-[10px] font-black uppercase tracking-widest text-pink-400 block">
-                BENEFICIO EXCLUSIVO
-              </span>
-              <h3 className="text-sm font-black text-white font-display">
-                Festejar mi cumpleaños
-              </h3>
-            </div>
-          </div>
-          <p className="text-[11px] text-zinc-400 leading-snug">
-            Ingreso gratis para vos e invitados + champagne de regalo para brindar en la noche.
-          </p>
+          <span className="flex items-center gap-2.5 font-bold">
+            <Cake className="w-4 h-4 text-[#F39200]" />
+            Festejar mi cumpleaños
+          </span>
+          <span className="text-zinc-500">→</span>
         </button>
 
-        {/* Botón 2: Reservar mesa */}
         <button
           type="button"
           onClick={() => onNavigateTab('reserva_mesa')}
-          className="p-4 rounded-3xl bg-gradient-to-br from-amber-950/40 via-zinc-900 to-zinc-900 border border-amber-500/40 hover:border-[#F39200] text-left cursor-pointer transition-all hover:scale-[1.01] active:scale-[0.99] group shadow-xl relative overflow-hidden"
+          className="w-full p-4 rounded-2xl bg-[#121217] border border-zinc-800 hover:border-zinc-700 flex items-center justify-between text-xs text-white cursor-pointer transition-colors"
         >
-          <div className="flex items-center gap-3 mb-2">
-            <div className="w-10 h-10 rounded-2xl bg-[#F39200]/15 border border-[#F39200]/30 flex items-center justify-center text-[#F39200] group-hover:scale-110 transition-transform">
-              <Wine className="w-5 h-5 text-[#F39200]" />
-            </div>
-            <div>
-              <span className="text-[10px] font-black uppercase tracking-widest text-[#F39200] block">
-                SECTOR VIP
-              </span>
-              <h3 className="text-sm font-black text-white font-display">
-                Reservar mesa
-              </h3>
-            </div>
-          </div>
-          <p className="text-[11px] text-zinc-400 leading-snug">
-            Living VIP exclusivo, consumición en barra y atención personalizada con tus amigos.
-          </p>
+          <span className="flex items-center gap-2.5 font-bold">
+            <Wine className="w-4 h-4 text-[#F39200]" />
+            Reservar mesa
+          </span>
+          <span className="text-zinc-500">→</span>
         </button>
-      </div>
 
-      {/* Otras opciones de cuenta */}
-      <div className="space-y-2 pt-1">
         <button
+          type="button"
           onClick={() => onNavigateTab('membresia')}
           className="w-full p-4 rounded-2xl bg-[#121217] border border-zinc-800 hover:border-zinc-700 flex items-center justify-between text-xs text-white cursor-pointer transition-colors"
         >
           <span className="flex items-center gap-2.5 font-bold">
             <Crown className="w-4 h-4 text-[#F39200]" />
-            Planes y Membresía Club Cachengueoo
+            Cachengueoo Club
           </span>
           <span className="text-zinc-500">→</span>
         </button>

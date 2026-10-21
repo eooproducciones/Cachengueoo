@@ -2,15 +2,28 @@ import { useState, useEffect, useCallback } from 'react';
 import { presenceService, PresenceStatus } from '../services/presenceService';
 import { eventService } from '../services/eventService';
 import { getVenueConfig } from '../config/venue';
-import { PresenceMethod } from '../types';
+import { PresenceMethod, VenueConfig } from '../types';
 
 export function usePresence() {
   const [presence, setPresence] = useState<PresenceStatus>(() => presenceService.getStoredPresence());
   const [isChecking, setIsChecking] = useState<boolean>(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-  const venueConfig = getVenueConfig();
+  const [venueConfig, setVenueConfig] = useState<VenueConfig>(() => getVenueConfig());
   const currentEvent = eventService.getActiveTonightEvent();
+
+  // Escuchar actualizaciones de locaciones y perímetro geográfico
+  useEffect(() => {
+    const handleVenueChange = () => {
+      setVenueConfig(getVenueConfig());
+    };
+    window.addEventListener('cachengueoo_venue_change', handleVenueChange);
+    window.addEventListener('storage', handleVenueChange);
+    return () => {
+      window.removeEventListener('cachengueoo_venue_change', handleVenueChange);
+      window.removeEventListener('storage', handleVenueChange);
+    };
+  }, []);
 
   // Comprueba la presencia real mediante GPS
   const checkGpsPresence = useCallback(async () => {

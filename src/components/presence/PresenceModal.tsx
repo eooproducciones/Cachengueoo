@@ -46,7 +46,9 @@ export const PresenceModal: React.FC<PresenceModalProps> = ({
             <div>
               <h2 className="text-base font-bold text-white font-display">Validación de Presencia</h2>
               <p className="text-xs text-zinc-400">
-                {venueConfig.name} · {venueConfig.city}, {venueConfig.province}
+                {venueConfig.locations && venueConfig.locations.length > 1
+                  ? `${venueConfig.locations.filter((l) => l.isActive).length} sedes habilitadas (Sede Central / Arena Maipú)`
+                  : `${venueConfig.name} · ${venueConfig.city}, ${venueConfig.province}`}
               </p>
             </div>
           </div>
@@ -83,16 +85,22 @@ export const PresenceModal: React.FC<PresenceModalProps> = ({
               {isChecking
                 ? 'Buscando tu ubicación...'
                 : presence.isInside
-                ? '¡Estás en Cachengueoo! 🔥'
-                : 'No estás dentro de Cachengueoo'}
+                ? presence.gpsResult?.matchedLocationName
+                  ? `¡Estás en ${presence.gpsResult.matchedLocationName}! 🔥`
+                  : '¡Estás en Cachengueoo! 🔥'
+                : 'No estás dentro de una sede habilitada'}
             </h3>
 
             <p className="text-xs text-zinc-400 mt-1.5 max-w-xs mx-auto leading-relaxed">
               {presence.isInside
                 ? presence.methodUsed === 'QR'
                   ? 'Presencia verificada mediante escaneo de código QR en puerta.'
-                  : 'Ubicación GPS confirmada dentro del perímetro del boliche.'
-                : 'Para participar en Cachengueoo Match y beneficios exclusivos, debés encontrarte físicamente en el local.'}
+                  : `Ubicación GPS confirmada dentro del perímetro permitido${
+                      presence.gpsResult?.matchedLocationName
+                        ? ` (${presence.gpsResult.matchedLocationName})`
+                        : ''
+                    }.`
+                : 'Para participar en Cachengueoo Match y beneficios exclusivos, debés encontrarte físicamente en una de las sedes habilitadas.'}
             </p>
 
             {/* GPS Metadata readout if available */}

@@ -19,6 +19,7 @@ import { eventService } from './services/eventService';
 import { benefitService } from './services/benefitService';
 import { matchService } from './services/matchService';
 import { UserProfile } from './types';
+import { authService, DEFAULT_EXAMPLE_USER } from './services/authService';
 import { CheckCircle2 } from 'lucide-react';
 
 export default function App() {
@@ -32,7 +33,7 @@ export default function App() {
   const [authModalMode, setAuthModalMode] = useState<'login' | 'register' | 'choice' | 'verify'>('choice');
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
-  const { user, updateProfile, switchDemoUser, logout } = useAuth();
+  const { user, setUser, updateProfile, switchDemoUser, logout } = useAuth();
   const {
     presence,
     isInside,
@@ -61,8 +62,6 @@ export default function App() {
     const handleHash = () => {
       if (window.location.hash === '#admin' || window.location.pathname === '/admin') {
         setIsAdminView(true);
-      } else {
-        setIsAdminView(false);
       }
     };
     window.addEventListener('hashchange', handleHash);
@@ -71,6 +70,7 @@ export default function App() {
 
   const handleExitAdmin = () => {
     setIsAdminView(false);
+    setCurrentTab('inicio');
     if (window.location.hash === '#admin') {
       window.history.pushState(null, '', window.location.pathname);
     }
@@ -86,33 +86,75 @@ export default function App() {
   };
 
   const handleAuthSuccess = (loggedUser: UserProfile) => {
+    setUser(loggedUser);
     showToast(`¡Bienvenido, ${loggedUser.nickname}! Sesión activa en Cachengueoo.`);
     if (loggedUser.isAdmin || loggedUser.role === 'admin') {
       setIsAdminView(true);
+      setIsAuthModalOpen(false);
+    } else {
+      setIsAdminView(false);
+      if (currentTab === 'perfil' || currentTab === 'match_perfil') {
+        setCurrentTab('perfil');
+      }
     }
   };
 
   const handleTabChange = (tab: string) => {
+    const activeUser = user || authService.getCurrentUser();
+    if (!user && activeUser) {
+      setUser(activeUser);
+    }
+
     if (tab === 'perfil' || tab === 'match_perfil') {
-      if (!user) {
+      if (!activeUser) {
         setAuthModalMode('choice');
         setIsAuthModalOpen(true);
         setCurrentTab('perfil');
         setIsAdminView(false);
         return;
       }
-      if (user.isAdmin || user.role === 'admin') {
+      if (activeUser.isAdmin || activeUser.role === 'admin') {
         setIsAdminView(true);
         return;
       }
+      setIsAdminView(false);
+      setCurrentTab(tab === 'match_perfil' ? 'match_perfil' : 'perfil');
+      return;
     }
+
+    if (tab === 'match' || tab === 'match_pista') {
+      if (!activeUser) {
+        setAuthModalMode('choice');
+        setIsAuthModalOpen(true);
+        return;
+      }
+      if (!isInside) {
+        setAuthModalMode('verify');
+        setIsAuthModalOpen(true);
+        return;
+      }
+      setIsAdminView(false);
+      setCurrentTab('match_pista');
+      return;
+    }
+
     setIsAdminView(false);
     setCurrentTab(tab);
   };
 
   const handleActivateMatch = () => {
-    setAuthModalMode('choice');
-    setIsAuthModalOpen(true);
+    const activeUser = user || authService.getCurrentUser();
+    if (!activeUser) {
+      setAuthModalMode('choice');
+      setIsAuthModalOpen(true);
+      return;
+    }
+    if (!isInside) {
+      setAuthModalMode('verify');
+      setIsAuthModalOpen(true);
+      return;
+    }
+    setCurrentTab('match_pista');
   };
 
   // Modo Match activo: al entrar a match, el menú inferior cambia a "Menú Match"
@@ -166,7 +208,15 @@ export default function App() {
         }`}
       >
         {isAdminView ? (
-          <AdminDashboard />
+          <AdminDashboard
+            onExitAdmin={handleExitAdmin}
+            onLogout={() => {
+              logout();
+              setIsAdminView(false);
+              setCurrentTab('inicio');
+              showToast('Sesión de administrador cerrada.');
+            }}
+          />
         ) : (
           <>
             {currentTab === 'inicio' && (
@@ -188,7 +238,7 @@ export default function App() {
             {/* MÓDULO CACHENGUEOO MATCH (CON MENÚ MATCH Y SUBPESTAÑAS) */}
             {isMatchMode && currentTab !== 'match_perfil' && (
               <MatchView
-                currentUser={user}
+                currentUser={user || DEFAULT_EXAMPLE_USER}
                 isInsideVenue={isInside}
                 onOpenPresenceModal={() => setIsPresenceModalOpen(true)}
                 eventTitle={currentEvent.title}
@@ -206,11 +256,19 @@ export default function App() {
             {currentTab === 'beneficios' && <BenefitsView currentUser={user} />}
 
             {(currentTab === 'perfil' || currentTab === 'match_perfil') && (
-              user && (user.isAdmin || user.role === 'admin') ? (
-                <AdminDashboard />
+              ((user && (user.isAdmin || user.role === 'admin')) || authService.getCurrentUser()?.isAdmin) ? (
+                <AdminDashboard
+                  onExitAdmin={handleExitAdmin}
+                  onLogout={() => {
+                    logout();
+                    setIsAdminView(false);
+                    setCurrentTab('inicio');
+                    showToast('Sesión de administrador cerrada.');
+                  }}
+                />
               ) : (
                 <ProfileView
-                  currentUser={user}
+                  currentUser={user || authService.getCurrentUser()}
                   onUpdateProfile={updateProfile}
                   onSwitchDemoUser={switchDemoUser}
                   onNavigateTab={(tab) => {

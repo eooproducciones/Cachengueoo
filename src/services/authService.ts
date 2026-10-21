@@ -4,6 +4,12 @@ import { getSupabaseClient } from './supabaseClient';
 const USER_STORAGE_KEY = 'cachengueoo_current_user';
 const USERS_LIST_STORAGE_KEY = 'cachengueoo_registered_users';
 
+export function notifyAuthChange() {
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('cachengueoo_auth_change'));
+  }
+}
+
 // 1. Cuenta de usuario de ejemplo (SIN administración habilitada)
 export const DEFAULT_EXAMPLE_USER: UserProfile = {
   id: 'usr_cachenguero_01',
@@ -17,15 +23,16 @@ export const DEFAULT_EXAMPLE_USER: UserProfile = {
   photos: [
     'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=800&q=80',
     'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=800&q=80',
+    'https://images.unsplash.com/photo-1517841905240-472988babdf9?auto=format&fit=crop&w=800&q=80',
   ],
   gender: 'hombre',
   preference: 'todos',
   interests: ['Fernet', 'Skyy', 'Reggaeton', 'Cumbia'],
-  bio: 'Listo para romper la pista en Cachengueoo 💃🕺',
+  bio: 'Listo para romper la pista en Cachengueoo 💃🕺 Si hay Fernet, hay charla.',
   drinkFavorite: 'Fernet & Skyy',
   drinks: ['Fernet', 'Skyy'],
   zodiacSign: 'Virgo',
-  musicPreferences: ['Reggaeton', 'Cumbia', 'Cuarteto'],
+  musicPreferences: ['Reggaeton', 'Cumbia', 'Cuarteto', 'Rock'],
   instagram: '@juani_cache',
   createdAt: '2026-03-01T00:00:00Z',
   isAdmin: false,
@@ -57,10 +64,10 @@ export const DEFAULT_ADMIN_USER: UserProfile = {
 };
 
 export const authService = {
-  // Por defecto en la simulación comienza sin sesión (null)
+  // Sesión persistente: si el usuario ya inició sesión, no se cierra a menos que haga click en "Cerrar sesión"
   getCurrentUser(): UserProfile | null {
     try {
-      const saved = sessionStorage.getItem(USER_STORAGE_KEY);
+      const saved = localStorage.getItem(USER_STORAGE_KEY) || sessionStorage.getItem(USER_STORAGE_KEY);
       if (saved) return JSON.parse(saved);
     } catch (e) {
       console.error(e);
@@ -83,6 +90,7 @@ export const authService = {
     if (!current) return null;
 
     const updated = { ...current, ...profile };
+    localStorage.setItem(USER_STORAGE_KEY, JSON.stringify(updated));
     sessionStorage.setItem(USER_STORAGE_KEY, JSON.stringify(updated));
 
     // Update in all users list
@@ -96,6 +104,7 @@ export const authService = {
       client.from('profiles').update(profile).eq('id', current.id).then();
     }
 
+    notifyAuthChange();
     return updated;
   },
 
@@ -106,29 +115,39 @@ export const authService = {
     const cleanEmail = email.trim().toLowerCase();
     const cleanPassword = password.trim();
 
-    // 1. Cuenta de Usuario fija: usuario@cachengueoo.com / river??2??
-    if (cleanEmail === 'usuario@cachengueoo.com') {
+    // 1. Cuenta de Usuario fija: usuario@cachengueoo.com o usuario@cachuengueoo.com / river??2??
+    const isUserAccount =
+      cleanEmail === 'usuario@cachengueoo.com' || cleanEmail === 'usuario@cachuengueoo.com';
+
+    if (isUserAccount) {
       if (cleanPassword === 'river??2??') {
-        const u = { ...DEFAULT_EXAMPLE_USER };
+        const u = { ...DEFAULT_EXAMPLE_USER, email: cleanEmail };
+        localStorage.setItem(USER_STORAGE_KEY, JSON.stringify(u));
         sessionStorage.setItem(USER_STORAGE_KEY, JSON.stringify(u));
+        notifyAuthChange();
         return { success: true, user: u };
       }
       return {
         success: false,
-        message: 'Contraseña incorrecta para usuario@cachengueoo.com. (Clave: river??2??)',
+        message: 'Contraseña incorrecta para cuenta de usuario. (Clave: river??2??)',
       };
     }
 
-    // 2. Cuenta de Administrador fija: admin@cachengueoo.com / river??2??
-    if (cleanEmail === 'admin@cachengueoo.com') {
+    // 2. Cuenta de Administrador fija: admin@cachengueoo.com o admin@cachuengueoo.com / river??2??
+    const isAdminAccount =
+      cleanEmail === 'admin@cachengueoo.com' || cleanEmail === 'admin@cachuengueoo.com';
+
+    if (isAdminAccount) {
       if (cleanPassword === 'river??2??') {
-        const u = { ...DEFAULT_ADMIN_USER };
+        const u = { ...DEFAULT_ADMIN_USER, email: cleanEmail };
+        localStorage.setItem(USER_STORAGE_KEY, JSON.stringify(u));
         sessionStorage.setItem(USER_STORAGE_KEY, JSON.stringify(u));
+        notifyAuthChange();
         return { success: true, user: u };
       }
       return {
         success: false,
-        message: 'Contraseña incorrecta para admin@cachengueoo.com. (Clave: river??2??)',
+        message: 'Contraseña incorrecta para cuenta de administrador. (Clave: river??2??)',
       };
     }
 
@@ -166,7 +185,9 @@ export const authService = {
             isAdmin: cleanEmail.includes('admin'),
             role: cleanEmail.includes('admin') ? 'admin' : 'user',
           };
+          localStorage.setItem(USER_STORAGE_KEY, JSON.stringify(u));
           sessionStorage.setItem(USER_STORAGE_KEY, JSON.stringify(u));
+          notifyAuthChange();
           return { success: true, user: u };
         }
       }
@@ -180,7 +201,9 @@ export const authService = {
       if (found.password && found.password !== cleanPassword) {
         return { success: false, message: 'Contraseña incorrecta' };
       }
+      localStorage.setItem(USER_STORAGE_KEY, JSON.stringify(found));
       sessionStorage.setItem(USER_STORAGE_KEY, JSON.stringify(found));
+      notifyAuthChange();
       return { success: true, user: found };
     }
 
@@ -196,7 +219,9 @@ export const authService = {
         isAdmin,
         role: isAdmin ? 'admin' : 'user',
       };
+      localStorage.setItem(USER_STORAGE_KEY, JSON.stringify(fallbackUser));
       sessionStorage.setItem(USER_STORAGE_KEY, JSON.stringify(fallbackUser));
+      notifyAuthChange();
       return { success: true, user: fallbackUser };
     }
 
@@ -248,9 +273,11 @@ export const authService = {
       role: 'user',
     };
 
+    localStorage.setItem(USER_STORAGE_KEY, JSON.stringify(userToSave));
     sessionStorage.setItem(USER_STORAGE_KEY, JSON.stringify(userToSave));
     const all = this.getAllUsers();
     localStorage.setItem(USERS_LIST_STORAGE_KEY, JSON.stringify([...all, userToSave]));
+    notifyAuthChange();
 
     return { success: true };
   },
@@ -276,14 +303,19 @@ export const authService = {
     }
     sessionStorage.removeItem(USER_STORAGE_KEY);
     localStorage.removeItem(USER_STORAGE_KEY);
+    notifyAuthChange();
   },
 
   loginDemo(role: 'user' | 'admin' | 'valen'): UserProfile {
     if (role === 'admin') {
       sessionStorage.setItem(USER_STORAGE_KEY, JSON.stringify(DEFAULT_ADMIN_USER));
+      localStorage.setItem(USER_STORAGE_KEY, JSON.stringify(DEFAULT_ADMIN_USER));
+      notifyAuthChange();
       return DEFAULT_ADMIN_USER;
     }
     sessionStorage.setItem(USER_STORAGE_KEY, JSON.stringify(DEFAULT_EXAMPLE_USER));
+    localStorage.setItem(USER_STORAGE_KEY, JSON.stringify(DEFAULT_EXAMPLE_USER));
+    notifyAuthChange();
     return DEFAULT_EXAMPLE_USER;
   },
 };

@@ -232,7 +232,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
             <Crown className="w-5 h-5 text-[#F39200] group-hover:scale-110 transition-transform" />
           </div>
           <div className="flex-1 min-w-0">
-            <h4 className="text-sm font-bold text-white font-display">Club cachengueoo</h4>
+            <h4 className="text-sm font-bold text-white font-display">Cachengueoo Club</h4>
             <p className="text-[11px] text-zinc-400 mt-0.5 leading-snug">Membresía mensual con entradas libres y VIP.</p>
           </div>
         </div>

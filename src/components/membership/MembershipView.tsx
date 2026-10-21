@@ -37,7 +37,7 @@ export const MembershipView: React.FC<MembershipViewProps> = ({ currentUser }) =
         </div>
 
         <h2 className="text-2xl font-black text-white font-display uppercase tracking-tight">
-          CLUB <span className="text-[#F39200]">CACHENGUEOO</span>
+          CACHENGUEOO <span className="text-[#F39200]">CLUB</span>
         </h2>
 
         <p className="text-xs text-zinc-300 mt-1 max-w-sm leading-relaxed">

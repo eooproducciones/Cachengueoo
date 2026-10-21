@@ -1,19 +1,44 @@
-import { VenueConfig } from '../types';
+import { VenueConfig, VenueLocation } from '../types';
+
+export const DEFAULT_LOCATIONS: VenueLocation[] = [
+  {
+    id: 'loc_cache_principal',
+    name: 'Cachengueoo - Sede Principal',
+    address: 'San Martín & Panamericana, Mendoza',
+    city: 'Mendoza',
+    province: 'Mendoza',
+    country: 'Argentina',
+    latitude: -32.89084,
+    longitude: -68.84717,
+    radiusMeters: 180,
+    isActive: true,
+  },
+  {
+    id: 'loc_arena_maipu',
+    name: 'Arena Maipú - Evento Especial',
+    address: 'Emilio Civit & Maza, Maipú, Mendoza',
+    city: 'Maipú',
+    province: 'Mendoza',
+    country: 'Argentina',
+    latitude: -32.97745,
+    longitude: -68.79090,
+    radiusMeters: 300,
+    isActive: true,
+  },
+];
 
 /**
  * Configuración central del boliche Cachengueoo en Mendoza, Argentina.
- * Modificable dinámicamente o por variables de entorno / Supabase en el futuro.
  */
 export const DEFAULT_VENUE_LOCATION: VenueConfig = {
   name: 'CACHENGUEOO',
   city: 'Mendoza',
   province: 'Mendoza',
   country: 'Argentina',
-  // Ubicación nocturna de referencia en Mendoza (Chacras de Coria / San Martín / Ruta Panamericana nightlife hub)
   latitude: -32.89084,
   longitude: -68.84717,
-  // Radio de presencia por defecto en metros (150 metros cubre el local, patio y VIP)
   radiusMeters: 180,
+  locations: DEFAULT_LOCATIONS,
 };
 
 // Key en localStorage para permitir que el administrador modifique las coordenadas y radio en vivo
@@ -23,7 +48,11 @@ export function getVenueConfig(): VenueConfig {
   try {
     const saved = localStorage.getItem(VENUE_STORAGE_KEY);
     if (saved) {
-      return JSON.parse(saved);
+      const parsed = JSON.parse(saved);
+      if (!parsed.locations || parsed.locations.length === 0) {
+        parsed.locations = DEFAULT_LOCATIONS;
+      }
+      return parsed;
     }
   } catch (e) {
     console.error('Error reading venue config from storage', e);
@@ -34,6 +63,9 @@ export function getVenueConfig(): VenueConfig {
 export function saveVenueConfig(config: VenueConfig): void {
   try {
     localStorage.setItem(VENUE_STORAGE_KEY, JSON.stringify(config));
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('cachengueoo_venue_change', { detail: config }));
+    }
   } catch (e) {
     console.error('Error saving venue config', e);
   }
@@ -69,11 +101,12 @@ export interface GeolocationValidationResult {
   accuracyMeters: number;
   isAccuracyAcceptable: boolean;
   message: string;
+  matchedLocationName?: string;
 }
 
 /**
- * Valida si un punto geográfico se encuentra dentro del radio de Cachengueoo,
- * evaluando también la precisión entregada por el hardware GPS.
+ * Valida si un punto geográfico se encuentra dentro del radio permitido
+ * de CUALQUIERA de las locaciones activas (ej. Sede Central o Arena Maipú).
  */
 export function validateVenuePresence(
   userLat: number,
@@ -81,34 +114,80 @@ export function validateVenuePresence(
   accuracyMeters: number,
   venueConfig = getVenueConfig()
 ): GeolocationValidationResult {
-  const distance = calculateHaversineDistance(
-    userLat,
-    userLon,
-    venueConfig.latitude,
-    venueConfig.longitude
-  );
+  const activeLocations: VenueLocation[] =
+    venueConfig.locations && venueConfig.locations.length > 0
+      ? venueConfig.locations.filter((loc) => loc.isActive)
+      : [
+          {
+            id: 'default',
+            name: venueConfig.name,
+            city: venueConfig.city,
+            province: venueConfig.province,
+            country: venueConfig.country,
+            latitude: venueConfig.latitude,
+            longitude: venueConfig.longitude,
+            radiusMeters: venueConfig.radiusMeters,
+            isActive: true,
+          },
+        ];
 
-  // Umbral de precisión: si el GPS tiene un margen de error mayor a 2.5x el radio del club,
-  // la ubicación no es confiable para validar automáticamente.
-  const isAccuracyAcceptable = accuracyMeters <= venueConfig.radiusMeters * 2;
+  if (activeLocations.length === 0) {
+    return {
+      isInside: false,
+      distanceMeters: 0,
+      accuracyMeters: Math.round(accuracyMeters),
+      isAccuracyAcceptable: true,
+      message: 'No hay locaciones activas configuradas.',
+    };
+  }
 
-  // Está dentro si la distancia es menor o igual al radio
-  const isInside = distance <= venueConfig.radiusMeters;
+  let insideLocation: VenueLocation | null = null;
+  let minDistance = Infinity;
+  let closestLocation = activeLocations[0];
+
+  for (const loc of activeLocations) {
+    const dist = calculateHaversineDistance(userLat, userLon, loc.latitude, loc.longitude);
+    if (dist < minDistance) {
+      minDistance = dist;
+      closestLocation = loc;
+    }
+    if (dist <= loc.radiusMeters) {
+      insideLocation = loc;
+      break;
+    }
+  }
+
+  const targetRadius = insideLocation ? insideLocation.radiusMeters : closestLocation.radiusMeters;
+  const isAccuracyAcceptable = accuracyMeters <= targetRadius * 2.5;
+  const isInside = insideLocation !== null;
 
   let message = '';
-  if (!isAccuracyAcceptable && isInside) {
-    message = 'Señal GPS de baja precisión. Recomendamos validar con QR en el ingreso.';
-  } else if (isInside) {
-    message = '¡Estás en Cachengueoo! 🔥';
+  let distanceMeters = Math.round(minDistance);
+
+  if (insideLocation) {
+    distanceMeters = Math.round(
+      calculateHaversineDistance(
+        userLat,
+        userLon,
+        insideLocation.latitude,
+        insideLocation.longitude
+      )
+    );
+    if (!isAccuracyAcceptable) {
+      message = `Señal GPS aproximada en ${insideLocation.name}. Recomendamos escanear el QR oficial.`;
+    } else {
+      message = `¡Estás en ${insideLocation.name}! 🔥`;
+    }
   } else {
-    message = `Estás a ${Math.round(distance)}m de Cachengueoo (radio: ${venueConfig.radiusMeters}m).`;
+    message = `Estás a ${Math.round(minDistance)}m de ${closestLocation.name} (radio permitido: ${closestLocation.radiusMeters}m).`;
   }
 
   return {
     isInside: isInside && isAccuracyAcceptable,
-    distanceMeters: Math.round(distance),
+    distanceMeters,
     accuracyMeters: Math.round(accuracyMeters),
     isAccuracyAcceptable,
     message,
+    matchedLocationName: insideLocation?.name,
   };
 }
