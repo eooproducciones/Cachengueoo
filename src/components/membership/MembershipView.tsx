@@ -4,20 +4,21 @@ import { MembershipPlan, UserMembership, UserProfile } from '../../types';
 import { membershipService } from '../../services/membershipService';
 
 interface MembershipViewProps {
-  currentUser: UserProfile;
+  currentUser: UserProfile | null;
 }
 
 export const MembershipView: React.FC<MembershipViewProps> = ({ currentUser }) => {
+  const userId = currentUser?.id || 'usr_cachenguero_01';
   const [plans] = useState<MembershipPlan[]>(() => membershipService.getPlans());
   const [currentMembership, setCurrentMembership] = useState<UserMembership>(() =>
-    membershipService.getUserMembership(currentUser.id)
+    membershipService.getUserMembership(userId)
   );
   const [selectedPlanToSubscribe, setSelectedPlanToSubscribe] = useState<MembershipPlan | null>(
     null
   );
 
   const handleSubscribe = (plan: MembershipPlan) => {
-    const updated = membershipService.subscribeToPlan(currentUser.id, plan);
+    const updated = membershipService.subscribeToPlan(userId, plan);
     setCurrentMembership(updated);
     setSelectedPlanToSubscribe(null);
   };

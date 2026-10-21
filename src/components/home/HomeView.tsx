@@ -14,7 +14,7 @@ import { PresenceStatus } from '../../services/presenceService';
 import { isEventToday } from '../../services/eventService';
 
 interface HomeViewProps {
-  currentUser: UserProfile;
+  currentUser: UserProfile | null;
   presence: PresenceStatus;
   tonightEvent: ClubEvent;
   upcomingEvents?: ClubEvent[];
@@ -22,6 +22,7 @@ interface HomeViewProps {
   onNavigateTab: (tab: string) => void;
   onOpenPresenceModal: () => void;
   onOpenQrScanner: () => void;
+  onActivateMatch?: () => void;
 }
 
 export const HomeView: React.FC<HomeViewProps> = ({
@@ -29,9 +30,11 @@ export const HomeView: React.FC<HomeViewProps> = ({
   presence,
   tonightEvent,
   upcomingEvents = [],
+  benefits = [],
   onNavigateTab,
   onOpenPresenceModal,
   onOpenQrScanner,
+  onActivateMatch,
 }) => {
   return (
     <div className="max-w-xl mx-auto px-4 py-4 space-y-6">
@@ -55,7 +58,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
 
           <div className="mt-4">
             <button
-              onClick={() => onNavigateTab('match')}
+              onClick={onActivateMatch || (() => onNavigateTab('match'))}
               className="w-full h-12 rounded-xl bg-[#F39200] hover:bg-[#E08400] text-black font-extrabold text-xs flex items-center justify-center gap-2 cursor-pointer shadow-lg shadow-[#F39200]/25 active:scale-[0.98] transition-all"
             >
               <Flame className="w-4 h-4 fill-black" />
@@ -82,21 +85,31 @@ export const HomeView: React.FC<HomeViewProps> = ({
             <strong className="text-white">Cachengueoo Match</strong> y conectar con gente esta noche.
           </p>
 
-          <div className="mt-4 grid grid-cols-2 gap-2">
+          <div className="mt-4 space-y-2">
             <button
-              onClick={onOpenPresenceModal}
-              className="h-11 rounded-xl bg-zinc-900 border border-zinc-700 hover:border-zinc-500 text-white font-bold text-xs flex items-center justify-center gap-1.5 cursor-pointer active:scale-95 transition-all"
+              onClick={onActivateMatch || (() => onNavigateTab('match'))}
+              className="w-full h-12 rounded-xl bg-[#F39200] hover:bg-[#E08400] text-black font-extrabold text-xs flex items-center justify-center gap-2 cursor-pointer shadow-lg shadow-[#F39200]/25 active:scale-[0.98] transition-all"
             >
-              <MapPin className="w-3.5 h-3.5 text-[#F39200]" />
-              Validar por GPS
+              <Flame className="w-4 h-4 fill-black" />
+              ACTIVAR CACHENGUEOO MATCH
             </button>
-            <button
-              onClick={onOpenQrScanner}
-              className="h-11 rounded-xl bg-[#F39200] hover:bg-[#E08400] text-black font-bold text-xs flex items-center justify-center gap-1.5 cursor-pointer shadow-md shadow-[#F39200]/20 active:scale-95 transition-all"
-            >
-              <QrCode className="w-3.5 h-3.5" />
-              Escanear QR Puerta
-            </button>
+
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                onClick={onOpenPresenceModal}
+                className="h-10 rounded-xl bg-zinc-900 border border-zinc-700 hover:border-zinc-500 text-white font-bold text-xs flex items-center justify-center gap-1.5 cursor-pointer active:scale-95 transition-all"
+              >
+                <MapPin className="w-3.5 h-3.5 text-[#F39200]" />
+                Validar por GPS
+              </button>
+              <button
+                onClick={onOpenQrScanner}
+                className="h-10 rounded-xl bg-zinc-900 border border-zinc-700 hover:border-amber-400 text-amber-300 font-bold text-xs flex items-center justify-center gap-1.5 cursor-pointer active:scale-95 transition-all"
+              >
+                <QrCode className="w-3.5 h-3.5 text-[#F39200]" />
+                Escanear QR Puerta
+              </button>
+            </div>
           </div>
         </div>
       )}

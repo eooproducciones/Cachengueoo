@@ -1,19 +1,71 @@
-import { CURRENT_MOCK_USER } from '../data/mockData';
 import { UserProfile } from '../types';
 import { getSupabaseClient } from './supabaseClient';
 
 const USER_STORAGE_KEY = 'cachengueoo_current_user';
 const USERS_LIST_STORAGE_KEY = 'cachengueoo_registered_users';
 
+// 1. Cuenta de usuario de ejemplo (SIN administración habilitada)
+export const DEFAULT_EXAMPLE_USER: UserProfile = {
+  id: 'usr_cachenguero_01',
+  email: 'usuario@cachengueoo.com',
+  fullName: 'Juan Ignacio Pérez',
+  nickname: 'Juani',
+  birthDate: '2001-09-12',
+  age: 23,
+  avatarUrl:
+    'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=800&q=80',
+  photos: [
+    'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=800&q=80',
+    'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=800&q=80',
+  ],
+  gender: 'hombre',
+  preference: 'todos',
+  interests: ['Fernet', 'Skyy', 'Reggaeton', 'Cumbia'],
+  bio: 'Listo para romper la pista en Cachengueoo 💃🕺',
+  drinkFavorite: 'Fernet & Skyy',
+  drinks: ['Fernet', 'Skyy'],
+  zodiacSign: 'Virgo',
+  musicPreferences: ['Reggaeton', 'Cumbia', 'Cuarteto'],
+  instagram: '@juani_cache',
+  createdAt: '2026-03-01T00:00:00Z',
+  isAdmin: false,
+  role: 'user',
+};
+
+// 2. Cuenta de administrador de ejemplo (Pasa directo al panel admin)
+export const DEFAULT_ADMIN_USER: UserProfile = {
+  id: 'usr_admin_01',
+  email: 'admin@cachengueoo.com',
+  fullName: 'Administrador Cachengueoo',
+  nickname: 'Staff Admin',
+  birthDate: '1995-01-01',
+  age: 31,
+  avatarUrl:
+    'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=800&q=80',
+  photos: [
+    'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=800&q=80',
+  ],
+  gender: 'otro',
+  preference: 'todos',
+  interests: ['Gestión', 'Eventos', 'Beneficios'],
+  bio: 'Administración Cachengueoo Mendoza',
+  drinkFavorite: 'Fernet & Skyy',
+  drinks: ['Fernet', 'Skyy'],
+  createdAt: '2026-01-01T00:00:00Z',
+  isAdmin: true,
+  role: 'admin',
+};
+
 export const authService = {
-  getCurrentUser(): UserProfile {
+  // Por defecto en la simulación comienza sin sesión (null)
+  getCurrentUser(): UserProfile | null {
     try {
-      const saved = localStorage.getItem(USER_STORAGE_KEY);
+      const saved = sessionStorage.getItem(USER_STORAGE_KEY);
       if (saved) return JSON.parse(saved);
     } catch (e) {
       console.error(e);
     }
-    return CURRENT_MOCK_USER;
+    return null;
   },
 
   getAllUsers(): UserProfile[] {
@@ -23,13 +75,15 @@ export const authService = {
     } catch (e) {
       console.error(e);
     }
-    return [CURRENT_MOCK_USER];
+    return [DEFAULT_EXAMPLE_USER, DEFAULT_ADMIN_USER];
   },
 
-  updateProfile(profile: Partial<UserProfile>): UserProfile {
+  updateProfile(profile: Partial<UserProfile>): UserProfile | null {
     const current = this.getCurrentUser();
+    if (!current) return null;
+
     const updated = { ...current, ...profile };
-    localStorage.setItem(USER_STORAGE_KEY, JSON.stringify(updated));
+    sessionStorage.setItem(USER_STORAGE_KEY, JSON.stringify(updated));
 
     // Update in all users list
     const all = this.getAllUsers();
@@ -49,21 +103,44 @@ export const authService = {
     email: string,
     password: string
   ): Promise<{ success: boolean; user?: UserProfile; message?: string }> {
-    const client = getSupabaseClient();
+    const cleanEmail = email.trim().toLowerCase();
+    const cleanPassword = password.trim();
 
-    // Si Supabase está configurado, usar Supabase Auth real:
+    // 1. Cuenta de Usuario fija: usuario@cachengueoo.com / river??2??
+    if (cleanEmail === 'usuario@cachengueoo.com') {
+      if (cleanPassword === 'river??2??') {
+        const u = { ...DEFAULT_EXAMPLE_USER };
+        sessionStorage.setItem(USER_STORAGE_KEY, JSON.stringify(u));
+        return { success: true, user: u };
+      }
+      return {
+        success: false,
+        message: 'Contraseña incorrecta para usuario@cachengueoo.com. (Clave: river??2??)',
+      };
+    }
+
+    // 2. Cuenta de Administrador fija: admin@cachengueoo.com / river??2??
+    if (cleanEmail === 'admin@cachengueoo.com') {
+      if (cleanPassword === 'river??2??') {
+        const u = { ...DEFAULT_ADMIN_USER };
+        sessionStorage.setItem(USER_STORAGE_KEY, JSON.stringify(u));
+        return { success: true, user: u };
+      }
+      return {
+        success: false,
+        message: 'Contraseña incorrecta para admin@cachengueoo.com. (Clave: river??2??)',
+      };
+    }
+
+    // Supabase Auth (si está activo)
+    const client = getSupabaseClient();
     if (client) {
       const { data, error } = await client.auth.signInWithPassword({
-        email,
-        password,
+        email: cleanEmail,
+        password: cleanPassword,
       });
 
-      if (error) {
-        return { success: false, message: error.message };
-      }
-
-      if (data.user) {
-        // Fetch profile from table
+      if (!error && data.user) {
         const { data: profileData } = await client
           .from('profiles')
           .select('*')
@@ -83,48 +160,59 @@ export const authService = {
             preference: profileData.preference,
             interests: profileData.interests || [],
             bio: profileData.bio || '',
-            drinkFavorite: profileData.drink_favorite || 'Fernet con Coca',
+            drinkFavorite: profileData.drink_favorite || 'Fernet & Skyy',
+            drinks: profileData.drinks || ['Fernet', 'Skyy'],
             createdAt: profileData.created_at,
+            isAdmin: cleanEmail.includes('admin'),
+            role: cleanEmail.includes('admin') ? 'admin' : 'user',
           };
-          localStorage.setItem(USER_STORAGE_KEY, JSON.stringify(u));
+          sessionStorage.setItem(USER_STORAGE_KEY, JSON.stringify(u));
           return { success: true, user: u };
         }
       }
     }
 
-    // Modo local / Mock
+    // Buscar en usuarios locales registrados previamente
     const all = this.getAllUsers();
-    const found = all.find((u) => u.email.toLowerCase() === email.toLowerCase());
+    const found = all.find((u) => u.email.toLowerCase() === cleanEmail);
 
     if (found) {
-      localStorage.setItem(USER_STORAGE_KEY, JSON.stringify(found));
+      if (found.password && found.password !== cleanPassword) {
+        return { success: false, message: 'Contraseña incorrecta' };
+      }
+      sessionStorage.setItem(USER_STORAGE_KEY, JSON.stringify(found));
       return { success: true, user: found };
     }
 
-    // Si es una cuenta demo conocida
-    if (email.toLowerCase().includes('valen')) {
-      const u = this.loginDemo('valen');
-      return { success: true, user: u };
+    // Ingreso flexible de prueba si la contraseña coincide con river??2??
+    if (cleanPassword === 'river??2??') {
+      const isAdmin = cleanEmail.includes('admin');
+      const fallbackUser: UserProfile = {
+        ...(isAdmin ? DEFAULT_ADMIN_USER : DEFAULT_EXAMPLE_USER),
+        id: `usr_${Date.now()}`,
+        email: cleanEmail,
+        fullName: cleanEmail.split('@')[0],
+        nickname: cleanEmail.split('@')[0],
+        isAdmin,
+        role: isAdmin ? 'admin' : 'user',
+      };
+      sessionStorage.setItem(USER_STORAGE_KEY, JSON.stringify(fallbackUser));
+      return { success: true, user: fallbackUser };
     }
 
-    // Permitir ingreso flexible para desarrollo
-    const fallbackUser: UserProfile = {
-      ...CURRENT_MOCK_USER,
-      email,
-      fullName: email.split('@')[0],
-      nickname: email.split('@')[0],
+    return {
+      success: false,
+      message: 'Usuario no encontrado. Podés registrarte o usar usuario@cachengueoo.com o admin@cachengueoo.com con river??2??',
     };
-    localStorage.setItem(USER_STORAGE_KEY, JSON.stringify(fallbackUser));
-    return { success: true, user: fallbackUser };
   },
 
   async registerUser(
     newUser: UserProfile,
-    password: string
+    password?: string
   ): Promise<{ success: boolean; message?: string }> {
     const client = getSupabaseClient();
 
-    if (client) {
+    if (client && password) {
       const { data, error } = await client.auth.signUp({
         email: newUser.email,
         password,
@@ -135,7 +223,6 @@ export const authService = {
       }
 
       if (data.user) {
-        // Insert profile row
         await client.from('profiles').insert({
           id: data.user.id,
           email: newUser.email,
@@ -154,11 +241,32 @@ export const authService = {
     }
 
     // Save locally
-    localStorage.setItem(USER_STORAGE_KEY, JSON.stringify(newUser));
+    const userToSave: UserProfile = {
+      ...newUser,
+      password,
+      isAdmin: false,
+      role: 'user',
+    };
+
+    sessionStorage.setItem(USER_STORAGE_KEY, JSON.stringify(userToSave));
     const all = this.getAllUsers();
-    localStorage.setItem(USERS_LIST_STORAGE_KEY, JSON.stringify([...all, newUser]));
+    localStorage.setItem(USERS_LIST_STORAGE_KEY, JSON.stringify([...all, userToSave]));
 
     return { success: true };
+  },
+
+  async requestPasswordReset(email: string): Promise<{ success: boolean; message: string }> {
+    const client = getSupabaseClient();
+    if (client) {
+      const { error } = await client.auth.resetPasswordForEmail(email);
+      if (error) {
+        return { success: false, message: error.message };
+      }
+    }
+    return {
+      success: true,
+      message: `Te enviamos un correo electrónico a ${email} con el enlace para restablecer tu contraseña. Revisá tu bandeja de entrada o spam.`,
+    };
   },
 
   logout(): void {
@@ -166,33 +274,16 @@ export const authService = {
     if (client) {
       client.auth.signOut().then();
     }
+    sessionStorage.removeItem(USER_STORAGE_KEY);
     localStorage.removeItem(USER_STORAGE_KEY);
   },
 
-  loginDemo(role: 'mateo' | 'valen' | 'admin'): UserProfile {
-    if (role === 'valen') {
-      const valen: UserProfile = {
-        id: 'usr_match_01',
-        email: 'valen.morales@gmail.com',
-        fullName: 'Valentina Morales',
-        nickname: 'Valen',
-        birthDate: '2003-04-12',
-        age: 22,
-        avatarUrl:
-          'https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&fit=crop&w=400&q=80',
-        gender: 'mujer',
-        preference: 'todos',
-        interests: ['Gin Tonic de Frutos Rojos', 'Reggaeton Viejo', 'Bresh', 'Cachengue'],
-        bio: 'Si suena Daddy Yankee o Duki estoy en el medio de la pista. Barra VIP 🍸',
-        drinkFavorite: 'Gin Tonic de Frutos Rojos',
-        instagram: '@valenmorales',
-        createdAt: '2026-02-15T00:00:00Z',
-      };
-      localStorage.setItem(USER_STORAGE_KEY, JSON.stringify(valen));
-      return valen;
+  loginDemo(role: 'user' | 'admin' | 'valen'): UserProfile {
+    if (role === 'admin') {
+      sessionStorage.setItem(USER_STORAGE_KEY, JSON.stringify(DEFAULT_ADMIN_USER));
+      return DEFAULT_ADMIN_USER;
     }
-
-    localStorage.setItem(USER_STORAGE_KEY, JSON.stringify(CURRENT_MOCK_USER));
-    return CURRENT_MOCK_USER;
+    sessionStorage.setItem(USER_STORAGE_KEY, JSON.stringify(DEFAULT_EXAMPLE_USER));
+    return DEFAULT_EXAMPLE_USER;
   },
 };

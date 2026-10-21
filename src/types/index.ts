@@ -35,7 +35,15 @@ export interface UserProfile {
   interests: string[];
   bio: string;
   drinkFavorite: string;
+  drinks?: string[]; // Hasta 2 tragos favoritos
+  zodiacSign?: string;
+  musicPreferences?: string[];
   instagram?: string;
+  phone?: string;
+  authProvider?: 'gmail' | 'instagram' | 'phone' | 'email';
+  password?: string;
+  isAdmin?: boolean;
+  role?: 'admin' | 'user';
   createdAt: string;
   membershipPlanId?: string;
   nightNote?: NightNote;
@@ -123,6 +131,9 @@ export interface MatchProfile {
   bio: string;
   interests: string[];
   drinkFavorite: string;
+  drinks?: string[]; // Hasta 2 tragos favoritos
+  zodiacSign?: string;
+  musicPreferences?: string[];
   verifiedInVenue: boolean;
   lastPresenceCheck: string;
   instagram?: string;
@@ -164,14 +175,20 @@ export interface ChatMessage {
 export interface ClubBenefit {
   id: string;
   title: string;
+  partnerName?: string;
+  highlightBadge: string; // e.g. "10% OFF"
   description: string;
-  condition: string;
-  expiryTime: string;
-  discountPercentage?: number;
-  tag: string;
-  onlyMembers: boolean;
-  iconName: string;
+  promoCode?: string; // e.g. "CACHESPORT"
+  actionUrl: string; // Link de redirección hacia WhatsApp o web
+  actionType?: 'whatsapp' | 'web';
+  actionLabel?: string; // e.g. "Pedir por WhatsApp" o "Ir a la Web"
   imageUrl?: string;
+  category?: string;
+  condition?: string;
+  expiryTime?: string;
+  tag?: string;
+  onlyMembers?: boolean;
+  iconName?: string;
   active: boolean;
 }
 

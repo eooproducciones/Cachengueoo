@@ -16,7 +16,7 @@ import { ClubEvent, UserProfile } from '../../types';
 import { eventService, isEventToday } from '../../services/eventService';
 
 interface TicketsViewProps {
-  currentUser: UserProfile;
+  currentUser: UserProfile | null;
 }
 
 export const TicketsView: React.FC<TicketsViewProps> = ({ currentUser }) => {

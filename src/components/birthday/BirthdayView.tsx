@@ -21,18 +21,18 @@ import { UserProfile } from '../../types';
 import { birthdayService } from '../../services/birthdayService';
 
 interface BirthdayViewProps {
-  currentUser: UserProfile;
+  currentUser: UserProfile | null;
 }
 
 export const BirthdayView: React.FC<BirthdayViewProps> = ({ currentUser }) => {
   const [submittedSuccess, setSubmittedSuccess] = useState(false);
   const [whatsappSentUrl, setWhatsappSentUrl] = useState('');
   const [formData, setFormData] = useState({
-    name: currentUser.fullName || '',
-    instagram: currentUser.instagram ? currentUser.instagram.replace(/^@/, '') : '',
+    name: currentUser?.fullName || '',
+    instagram: currentUser?.instagram ? currentUser.instagram.replace(/^@/, '') : '',
     date: '2026-10-17',
     guestCount: 10,
-    email: currentUser.email || '',
+    email: currentUser?.email || '',
   });
 
   // Asegura que al entrar la pantalla siempre comience desde arriba de todo
@@ -77,7 +77,7 @@ Mujeres +23 | Hombres +25 | General menores de 45 años
     e.preventDefault();
 
     // Guardar en el servicio local
-    birthdayService.submitRequest(currentUser.id, {
+    birthdayService.submitRequest(currentUser?.id || 'usr_cachenguero_01', {
       name: formData.name,
       email: formData.email,
       instagram: formData.instagram,

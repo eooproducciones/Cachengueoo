@@ -8,7 +8,7 @@ interface HeaderProps {
   onTabChange: (tab: string) => void;
   isAdmin: boolean;
   onExitAdmin: () => void;
-  currentUser?: UserProfile;
+  currentUser?: UserProfile | null;
 }
 
 export const Header: React.FC<HeaderProps> = ({

@@ -29,7 +29,7 @@ export default function App() {
   const [isPresenceModalOpen, setIsPresenceModalOpen] = useState<boolean>(false);
   const [isQrScannerOpen, setIsQrScannerOpen] = useState<boolean>(false);
   const [isAuthModalOpen, setIsAuthModalOpen] = useState<boolean>(false);
-  const [authModalMode, setAuthModalMode] = useState<'login' | 'register'>('login');
+  const [authModalMode, setAuthModalMode] = useState<'login' | 'register' | 'choice' | 'verify'>('choice');
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
   const { user, updateProfile, switchDemoUser, logout } = useAuth();
@@ -87,6 +87,32 @@ export default function App() {
 
   const handleAuthSuccess = (loggedUser: UserProfile) => {
     showToast(`¡Bienvenido, ${loggedUser.nickname}! Sesión activa en Cachengueoo.`);
+    if (loggedUser.isAdmin || loggedUser.role === 'admin') {
+      setIsAdminView(true);
+    }
+  };
+
+  const handleTabChange = (tab: string) => {
+    if (tab === 'perfil' || tab === 'match_perfil') {
+      if (!user) {
+        setAuthModalMode('choice');
+        setIsAuthModalOpen(true);
+        setCurrentTab('perfil');
+        setIsAdminView(false);
+        return;
+      }
+      if (user.isAdmin || user.role === 'admin') {
+        setIsAdminView(true);
+        return;
+      }
+    }
+    setIsAdminView(false);
+    setCurrentTab(tab);
+  };
+
+  const handleActivateMatch = () => {
+    setAuthModalMode('choice');
+    setIsAuthModalOpen(true);
   };
 
   // Modo Match activo: al entrar a match, el menú inferior cambia a "Menú Match"
@@ -122,10 +148,7 @@ export default function App() {
       {!isMatchMode && (
         <Header
           currentTab={currentTab}
-          onTabChange={(tab) => {
-            setIsAdminView(false);
-            setCurrentTab(tab);
-          }}
+          onTabChange={handleTabChange}
           isAdmin={isAdminView}
           onExitAdmin={handleExitAdmin}
           currentUser={user}
@@ -153,9 +176,10 @@ export default function App() {
                 tonightEvent={currentEvent}
                 upcomingEvents={events}
                 benefits={benefits}
-                onNavigateTab={setCurrentTab}
+                onNavigateTab={handleTabChange}
                 onOpenPresenceModal={() => setIsPresenceModalOpen(true)}
                 onOpenQrScanner={() => setIsQrScannerOpen(true)}
+                onActivateMatch={handleActivateMatch}
               />
             )}
 
@@ -175,31 +199,35 @@ export default function App() {
                   else if (sub === 'notitas') setCurrentTab('match_notitas');
                   else if (sub === 'matches') setCurrentTab('match_matches');
                 }}
-                onNavigateToGeneralTab={setCurrentTab}
+                onNavigateToGeneralTab={handleTabChange}
               />
             )}
 
             {currentTab === 'beneficios' && <BenefitsView currentUser={user} />}
 
             {(currentTab === 'perfil' || currentTab === 'match_perfil') && (
-              <ProfileView
-                currentUser={user}
-                onUpdateProfile={updateProfile}
-                onSwitchDemoUser={switchDemoUser}
-                onNavigateTab={(tab) => {
-                  if (tab === 'match') setCurrentTab('match_pista');
-                  else setCurrentTab(tab);
-                }}
-                onOpenAuthModal={(m) => {
-                  setAuthModalMode(m);
-                  setIsAuthModalOpen(true);
-                }}
-                onEnterAdmin={() => setIsAdminView(true)}
-                onLogout={() => {
-                  logout();
-                  showToast('Sesión cerrada.');
-                }}
-              />
+              user && (user.isAdmin || user.role === 'admin') ? (
+                <AdminDashboard />
+              ) : (
+                <ProfileView
+                  currentUser={user}
+                  onUpdateProfile={updateProfile}
+                  onSwitchDemoUser={switchDemoUser}
+                  onNavigateTab={(tab) => {
+                    if (tab === 'match') setCurrentTab('match_pista');
+                    else handleTabChange(tab);
+                  }}
+                  onOpenAuthModal={(m) => {
+                    setAuthModalMode(m);
+                    setIsAuthModalOpen(true);
+                  }}
+                  onEnterAdmin={() => setIsAdminView(true)}
+                  onLogout={() => {
+                    logout();
+                    showToast('Sesión cerrada.');
+                  }}
+                />
+              )
             )}
 
             {currentTab === 'membresia' && <MembershipView currentUser={user} />}
@@ -222,10 +250,7 @@ export default function App() {
       {!isAdminView && (
         <BottomNav
           currentTab={currentTab}
-          onTabChange={(tab) => {
-            setIsAdminView(false);
-            setCurrentTab(tab);
-          }}
+          onTabChange={handleTabChange}
           isInsideVenue={isInside}
           isInMatchMode={isMatchMode}
           matchesCount={matchesCount}
@@ -270,12 +295,25 @@ export default function App() {
         onSuccess={handleQrSuccess}
       />
 
-      {/* Modal de Autenticación */}
+      {/* Modal de Autenticación & Wizard Match */}
       <AuthModal
         isOpen={isAuthModalOpen}
         onClose={() => setIsAuthModalOpen(false)}
         onAuthSuccess={handleAuthSuccess}
         initialMode={authModalMode}
+        isInsideVenue={isInside}
+        onCheckGps={async () => {
+          await checkGpsPresence();
+          showToast('Ubicación comprobada');
+        }}
+        onOpenQrScanner={() => {
+          setIsQrScannerOpen(true);
+        }}
+        onProceedToMatch={() => {
+          simulatePresence(true, 'GPS');
+          setCurrentTab('match_pista');
+          showToast('🔥 ¡Acceso desbloqueado a Cachengueoo Match!');
+        }}
       />
 
       {/* Notificación Toast flotante */}

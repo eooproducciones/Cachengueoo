@@ -26,8 +26,12 @@ import {
   Clock,
   Music,
   Image as ImageIcon,
+  Pencil,
+  Tag,
+  Percent,
+  MessageCircle,
 } from 'lucide-react';
-import { ClubEvent, ValidationMode, VenueConfig, BirthdayRequest } from '../../types';
+import { ClubEvent, ValidationMode, VenueConfig, BirthdayRequest, ClubBenefit } from '../../types';
 import { eventService } from '../../services/eventService';
 import { presenceService } from '../../services/presenceService';
 import { ticketService } from '../../services/ticketService';
@@ -44,9 +48,29 @@ import {
 } from '../../services/supabaseClient';
 import { passlineParser, FOUR_PRESET_FLYERS } from '../../services/passlineParser';
 
+// Imágenes de alta resolución predeterminadas para aliados comerciales
+export const PRESET_BENEFIT_IMAGES = [
+  {
+    label: 'Gimnasio & Fitness (SportClub)',
+    url: 'https://images.unsplash.com/photo-1534438327276-14e5300c3a48?auto=format&fit=crop&w=1200&q=80',
+  },
+  {
+    label: 'Gastronomía / Bar / Resto',
+    url: 'https://images.unsplash.com/photo-1517248135467-4c7edcad34c4?auto=format&fit=crop&w=1200&q=80',
+  },
+  {
+    label: 'Indumentaria / Ropa / Moda',
+    url: 'https://images.unsplash.com/photo-1441986300917-64674bd600d8?auto=format&fit=crop&w=1200&q=80',
+  },
+  {
+    label: 'Barbería / Peluquería / Estética',
+    url: 'https://images.unsplash.com/photo-1503951914875-452162b0f3f1?auto=format&fit=crop&w=1200&q=80',
+  },
+];
+
 export const AdminDashboard: React.FC = () => {
   const [adminTab, setAdminTab] = useState<
-    'presencia' | 'eventos' | 'entradas' | 'usuarios' | 'cumpleanos' | 'venue' | 'supabase'
+    'presencia' | 'eventos' | 'beneficios' | 'entradas' | 'usuarios' | 'cumpleanos' | 'venue' | 'supabase'
   >('presencia');
 
   // Events state
@@ -76,6 +100,23 @@ export const AdminDashboard: React.FC = () => {
     'https://images.unsplash.com/photo-1492684223066-81342ee5ff30?auto=format&fit=crop&w=1200&q=80'
   );
   const [newEventIsFeatured, setNewEventIsFeatured] = useState(false);
+
+  // Benefits state
+  const [benefits, setBenefits] = useState<ClubBenefit[]>(() => benefitService.getBenefits());
+  const [showNewBenefitModal, setShowNewBenefitModal] = useState(false);
+  const [editingBenefitId, setEditingBenefitId] = useState<string | null>(null);
+  const [newBenTitle, setNewBenTitle] = useState('');
+  const [newBenPartnerName, setNewBenPartnerName] = useState('');
+  const [newBenBadge, setNewBenBadge] = useState('10% OFF');
+  const [newBenDescription, setNewBenDescription] = useState('');
+  const [newBenPromoCode, setNewBenPromoCode] = useState('');
+  const [newBenActionUrl, setNewBenActionUrl] = useState('');
+  const [newBenActionType, setNewBenActionType] = useState<'whatsapp' | 'web'>('whatsapp');
+  const [newBenActionLabel, setNewBenActionLabel] = useState('');
+  const [newBenCategory, setNewBenCategory] = useState('Gimnasio & Salud');
+  const [newBenImageUrl, setNewBenImageUrl] = useState(
+    'https://images.unsplash.com/photo-1534438327276-14e5300c3a48?auto=format&fit=crop&w=1200&q=80'
+  );
 
   // Birthday requests state
   const [birthdays, setBirthdays] = useState<BirthdayRequest[]>(() => birthdayService.getRequests());
@@ -246,6 +287,109 @@ export const AdminDashboard: React.FC = () => {
     setEvents(eventService.getEvents());
   };
 
+  // Toggle beneficio activo
+  const handleToggleBenefit = (id: string) => {
+    benefitService.toggleBenefit(id);
+    setBenefits(benefitService.getBenefits());
+  };
+
+  // Eliminar beneficio
+  const handleDeleteBenefit = (id: string) => {
+    benefitService.deleteBenefit(id);
+    setBenefits(benefitService.getBenefits());
+  };
+
+  // Abrir modal para crear nuevo beneficio
+  const handleOpenCreateBenefit = () => {
+    setEditingBenefitId(null);
+    setNewBenTitle('SportClub · Gimnasio & Fitness');
+    setNewBenPartnerName('SportClub');
+    setNewBenBadge('10% OFF');
+    setNewBenDescription(
+      'Por ser parte de Cachengueoo tenés el 10% de descuento en tu cuota de SportClub. Entrá a la web, ingresá el código CACHESPORT o escribí por WhatsApp para activar tu beneficio.'
+    );
+    // El código de descuento es opcional: si es por WhatsApp no hace falta, si es web se coloca
+    setNewBenPromoCode('');
+    setNewBenActionUrl(
+      'https://wa.me/5492615551234?text=Hola%20SportClub!%20Vengo%20de%20Cachengueoo%20y%20quiero%20el%2010%25%20de%20descuento'
+    );
+    setNewBenActionType('whatsapp');
+    setNewBenActionLabel('Obtener beneficio');
+    setNewBenCategory('Gimnasio & Salud');
+    setNewBenImageUrl(PRESET_BENEFIT_IMAGES[0].url);
+    setShowNewBenefitModal(true);
+  };
+
+  // Abrir modal para editar beneficio existente
+  const handleOpenEditBenefit = (b: ClubBenefit) => {
+    setEditingBenefitId(b.id);
+    setNewBenTitle(b.title);
+    setNewBenPartnerName(b.partnerName || b.title);
+    setNewBenBadge(b.highlightBadge || '10% OFF');
+    setNewBenDescription(b.description);
+    setNewBenPromoCode(b.promoCode || '');
+    setNewBenActionUrl(b.actionUrl);
+    setNewBenActionType(
+      b.actionType ||
+        (b.actionUrl.includes('wa.me') || b.actionUrl.includes('whatsapp') ? 'whatsapp' : 'web')
+    );
+    setNewBenActionLabel(b.actionLabel || 'Obtener beneficio');
+    setNewBenCategory(b.category || 'Gimnasio & Salud');
+    setNewBenImageUrl(b.imageUrl || PRESET_BENEFIT_IMAGES[0].url);
+    setShowNewBenefitModal(true);
+  };
+
+  // Carga de imagen de beneficio desde el dispositivo
+  const handleBenefitImageFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (uploadEvent) => {
+      const result = uploadEvent.target?.result as string;
+      if (result) {
+        setNewBenImageUrl(result);
+      }
+    };
+    reader.readAsDataURL(file);
+  };
+
+  // Guardar beneficio (crear nuevo o actualizar existente)
+  const handleSaveBenefit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newBenTitle.trim() || !newBenActionUrl.trim()) return;
+
+    const formattedUrl = newBenActionUrl.trim().startsWith('http')
+      ? newBenActionUrl.trim()
+      : `https://${newBenActionUrl.trim()}`;
+
+    const cleanPromoCode = newBenPromoCode.trim();
+
+    const benefitData = {
+      title: newBenTitle.trim(),
+      partnerName: newBenTitle.trim(),
+      highlightBadge: newBenBadge.trim() || '10% OFF',
+      description: newBenDescription.trim(),
+      promoCode: cleanPromoCode ? cleanPromoCode.toUpperCase() : undefined,
+      actionUrl: formattedUrl,
+      actionType: newBenActionType,
+      actionLabel: newBenActionLabel.trim() || 'Obtener beneficio',
+      category: newBenCategory.trim() || 'Gimnasio & Salud',
+      imageUrl: newBenImageUrl,
+      active: true,
+    };
+
+    if (editingBenefitId) {
+      benefitService.updateBenefit(editingBenefitId, benefitData);
+    } else {
+      benefitService.addBenefit(benefitData);
+    }
+
+    setBenefits(benefitService.getBenefits());
+    setShowNewBenefitModal(false);
+    setEditingBenefitId(null);
+  };
+
   // Birthday status change
   const handleBirthdayStatus = (id: string, status: 'pending' | 'approved' | 'contacted') => {
     birthdayService.updateRequestStatus(id, status);
@@ -328,6 +472,7 @@ export const AdminDashboard: React.FC = () => {
         {[
           { id: 'presencia', label: 'Presencia & QR', icon: MapPin },
           { id: 'eventos', label: 'Eventos', icon: Calendar },
+          { id: 'beneficios', label: 'Beneficios', icon: Gift },
           { id: 'entradas', label: 'Control Entradas', icon: Ticket },
           { id: 'usuarios', label: 'Usuarios & Match', icon: Users },
           { id: 'cumpleanos', label: 'Cumpleaños', icon: Cake },
@@ -588,6 +733,212 @@ export const AdminDashboard: React.FC = () => {
                 </div>
               </div>
             ))}
+          </div>
+        </div>
+      )}
+
+      {/* TAB: GESTIÓN DE BENEFICIOS */}
+      {adminTab === 'beneficios' && (
+        <div className="space-y-6">
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 p-6 rounded-3xl bg-[#121217] border border-zinc-800 shadow-xl">
+            <div>
+              <div className="flex items-center gap-2 mb-1.5">
+                <Gift className="w-4 h-4 text-[#F39200]" />
+                <span className="text-[10px] uppercase font-bold text-[#F39200] tracking-widest">
+                  ALIANZAS & CONVENIOS COMERCIALES
+                </span>
+              </div>
+              <h3 className="text-xl font-black text-white font-display uppercase tracking-tight">
+                GESTIÓN DE BENEFICIOS <span className="text-[#F39200]">CACHENGUEOO</span>
+              </h3>
+              <p className="text-xs text-zinc-400 mt-1 max-w-lg leading-relaxed">
+                Administrá los convenios de la comunidad (ej. SportClub, locales, gastronomía). Podés definir el porcentaje resaltado (ej. 10% OFF), la descripción y el link donde se envía al usuario (WhatsApp o web oficial).
+              </p>
+            </div>
+
+            <button
+              type="button"
+              onClick={handleOpenCreateBenefit}
+              className="h-11 px-5 rounded-xl bg-[#F39200] hover:bg-[#E08400] text-black font-extrabold text-xs flex items-center gap-2 cursor-pointer transition-all shadow-md shadow-[#F39200]/25 shrink-0"
+            >
+              <Plus className="w-4 h-4" />
+              Nuevo Beneficio
+            </button>
+          </div>
+
+          {/* Quick Stats */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div className="p-4 rounded-2xl bg-[#121217] border border-zinc-800 flex items-center justify-between">
+              <div>
+                <span className="text-[11px] text-zinc-400 block font-medium">Total Alianzas</span>
+                <span className="text-2xl font-black text-white font-mono mt-0.5 block">{benefits.length}</span>
+              </div>
+              <div className="w-10 h-10 rounded-xl bg-[#F39200]/15 border border-[#F39200]/30 flex items-center justify-center text-[#F39200]">
+                <Gift className="w-5 h-5" />
+              </div>
+            </div>
+
+            <div className="p-4 rounded-2xl bg-[#121217] border border-zinc-800 flex items-center justify-between">
+              <div>
+                <span className="text-[11px] text-zinc-400 block font-medium">Beneficios Activos</span>
+                <span className="text-2xl font-black text-emerald-400 font-mono mt-0.5 block">
+                  {benefits.filter((b) => b.active).length}
+                </span>
+              </div>
+              <div className="w-10 h-10 rounded-xl bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center text-emerald-400">
+                <CheckCircle2 className="w-5 h-5" />
+              </div>
+            </div>
+
+            <div className="p-4 rounded-2xl bg-[#121217] border border-zinc-800 flex items-center justify-between">
+              <div>
+                <span className="text-[11px] text-zinc-400 block font-medium">Alianza Principal</span>
+                <span className="text-sm font-bold text-white mt-1 block truncate max-w-[150px]">
+                  {benefits[0]?.partnerName || 'SportClub'}
+                </span>
+              </div>
+              <div className="w-10 h-10 rounded-xl bg-amber-400/15 border border-amber-400/30 flex items-center justify-center text-amber-400">
+                <Percent className="w-5 h-5" />
+              </div>
+            </div>
+          </div>
+
+          {/* Benefits Cards List */}
+          <div className="space-y-4">
+            {benefits.length === 0 ? (
+              <div className="p-8 rounded-3xl bg-[#121217] border border-zinc-800 text-center space-y-3">
+                <Gift className="w-10 h-10 text-zinc-600 mx-auto" />
+                <h4 className="text-sm font-bold text-white">No hay beneficios cargados</h4>
+                <p className="text-xs text-zinc-500 max-w-sm mx-auto">
+                  Agregá el beneficio de SportClub u otras alianzas comerciales haciendo click en "Nuevo Beneficio".
+                </p>
+                <button
+                  type="button"
+                  onClick={handleOpenCreateBenefit}
+                  className="h-10 px-4 rounded-xl bg-[#F39200] text-black font-bold text-xs inline-flex items-center gap-1.5 cursor-pointer"
+                >
+                  <Plus className="w-4 h-4" />
+                  Cargar Alianza SportClub
+                </button>
+              </div>
+            ) : (
+              benefits.map((b) => {
+                const isWhatsApp =
+                  b.actionType === 'whatsapp' ||
+                  b.actionUrl.includes('wa.me') ||
+                  b.actionUrl.includes('whatsapp');
+
+                return (
+                  <div
+                    key={b.id}
+                    className="p-5 rounded-3xl bg-[#121217] border border-zinc-800 hover:border-zinc-700/80 transition-all space-y-4 shadow-lg"
+                  >
+                    <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                      {/* Left: Thumbnail + Title + Highlight badge */}
+                      <div className="flex items-center gap-3.5 min-w-0">
+                        <div className="relative w-24 h-16 rounded-2xl overflow-hidden bg-zinc-900 shrink-0 border border-zinc-800">
+                          <img
+                            src={b.imageUrl || PRESET_BENEFIT_IMAGES[0].url}
+                            alt={b.title}
+                            className="w-full h-full object-cover"
+                          />
+                          <div className="absolute top-1 right-1 px-1.5 py-0.5 rounded-lg bg-gradient-to-r from-amber-400 to-[#F39200] text-black font-black text-[9px] font-display shadow">
+                            {b.highlightBadge || '10% OFF'}
+                          </div>
+                        </div>
+
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-2 mb-0.5">
+                            <span className="text-[10px] font-black uppercase tracking-wider text-[#F39200]">
+                              {b.category || 'Gimnasio & Salud'}
+                            </span>
+                          </div>
+                          <h4 className="text-base font-extrabold text-white truncate font-display">
+                            {b.title}
+                          </h4>
+                          {Boolean(b.promoCode && b.promoCode.trim().length > 0) && (
+                            <span className="inline-flex items-center gap-1 text-[11px] text-amber-300 font-mono font-bold mt-0.5">
+                              <Tag className="w-3 h-3 text-[#F39200]" />
+                              Código: {b.promoCode}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Right: Toggle Active + Edit + Delete */}
+                      <div className="flex items-center gap-2 self-end sm:self-center">
+                        <button
+                          type="button"
+                          onClick={() => handleToggleBenefit(b.id)}
+                          className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
+                            b.active
+                              ? 'bg-emerald-500/15 border border-emerald-500/40 text-emerald-400'
+                              : 'bg-zinc-900 border border-zinc-800 text-zinc-500'
+                          }`}
+                        >
+                          <span
+                            className={`w-2 h-2 rounded-full ${
+                              b.active ? 'bg-emerald-400 animate-pulse' : 'bg-zinc-600'
+                            }`}
+                          />
+                          {b.active ? 'ACTIVO' : 'PAUSADO'}
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => handleOpenEditBenefit(b)}
+                          className="h-8 px-3 rounded-xl bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 text-zinc-200 text-xs font-bold flex items-center gap-1.5 cursor-pointer transition-colors"
+                          title="Editar beneficio"
+                        >
+                          <Pencil className="w-3.5 h-3.5 text-[#F39200]" />
+                          Editar
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteBenefit(b.id)}
+                          className="w-8 h-8 rounded-xl bg-zinc-900 hover:bg-red-950/40 border border-zinc-800 hover:border-red-500/40 text-zinc-500 hover:text-red-400 flex items-center justify-center cursor-pointer transition-colors"
+                          title="Eliminar beneficio"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Description preview */}
+                    <p className="text-xs text-zinc-300 bg-zinc-950/60 p-3 rounded-2xl border border-zinc-900 leading-relaxed font-normal">
+                      {b.description}
+                    </p>
+
+                    {/* Action link & redirection target */}
+                    <div className="flex flex-wrap items-center justify-between gap-2 pt-1 text-xs border-t border-zinc-800/60">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <span className="text-[11px] text-zinc-500 font-medium">Redirección:</span>
+                        <a
+                          href={b.actionUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-1.5 text-xs font-semibold text-zinc-300 hover:text-white truncate max-w-xs sm:max-w-md group"
+                        >
+                          {isWhatsApp ? (
+                            <MessageCircle className="w-3.5 h-3.5 text-[#25D366] shrink-0" />
+                          ) : (
+                            <ExternalLink className="w-3.5 h-3.5 text-[#F39200] shrink-0" />
+                          )}
+                          <span className="truncate underline decoration-zinc-700 underline-offset-2">
+                            {b.actionUrl}
+                          </span>
+                        </a>
+                      </div>
+
+                      <span className="text-[11px] font-bold text-zinc-400">
+                        Botón: <strong className="text-white">{b.actionLabel || 'Obtener beneficio'}</strong>
+                      </span>
+                    </div>
+                  </div>
+                );
+              })
+            )}
           </div>
         </div>
       )}
@@ -1216,6 +1567,294 @@ export const AdminDashboard: React.FC = () => {
                 >
                   <Check className="w-4 h-4" />
                   Publicar Evento
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* CREATE / EDIT BENEFIT MODAL */}
+      {showNewBenefitModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-md animate-in fade-in duration-200">
+          <div className="bg-[#121217] border border-zinc-800 rounded-3xl w-full max-w-lg p-6 space-y-4 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between pb-3 border-b border-zinc-800">
+              <div>
+                <span className="text-[10px] uppercase font-bold text-[#F39200] tracking-wider block">
+                  Gestión de Alianzas
+                </span>
+                <h4 className="text-base font-bold text-white font-display mt-0.5">
+                  {editingBenefitId ? 'Editar Beneficio' : 'Nuevo Beneficio / Alianza'}
+                </h4>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowNewBenefitModal(false)}
+                className="w-8 h-8 rounded-xl bg-zinc-900 border border-zinc-800 text-zinc-400 hover:text-white flex items-center justify-center cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveBenefit} className="space-y-4 text-xs">
+              {/* 1. TÍTULO (PRIMERO) */}
+              <div>
+                <label className="text-zinc-300 block mb-1 font-bold">
+                  Título <span className="text-red-400">*</span>
+                </label>
+                <input
+                  type="text"
+                  required
+                  placeholder="ej. SportClub · Gimnasio & Fitness"
+                  value={newBenTitle}
+                  onChange={(e) => setNewBenTitle(e.target.value)}
+                  className="w-full h-10 px-3 rounded-xl bg-zinc-900 border border-zinc-800 text-white font-medium focus:outline-none focus:border-[#F39200]"
+                />
+              </div>
+
+              {/* 2. BENEFICIO RESALTADO (LUEGO DEL TÍTULO) */}
+              <div>
+                <label className="text-zinc-300 block mb-1 font-bold flex items-center gap-1.5">
+                  <Tag className="w-3.5 h-3.5 text-[#F39200]" />
+                  Beneficio Resaltado <span className="text-red-400">*</span>
+                </label>
+                <input
+                  type="text"
+                  required
+                  placeholder="ej. 10% OFF, 2x1, 15% OFF"
+                  value={newBenBadge}
+                  onChange={(e) => setNewBenBadge(e.target.value)}
+                  className="w-full h-10 px-3 rounded-xl bg-zinc-900 border border-amber-500/40 text-amber-300 font-black tracking-wide text-xs focus:outline-none focus:border-[#F39200]"
+                />
+              </div>
+
+              {/* 3. DESCRIPCIÓN DEL BENEFICIO */}
+              <div>
+                <label className="text-zinc-300 block mb-1 font-bold">
+                  Descripción del Beneficio <span className="text-red-400">*</span>
+                </label>
+                <textarea
+                  rows={3}
+                  required
+                  placeholder="Por ser parte de Cachengueoo tenés el 10% de descuento en tu cuota de SportClub. Entrá a la web, ingresá el código CACHESPORT o escribinos por WhatsApp..."
+                  value={newBenDescription}
+                  onChange={(e) => setNewBenDescription(e.target.value)}
+                  className="w-full p-3 rounded-xl bg-zinc-900 border border-zinc-800 text-white font-medium focus:outline-none focus:border-[#F39200] leading-relaxed resize-none"
+                />
+              </div>
+
+              {/* 4. LINK DE REDIRECCIÓN (DONDE LO ENVÍA) */}
+              <div className="p-3.5 rounded-2xl bg-zinc-950/80 border border-[#F39200]/40 space-y-3">
+                <div className="flex items-center justify-between">
+                  <label className="text-white font-black flex items-center gap-1.5 text-xs">
+                    <ExternalLink className="w-3.5 h-3.5 text-[#F39200]" />
+                    Link de Redirección del Botón <span className="text-red-400">*</span>
+                  </label>
+                  <span className="text-[10px] text-zinc-400 font-mono">WhatsApp o Web</span>
+                </div>
+
+                <input
+                  type="text"
+                  required
+                  placeholder="ej. https://wa.me/5492615551234?text=... o https://sportclub.com.ar"
+                  value={newBenActionUrl}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    setNewBenActionUrl(val);
+                    if (val.includes('wa.me') || val.includes('whatsapp')) {
+                      setNewBenActionType('whatsapp');
+                      if (!newBenActionLabel) setNewBenActionLabel('Obtener beneficio');
+                    } else if (val.includes('http')) {
+                      setNewBenActionType('web');
+                      if (!newBenActionLabel) setNewBenActionLabel('Obtener beneficio');
+                    }
+                  }}
+                  className="w-full h-10 px-3 rounded-xl bg-zinc-900 border border-zinc-800 text-white font-mono text-xs focus:outline-none focus:border-[#F39200]"
+                />
+
+                {/* Tipo de Redirección & Botón */}
+                <div className="grid grid-cols-2 gap-2 pt-1">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setNewBenActionType('whatsapp');
+                      if (!newBenActionLabel) {
+                        setNewBenActionLabel('Obtener beneficio');
+                      }
+                    }}
+                    className={`h-9 px-3 rounded-xl font-bold flex items-center justify-center gap-1.5 cursor-pointer transition-all ${
+                      newBenActionType === 'whatsapp'
+                        ? 'bg-[#25D366] text-black font-extrabold shadow-sm'
+                        : 'bg-zinc-900 border border-zinc-800 text-zinc-400 hover:text-white'
+                    }`}
+                  >
+                    <MessageCircle className="w-3.5 h-3.5" />
+                    WhatsApp
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setNewBenActionType('web');
+                      if (!newBenActionLabel) {
+                        setNewBenActionLabel('Obtener beneficio');
+                      }
+                    }}
+                    className={`h-9 px-3 rounded-xl font-bold flex items-center justify-center gap-1.5 cursor-pointer transition-all ${
+                      newBenActionType === 'web'
+                        ? 'bg-[#F39200] text-black font-extrabold shadow-sm'
+                        : 'bg-zinc-900 border border-zinc-800 text-zinc-400 hover:text-white'
+                    }`}
+                  >
+                    <ExternalLink className="w-3.5 h-3.5" />
+                    Sitio Web
+                  </button>
+                </div>
+
+                {/* Texto del Botón */}
+                <div>
+                  <label className="text-zinc-400 block mb-1 text-[11px] font-medium">
+                    Texto a mostrar en el botón
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="Obtener beneficio"
+                    value={newBenActionLabel}
+                    onChange={(e) => setNewBenActionLabel(e.target.value)}
+                    className="w-full h-9 px-3 rounded-xl bg-zinc-900 border border-zinc-800 text-white text-xs focus:outline-none focus:border-[#F39200]"
+                  />
+                </div>
+              </div>
+
+              {/* 5. CÓDIGO PROMOCIONAL Y CATEGORÍA */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="text-zinc-300 font-bold flex items-center gap-1">
+                      <Tag className="w-3 h-3 text-[#F39200]" />
+                      Código de Descuento (Opcional)
+                    </label>
+                    <span className="text-[10px] text-zinc-500 font-medium">Solo si tiene web</span>
+                  </div>
+                  <input
+                    type="text"
+                    placeholder="ej. CACHESPORT"
+                    value={newBenPromoCode}
+                    onChange={(e) => setNewBenPromoCode(e.target.value.toUpperCase())}
+                    className="w-full h-10 px-3 rounded-xl bg-zinc-900 border border-zinc-800 text-amber-300 font-mono font-bold text-xs uppercase focus:outline-none focus:border-[#F39200]"
+                  />
+                  <span className="text-[10px] text-zinc-500 mt-1 block">
+                    Dejá vacío si la alianza es solo WhatsApp o no requiere cupón (no saldrá en la tarjeta).
+                  </span>
+                </div>
+
+                <div>
+                  <label className="text-zinc-300 block mb-1 font-bold">
+                    Categoría
+                  </label>
+                  <select
+                    value={newBenCategory}
+                    onChange={(e) => setNewBenCategory(e.target.value)}
+                    className="w-full h-10 px-3 rounded-xl bg-zinc-900 border border-zinc-800 text-white text-xs focus:outline-none focus:border-[#F39200]"
+                  >
+                    <option value="Gimnasio & Salud">Gimnasio & Salud</option>
+                    <option value="Gastronomía & Bares">Gastronomía & Bares</option>
+                    <option value="Indumentaria & Moda">Indumentaria & Moda</option>
+                    <option value="Barbería & Estética">Barbería & Estética</option>
+                    <option value="Boliches & Afters">Boliches & Afters</option>
+                    <option value="Alianza Exclusiva">Alianza Exclusiva</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* 6. IMAGEN DE PORTADA (CON EJEMPLOS Y SUBIDA DE IMAGEN) */}
+              <div className="space-y-3">
+                <label className="text-zinc-300 block font-bold">
+                  Imagen de Portada <span className="text-red-400">*</span>
+                </label>
+
+                {/* Vista previa de la imagen seleccionada o subida */}
+                <div className="relative aspect-video w-full rounded-2xl overflow-hidden border border-zinc-700 bg-zinc-950 shadow-md">
+                  <img
+                    src={newBenImageUrl || PRESET_BENEFIT_IMAGES[0].url}
+                    alt="Vista previa portada"
+                    className="w-full h-full object-cover"
+                  />
+                  <div className="absolute top-2.5 left-2.5 px-2.5 py-0.5 rounded-full bg-black/75 backdrop-blur-md text-[10px] font-bold text-[#F39200] border border-white/10">
+                    Portada Seleccionada
+                  </div>
+                </div>
+
+                {/* Botón para subir imagen desde el dispositivo */}
+                <div>
+                  <label className="w-full h-10 rounded-xl bg-zinc-900 hover:bg-zinc-800 border border-zinc-700 hover:border-[#F39200] text-white font-bold text-xs flex items-center justify-center gap-2 cursor-pointer transition-all">
+                    <Upload className="w-4 h-4 text-[#F39200]" />
+                    Subir imagen desde tu dispositivo (Galería / Archivos)
+                    <input
+                      type="file"
+                      accept="image/*"
+                      onChange={handleBenefitImageFileUpload}
+                      className="hidden"
+                    />
+                  </label>
+                </div>
+
+                {/* Ejemplos de imágenes predeterminadas */}
+                <div>
+                  <span className="text-[10px] uppercase font-bold text-zinc-500 block mb-1.5">
+                    O elegir entre las opciones de ejemplo:
+                  </span>
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                    {PRESET_BENEFIT_IMAGES.map((preset, idx) => {
+                      const isSelected = newBenImageUrl === preset.url;
+                      return (
+                        <button
+                          key={idx}
+                          type="button"
+                          onClick={() => setNewBenImageUrl(preset.url)}
+                          className={`relative aspect-video rounded-xl overflow-hidden border-2 text-left cursor-pointer transition-all ${
+                            isSelected
+                              ? 'border-[#F39200] ring-2 ring-[#F39200]/40'
+                              : 'border-zinc-800 opacity-70 hover:opacity-100'
+                          }`}
+                        >
+                          <img
+                            src={preset.url}
+                            alt={preset.label}
+                            className="w-full h-full object-cover"
+                          />
+                          <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent flex items-end p-1.5">
+                            <span className="text-[10px] text-white font-bold leading-tight line-clamp-1">
+                              {preset.label}
+                            </span>
+                          </div>
+                          {isSelected && (
+                            <div className="absolute top-1 right-1 w-4 h-4 rounded-full bg-[#F39200] text-black flex items-center justify-center">
+                              <Check className="w-2.5 h-2.5 stroke-[3]" />
+                            </div>
+                          )}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+
+              {/* BOTONES */}
+              <div className="pt-2 flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => setShowNewBenefitModal(false)}
+                  className="flex-1 h-11 rounded-xl bg-zinc-900 border border-zinc-800 text-zinc-400 hover:text-white font-medium cursor-pointer"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  className="flex-1 h-11 rounded-xl bg-[#F39200] hover:bg-[#E08400] text-black font-extrabold cursor-pointer transition-all shadow-md shadow-[#F39200]/25 flex items-center justify-center gap-1.5"
+                >
+                  <Check className="w-4 h-4" />
+                  {editingBenefitId ? 'Guardar Cambios' : 'Publicar Beneficio'}
                 </button>
               </div>
             </form>

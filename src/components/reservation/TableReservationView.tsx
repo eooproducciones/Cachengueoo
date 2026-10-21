@@ -16,18 +16,18 @@ import {
 import { UserProfile } from '../../types';
 
 interface TableReservationViewProps {
-  currentUser: UserProfile;
+  currentUser: UserProfile | null;
 }
 
 export const TableReservationView: React.FC<TableReservationViewProps> = ({ currentUser }) => {
   const [submittedSuccess, setSubmittedSuccess] = useState(false);
   const [whatsappSentUrl, setWhatsappSentUrl] = useState('');
   const [formData, setFormData] = useState({
-    name: currentUser.fullName || '',
-    instagram: currentUser.instagram ? currentUser.instagram.replace(/^@/, '') : '',
+    name: currentUser?.fullName || '',
+    instagram: currentUser?.instagram ? currentUser.instagram.replace(/^@/, '') : '',
     date: '2026-10-17',
     guestCount: 10,
-    email: currentUser.email || '',
+    email: currentUser?.email || '',
   });
 
   // Asegura que al entrar la pantalla siempre comience desde arriba de todo

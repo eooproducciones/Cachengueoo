@@ -1,166 +1,217 @@
-import React, { useState } from 'react';
-import { Gift, Sparkles, Clock, Wine, Flame, Zap, CheckCircle2, QrCode } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import {
+  Gift,
+  ExternalLink,
+  MessageCircle,
+  Copy,
+  Check,
+  Percent,
+  Dumbbell,
+  Tag,
+  ShieldCheck,
+  Sparkles,
+} from 'lucide-react';
 import { ClubBenefit, UserProfile } from '../../types';
 import { benefitService } from '../../services/benefitService';
 
 interface BenefitsViewProps {
-  currentUser: UserProfile;
+  currentUser: UserProfile | null;
 }
 
-export const BenefitsView: React.FC<BenefitsViewProps> = ({ currentUser }) => {
-  const [benefits] = useState<ClubBenefit[]>(() => benefitService.getBenefits());
-  const [selectedTag, setSelectedTag] = useState<string>('TODOS');
-  const [redeemingBenefit, setRedeemingBenefit] = useState<ClubBenefit | null>(null);
+export const BenefitsView: React.FC<BenefitsViewProps> = () => {
+  const [benefits, setBenefits] = useState<ClubBenefit[]>(() => benefitService.getBenefits());
+  const [copiedCodeId, setCopiedCodeId] = useState<string | null>(null);
 
-  const tags = ['TODOS', 'BARRA', 'VIP', 'MEMBRESÍA', 'CUMPLE'];
+  // Escuchar actualizaciones en tiempo real desde el panel de administración
+  useEffect(() => {
+    const handleUpdate = () => {
+      setBenefits(benefitService.getBenefits());
+    };
+    window.addEventListener('cachengueoo_benefits_updated', handleUpdate);
+    return () => {
+      window.removeEventListener('cachengueoo_benefits_updated', handleUpdate);
+    };
+  }, []);
 
-  const filtered = benefits.filter((b) => {
-    if (selectedTag === 'TODOS') return true;
-    return b.tag === selectedTag;
-  });
+  const activeBenefits = benefits.filter((b) => b.active);
 
-  const getIcon = (name: string) => {
-    switch (name) {
-      case 'Wine':
-        return Wine;
-      case 'Flame':
-        return Flame;
-      case 'Zap':
-        return Zap;
-      default:
-        return Sparkles;
+  const handleCopyCode = (code: string, id: string) => {
+    try {
+      navigator.clipboard.writeText(code);
+      setCopiedCodeId(id);
+      setTimeout(() => setCopiedCodeId(null), 2500);
+    } catch {
+      // Fallback
     }
   };
 
   return (
     <div className="max-w-xl mx-auto px-4 py-4 space-y-5">
       {/* Header Banner */}
-      <div className="bg-gradient-to-r from-zinc-900 via-zinc-900 to-amber-950/30 border border-zinc-800 rounded-3xl p-5 relative overflow-hidden">
+      <div className="bg-[#121217] border border-zinc-800 rounded-3xl p-5 shadow-xl relative overflow-hidden">
         <div className="flex items-center gap-2 mb-1.5">
           <Gift className="w-4 h-4 text-[#F39200]" />
           <span className="text-[10px] uppercase font-bold text-[#F39200] tracking-widest">
-            BENEFICIOS EXCLUSIVOS
+            ALIANZAS & BENEFICIOS EXCLUSIVOS
           </span>
         </div>
-        <h2 className="text-xl font-black text-white font-display uppercase tracking-tight">
-          PROMOCIONES & BARRA <span className="text-[#F39200]">CACHENGUEOO</span>
+        <h2 className="text-xl sm:text-2xl font-black text-white font-display uppercase tracking-tight">
+          BENEFICIOS <span className="text-[#F39200]">CACHENGUEOO</span>
         </h2>
-        <p className="text-xs text-zinc-400 mt-1 max-w-sm">
-          Presentá el código en las barras del boliche o activá descuentos directos por estar presente.
+        <p className="text-xs text-zinc-400 mt-1 max-w-md leading-relaxed">
+          Convenios y descuentos exclusivos en las mejores marcas, gimnasios y locales de Mendoza por ser parte de nuestra comunidad.
         </p>
       </div>
 
-      {/* Filter Tabs */}
-      <div className="flex gap-1.5 overflow-x-auto no-scrollbar pb-1">
-        {tags.map((tag) => (
-          <button
-            key={tag}
-            onClick={() => setSelectedTag(tag)}
-            className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer whitespace-nowrap ${
-              selectedTag === tag
-                ? 'bg-[#F39200] text-black shadow-sm'
-                : 'bg-zinc-900 border border-zinc-800 text-zinc-400 hover:text-white'
-            }`}
-          >
-            {tag}
-          </button>
-        ))}
-      </div>
-
       {/* Benefits List */}
-      <div className="space-y-3.5">
-        {filtered.map((benefit) => {
-          const Icon = getIcon(benefit.iconName);
+      <div className="space-y-5">
+        {activeBenefits.length === 0 ? (
+          <div className="p-8 rounded-3xl bg-[#121217] border border-zinc-800 text-center space-y-3">
+            <Gift className="w-10 h-10 text-zinc-600 mx-auto" />
+            <h3 className="text-sm font-bold text-white">Próximamente más beneficios</h3>
+            <p className="text-xs text-zinc-500 max-w-xs mx-auto">
+              Estamos sumando nuevas alianzas y descuentos exclusivos para vos.
+            </p>
+          </div>
+        ) : (
+          activeBenefits.map((benefit) => {
+            const isWhatsApp =
+              benefit.actionType === 'whatsapp' ||
+              benefit.actionUrl.includes('wa.me') ||
+              benefit.actionUrl.includes('whatsapp');
 
-          return (
-            <div
-              key={benefit.id}
-              className="p-4 sm:p-5 rounded-3xl bg-[#121217] border border-zinc-800 hover:border-zinc-700 transition-all shadow-md relative overflow-hidden"
-            >
-              <div className="flex items-start justify-between gap-3 mb-2">
-                <div className="flex items-center gap-2.5">
-                  <div className="w-10 h-10 rounded-2xl bg-zinc-900 border border-zinc-800 flex items-center justify-center text-[#F39200]">
-                    <Icon className="w-5 h-5" />
+            return (
+              <div
+                key={benefit.id}
+                className="bg-[#121217] border border-zinc-800 hover:border-amber-500/50 rounded-3xl overflow-hidden shadow-2xl transition-all duration-300 group relative"
+              >
+                {/* Visual Cover Header with Super Prominent Highlighted Benefit Badge */}
+                <div className="relative aspect-[16/9] w-full overflow-hidden bg-zinc-950">
+                  <img
+                    src={
+                      benefit.imageUrl ||
+                      'https://images.unsplash.com/photo-1534438327276-14e5300c3a48?auto=format&fit=crop&w=1200&q=80'
+                    }
+                    alt={benefit.title}
+                    referrerPolicy="no-referrer"
+                    className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-700"
+                  />
+                  {/* Cinematic gradient overlays for readable contrast */}
+                  <div className="absolute inset-0 bg-gradient-to-t from-[#121217] via-black/40 to-black/30 pointer-events-none" />
+
+                  {/* Top Category Badge */}
+                  <div className="absolute top-3.5 left-3.5 flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-black/80 backdrop-blur-md border border-white/15 text-[10px] font-bold text-amber-300 shadow-md">
+                    <Dumbbell className="w-3.5 h-3.5 text-[#F39200]" />
+                    <span>{benefit.category || benefit.tag || 'GIMNASIO & FITNESS'}</span>
                   </div>
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <span className="px-2 py-0.5 rounded bg-zinc-800 text-[9px] font-bold text-zinc-300">
-                        {benefit.tag}
-                      </span>
-                      {benefit.onlyMembers && (
-                        <span className="px-2 py-0.5 rounded bg-amber-500/20 text-[#F39200] text-[9px] font-bold">
-                          SOLO SOCIOS CLUB
-                        </span>
-                      )}
+
+                  {/* SUPER PROMINENT HIGHLIGHT BADGE (ej. 10% OFF) */}
+                  <div className="absolute top-3.5 right-3.5 z-10 shadow-2xl">
+                    <div className="px-3.5 py-1.5 sm:px-4 sm:py-2 rounded-2xl bg-gradient-to-r from-amber-400 via-[#F39200] to-orange-500 text-black font-black text-sm sm:text-base font-display tracking-wider flex items-center justify-center shadow-xl shadow-[#F39200]/40 border-2 border-amber-300 ring-2 ring-black/40 transform group-hover:scale-105 transition-transform duration-300">
+                      <span>{benefit.highlightBadge || '10% OFF'}</span>
                     </div>
-                    <h3 className="text-sm font-bold text-white font-display mt-0.5">
+                  </div>
+
+                  {/* Title overlay on bottom of image */}
+                  <div className="absolute bottom-3.5 left-4 right-4">
+                    {benefit.partnerName && benefit.partnerName !== benefit.title && (
+                      <span className="text-[10px] sm:text-[11px] font-black uppercase tracking-widest text-[#F39200] block mb-0.5 drop-shadow">
+                        {benefit.partnerName}
+                      </span>
+                    )}
+                    <h3 className="text-xl sm:text-2xl font-black text-white font-display uppercase tracking-tight leading-tight drop-shadow-md">
                       {benefit.title}
                     </h3>
                   </div>
                 </div>
 
-                <div className="flex items-center gap-1 text-[11px] font-medium text-[#F39200] bg-amber-950/30 px-2 py-1 rounded-lg border border-amber-800/30">
-                  <Clock className="w-3 h-3" />
-                  <span>{benefit.expiryTime}</span>
+                {/* Card Details */}
+                <div className="p-5 space-y-4">
+                  {/* Description Box */}
+                  <div className="p-3.5 rounded-2xl bg-zinc-900/60 border border-zinc-800/80">
+                    <p className="text-xs sm:text-[13px] text-zinc-300 leading-relaxed font-normal">
+                      {benefit.description}
+                    </p>
+                  </div>
+
+                  {/* Promo Code Box (OPCIONAL: solo si fue configurado y no está vacío) */}
+                  {Boolean(benefit.promoCode && benefit.promoCode.trim().length > 0) && (
+                    <div className="p-3.5 rounded-2xl bg-zinc-950/90 border border-dashed border-[#F39200]/40 flex items-center justify-between gap-3 shadow-inner">
+                      <div className="flex items-center gap-2.5 min-w-0">
+                        <div className="w-9 h-9 rounded-xl bg-[#F39200]/15 border border-[#F39200]/30 flex items-center justify-center text-[#F39200] shrink-0">
+                          <Tag className="w-4 h-4" />
+                        </div>
+                        <div className="min-w-0">
+                          <span className="text-[10px] uppercase font-bold text-zinc-400 block tracking-wider">
+                            Código de Descuento
+                          </span>
+                          <span className="text-sm sm:text-base font-black font-mono text-amber-400 tracking-wider block truncate">
+                            {benefit.promoCode}
+                          </span>
+                        </div>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() => handleCopyCode(benefit.promoCode!, benefit.id)}
+                        className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 shrink-0 active:scale-95 shadow-md ${
+                          copiedCodeId === benefit.id
+                            ? 'bg-emerald-500 text-black shadow-emerald-500/25'
+                            : 'bg-zinc-900 hover:bg-zinc-800 border border-zinc-700 text-zinc-200'
+                        }`}
+                      >
+                        {copiedCodeId === benefit.id ? (
+                          <>
+                            <Check className="w-3.5 h-3.5 text-black stroke-[3]" />
+                            <span>¡Copiado!</span>
+                          </>
+                        ) : (
+                          <>
+                            <Copy className="w-3.5 h-3.5 text-zinc-400" />
+                            <span>Copiar</span>
+                          </>
+                        )}
+                      </button>
+                    </div>
+                  )}
+
+                  {/* Botón de Acción ("Obtener beneficio") */}
+                  <div>
+                    <a
+                      href={benefit.actionUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className={`w-full h-12 rounded-xl font-extrabold text-xs sm:text-sm flex items-center justify-center gap-2 cursor-pointer transition-all shadow-lg active:scale-[0.99] ${
+                        isWhatsApp
+                          ? 'bg-[#25D366] hover:bg-[#20ba5a] text-black shadow-emerald-950/40 border border-[#25D366]/40'
+                          : 'bg-[#F39200] hover:bg-[#E08400] text-black shadow-[#F39200]/25 border border-amber-300/40'
+                      }`}
+                    >
+                      {isWhatsApp ? (
+                        <MessageCircle className="w-4 h-4 fill-black text-black shrink-0" />
+                      ) : (
+                        <ExternalLink className="w-4 h-4 shrink-0" />
+                      )}
+                      <span>Obtener beneficio</span>
+                    </a>
+                  </div>
+
+                  {/* Footer note */}
+                  <div className="flex items-center justify-between pt-1 text-[11px] text-zinc-500 border-t border-zinc-800/80">
+                    <span className="flex items-center gap-1 text-zinc-400">
+                      <ShieldCheck className="w-3.5 h-3.5 text-[#F39200]" />
+                      Beneficio verificado
+                    </span>
+                    <span className="text-zinc-500">
+                      {benefit.condition || 'Exclusivo Comunidad Cachengueoo'}
+                    </span>
+                  </div>
                 </div>
               </div>
-
-              <p className="text-xs text-zinc-300 leading-relaxed mb-3">{benefit.description}</p>
-
-              <div className="pt-3 border-t border-zinc-800/80 flex items-center justify-between text-xs">
-                <span className="text-[11px] text-zinc-500 truncate max-w-[65%]">
-                  {benefit.condition}
-                </span>
-
-                <button
-                  onClick={() => setRedeemingBenefit(benefit)}
-                  className="px-3.5 py-1.5 rounded-xl bg-zinc-900 border border-zinc-700 hover:border-[#F39200] text-[#F39200] font-bold text-xs cursor-pointer transition-all active:scale-95"
-                >
-                  Canjear en Barra
-                </button>
-              </div>
-            </div>
-          );
-        })}
+            );
+          })
+        )}
       </div>
-
-      {/* REDEEM BENEFIT MODAL */}
-      {redeemingBenefit && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-md animate-in fade-in duration-200">
-          <div className="bg-[#121217] border border-zinc-800 rounded-3xl w-full max-w-sm p-6 text-center space-y-4">
-            <span className="text-[10px] font-bold uppercase text-[#F39200] tracking-widest">
-              CANJE DE BENEFICIO · BARRA
-            </span>
-
-            <h3 className="text-lg font-black text-white font-display uppercase tracking-tight">
-              {redeemingBenefit.title}
-            </h3>
-
-            {/* QR Mock code to show bartender */}
-            <div className="bg-white p-5 rounded-2xl mx-auto w-48 h-48 flex items-center justify-center shadow-xl">
-              <div className="w-full h-full border-4 border-black p-2 flex flex-col items-center justify-center">
-                <QrCode className="w-full h-full text-black" />
-              </div>
-            </div>
-
-            <div className="space-y-1">
-              <span className="font-mono text-xs text-[#F39200] font-bold bg-zinc-900 px-3 py-1 rounded-full border border-zinc-800">
-                BEN-{redeemingBenefit.id.toUpperCase()}-2026
-              </span>
-              <p className="text-[11px] text-zinc-400 pt-1">
-                Mostrá este código al barman de turno para aplicar la promoción.
-              </p>
-            </div>
-
-            <button
-              onClick={() => setRedeemingBenefit(null)}
-              className="w-full h-11 rounded-xl bg-[#F39200] hover:bg-[#E08400] text-black font-bold text-xs cursor-pointer shadow-lg shadow-[#F39200]/20"
-            >
-              Listo, código canjeado
-            </button>
-          </div>
-        </div>
-      )}
     </div>
   );
 };

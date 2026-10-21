@@ -18,6 +18,7 @@ import {
   MessageSquareQuote,
   Instagram,
   ExternalLink,
+  Music,
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { MatchPair, MatchProfile, UserProfile } from '../../types';
@@ -532,21 +533,43 @@ export const MatchView: React.FC<MatchViewProps> = ({
               </p>
             )}
 
-            {/* Trago favorito e intereses en formato minimalista */}
+            {/* Signo, Trago favorito y Música que le gusta */}
             <div className="flex flex-wrap items-center gap-1.5 text-xs text-zinc-200">
-              <div className="px-2 py-0.5 rounded-full bg-black/60 backdrop-blur-md border border-white/10 flex items-center gap-1 text-[#F39200] text-[10.5px] font-bold">
+              {/* Signo */}
+              {currentProfile.zodiacSign && (
+                <div className="px-2 py-0.5 rounded-full bg-black/60 backdrop-blur-md border border-amber-400/40 flex items-center gap-1 text-amber-300 text-[10.5px] font-bold shadow-sm">
+                  <Sparkles className="w-3 h-3 text-amber-400" />
+                  <span>{currentProfile.zodiacSign}</span>
+                </div>
+              )}
+
+              {/* ¿Qué tomás? */}
+              <div className="px-2 py-0.5 rounded-full bg-black/60 backdrop-blur-md border border-[#F39200]/40 flex items-center gap-1 text-[#F39200] text-[10.5px] font-bold shadow-sm">
                 <GlassWater className="w-3 h-3 text-[#F39200]" />
                 <span>{currentProfile.drinkFavorite}</span>
               </div>
 
-              {currentProfile.interests.slice(0, 2).map((item, idx) => (
-                <span
-                  key={idx}
-                  className="px-2 py-0.5 rounded-full bg-black/60 backdrop-blur-md border border-white/10 text-[10.5px] font-medium text-zinc-300"
-                >
-                  {item}
-                </span>
-              ))}
+              {/* ¿Qué música te gusta? */}
+              {currentProfile.musicPreferences && currentProfile.musicPreferences.length > 0 ? (
+                currentProfile.musicPreferences.slice(0, 2).map((item, idx) => (
+                  <span
+                    key={idx}
+                    className="px-2 py-0.5 rounded-full bg-black/60 backdrop-blur-md border border-white/10 text-[10.5px] font-medium text-zinc-300 flex items-center gap-1"
+                  >
+                    <Music className="w-2.5 h-2.5 text-zinc-400" />
+                    <span>{item}</span>
+                  </span>
+                ))
+              ) : (
+                currentProfile.interests.slice(0, 2).map((item, idx) => (
+                  <span
+                    key={idx}
+                    className="px-2 py-0.5 rounded-full bg-black/60 backdrop-blur-md border border-white/10 text-[10.5px] font-medium text-zinc-300"
+                  >
+                    {item}
+                  </span>
+                ))
+              )}
             </div>
 
             {/* BOTONES TINDER DENTRO DE LA FOTO DE PERFIL:
@@ -817,15 +840,50 @@ export const MatchView: React.FC<MatchViewProps> = ({
                   </div>
                 )}
 
-                <div className="flex items-center gap-2.5 p-2.5 rounded-xl bg-zinc-900/40 border border-zinc-800/80">
-                  <div className="w-7 h-7 rounded-lg bg-[#F39200]/15 border border-[#F39200]/30 flex items-center justify-center text-[#F39200] shrink-0">
-                    <GlassWater className="w-4 h-4" />
-                  </div>
-                  <div>
-                    <span className="text-zinc-400 block text-[10px] leading-none mb-0.5">Trago preferido</span>
-                    <span className="text-white font-semibold text-xs">{expandedProfile.drinkFavorite}</span>
+                {/* Signo y Trago en Grid */}
+                <div className="grid grid-cols-2 gap-2">
+                  {expandedProfile.zodiacSign && (
+                    <div className="flex items-center gap-2.5 p-2.5 rounded-xl bg-zinc-900/40 border border-zinc-800/80">
+                      <div className="w-7 h-7 rounded-lg bg-amber-400/15 border border-amber-400/30 flex items-center justify-center text-amber-300 shrink-0">
+                        <Sparkles className="w-4 h-4 text-amber-400" />
+                      </div>
+                      <div>
+                        <span className="text-zinc-400 block text-[10px] leading-none mb-0.5">Signo</span>
+                        <span className="text-white font-semibold text-xs">{expandedProfile.zodiacSign}</span>
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="flex items-center gap-2.5 p-2.5 rounded-xl bg-zinc-900/40 border border-zinc-800/80">
+                    <div className="w-7 h-7 rounded-lg bg-[#F39200]/15 border border-[#F39200]/30 flex items-center justify-center text-[#F39200] shrink-0">
+                      <GlassWater className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <span className="text-zinc-400 block text-[10px] leading-none mb-0.5">¿Qué toma?</span>
+                      <span className="text-white font-semibold text-xs">{expandedProfile.drinkFavorite}</span>
+                    </div>
                   </div>
                 </div>
+
+                {/* Música que le gusta */}
+                {expandedProfile.musicPreferences && expandedProfile.musicPreferences.length > 0 && (
+                  <div>
+                    <span className="text-zinc-500 block mb-1 text-[10px] uppercase font-bold tracking-wider flex items-center gap-1">
+                      <Music className="w-3 h-3 text-[#F39200]" />
+                      Música favorita:
+                    </span>
+                    <div className="flex flex-wrap gap-1.5">
+                      {expandedProfile.musicPreferences.map((m, i) => (
+                        <span
+                          key={i}
+                          className="px-2.5 py-1 rounded-lg bg-zinc-900 border border-zinc-800 text-amber-300 font-medium text-[11px]"
+                        >
+                          {m}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
 
                 {expandedProfile.interests && expandedProfile.interests.length > 0 && (
                   <div>

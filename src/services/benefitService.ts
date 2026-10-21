@@ -7,9 +7,24 @@ export const benefitService = {
   getBenefits(): ClubBenefit[] {
     try {
       const saved = localStorage.getItem(BENEFITS_STORAGE_KEY);
-      if (saved) return JSON.parse(saved);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          const isModern = parsed.some((b: ClubBenefit) => b.actionUrl || b.highlightBadge);
+          if (isModern) {
+            return parsed.map((b: ClubBenefit) => ({
+              ...b,
+              actionLabel: b.actionLabel || 'Obtener beneficio',
+              promoCode:
+                b.promoCode && b.promoCode.trim().length > 0
+                  ? b.promoCode.trim().toUpperCase()
+                  : undefined,
+            }));
+          }
+        }
+      }
     } catch (e) {
-      console.error(e);
+      console.error('Error reading benefits from storage', e);
     }
     return MOCK_BENEFITS;
   },
@@ -17,8 +32,11 @@ export const benefitService = {
   saveBenefits(benefits: ClubBenefit[]): void {
     try {
       localStorage.setItem(BENEFITS_STORAGE_KEY, JSON.stringify(benefits));
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('cachengueoo_benefits_updated', { detail: benefits }));
+      }
     } catch (e) {
-      console.error(e);
+      console.error('Error saving benefits', e);
     }
   },
 
@@ -36,5 +54,17 @@ export const benefitService = {
     };
     this.saveBenefits([newBen, ...list]);
     return newBen;
+  },
+
+  updateBenefit(id: string, updatedData: Partial<ClubBenefit>): void {
+    const list = this.getBenefits();
+    const updated = list.map((b) => (b.id === id ? { ...b, ...updatedData } : b));
+    this.saveBenefits(updated);
+  },
+
+  deleteBenefit(id: string): void {
+    const list = this.getBenefits();
+    const updated = list.filter((b) => b.id !== id);
+    this.saveBenefits(updated);
   },
 };
