@@ -14,7 +14,6 @@ import {
   RefreshCw,
   Search,
   ScanLine,
-  Database,
   Cake,
   ShieldCheck,
   Check,
@@ -42,16 +41,8 @@ import { birthdayService } from '../../services/birthdayService';
 import { authService } from '../../services/authService';
 import { getVenueConfig, saveVenueConfig } from '../../config/venue';
 import { MOCK_MATCH_PROFILES } from '../../data/mockData';
-import {
-  getSupabaseConfig,
-  saveSupabaseConfig,
-  clearSupabaseConfig,
-  getSupabaseClient,
-} from '../../services/supabaseClient';
 import { passlineParser, FOUR_PRESET_FLYERS } from '../../services/passlineParser';
 import { VenueMapEditor } from './VenueMapEditor';
-import schemaSql from '../../config/supabase.schema.sql?raw';
-import { Copy } from 'lucide-react';
 
 // Imágenes de alta resolución predeterminadas para aliados comerciales
 export const PRESET_BENEFIT_IMAGES = [
@@ -80,7 +71,7 @@ export interface AdminDashboardProps {
 
 export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onExitAdmin, onLogout }) => {
   const [adminTab, setAdminTab] = useState<
-    'eventos' | 'beneficios' | 'presencia' | 'entradas' | 'usuarios' | 'cumpleanos' | 'venue' | 'supabase'
+    'eventos' | 'beneficios' | 'presencia' | 'entradas' | 'usuarios' | 'cumpleanos' | 'venue'
   >('eventos');
 
   // Events state
@@ -130,24 +121,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onExitAdmin, onL
 
   // Birthday requests state
   const [birthdays, setBirthdays] = useState<BirthdayRequest[]>(() => birthdayService.getRequests());
-
-  // Supabase live config state
-  const [sbConfig, setSbConfig] = useState(() => getSupabaseConfig());
-  const [sbUrlInput, setSbUrlInput] = useState(sbConfig.url || '');
-  const [sbKeyInput, setSbKeyInput] = useState(sbConfig.anonKey || '');
-  const [sbTestResult, setSbTestResult] = useState<{
-    tested: boolean;
-    success: boolean;
-    message: string;
-  } | null>(null);
-  const [copiedSql, setCopiedSql] = useState(false);
-  const [showSqlCode, setShowSqlCode] = useState(false);
-
-  const handleCopySql = () => {
-    navigator.clipboard.writeText(schemaSql);
-    setCopiedSql(true);
-    setTimeout(() => setCopiedSql(false), 3000);
-  };
 
 
   // Handle Event Validation Mode Change
@@ -415,51 +388,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onExitAdmin, onL
     setBirthdays(birthdayService.getRequests());
   };
 
-  // Supabase test connection
-  const handleSaveAndTestSupabase = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!sbUrlInput.trim() || !sbKeyInput.trim()) {
-      clearSupabaseConfig();
-      setSbConfig(getSupabaseConfig());
-      setSbTestResult({
-        tested: true,
-        success: false,
-        message: 'Credenciales eliminadas. La app volverá al modo desacoplado mock.',
-      });
-      return;
-    }
-
-    saveSupabaseConfig(sbUrlInput, sbKeyInput);
-    setSbConfig(getSupabaseConfig());
-
-    try {
-      const client = getSupabaseClient();
-      if (!client) throw new Error('No se pudo inicializar el cliente de Supabase.');
-
-      // Test a light ping to profiles table or auth
-      const { error } = await client.from('profiles').select('count', { count: 'exact', head: true });
-      if (error && error.code !== 'PGRST116') {
-        setSbTestResult({
-          tested: true,
-          success: false,
-          message: `Conectado al proyecto, pero la tabla 'profiles' aún no fue creada o falta ejecutar supabase.schema.sql (${error.message}).`,
-        });
-      } else {
-        setSbTestResult({
-          tested: true,
-          success: true,
-          message: '¡Conexión exitosa con tu base de datos PostgreSQL de Supabase! Tablas listas.',
-        });
-      }
-    } catch (err: unknown) {
-      setSbTestResult({
-        tested: true,
-        success: false,
-        message: err instanceof Error ? err.message : 'Error al conectar con Supabase',
-      });
-    }
-  };
-
   return (
     <div className="max-w-4xl mx-auto px-4 py-6 space-y-6">
       {/* Admin Header */}
@@ -519,7 +447,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onExitAdmin, onL
           { id: 'usuarios', label: 'Usuarios', icon: Users },
           { id: 'cumpleanos', label: 'Cumpleaños', icon: Cake },
           { id: 'venue', label: 'Configuración Geográfica', icon: ScanLine },
-          { id: 'supabase', label: 'Supabase', icon: Database },
         ].map((tab) => {
           const Icon = tab.icon;
           const isActive = adminTab === tab.id;
@@ -1173,165 +1100,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onExitAdmin, onL
             setVenueState(updated);
           }}
         />
-      )}
-
-      {/* TAB: SUPABASE LIVE CONNECTOR */}
-      {adminTab === 'supabase' && (
-        <div className="p-6 rounded-3xl bg-[#121217] border border-zinc-800 space-y-5">
-          <div className="flex items-start justify-between">
-            <div>
-              <div className="flex items-center gap-2">
-                <Database className="w-5 h-5 text-[#F39200]" />
-                <h3 className="text-base font-bold text-white font-display">
-                  Conexión con Supabase (PostgreSQL & Auth)
-                </h3>
-              </div>
-              <p className="text-xs text-zinc-400 mt-1">
-                Ingresá tus credenciales de Supabase para activar la sincronización real con la nube.
-              </p>
-            </div>
-
-            <span
-              className={`px-3 py-1 rounded-full text-[10px] font-bold uppercase ${
-                sbConfig.isConfigured
-                  ? 'bg-emerald-950 text-emerald-400 border border-emerald-500/40'
-                  : 'bg-zinc-900 text-zinc-400 border border-zinc-800'
-              }`}
-            >
-              {sbConfig.isConfigured ? 'Supabase Configurado' : 'Modo Mock Local'}
-            </span>
-          </div>
-
-          <form onSubmit={handleSaveAndTestSupabase} className="space-y-4 text-xs">
-            <div>
-              <label className="text-zinc-400 block mb-1">
-                Project URL (VITE_SUPABASE_URL)
-              </label>
-              <input
-                type="text"
-                placeholder="https://xyzabcdefghijklm.supabase.co"
-                value={sbUrlInput}
-                onChange={(e) => setSbUrlInput(e.target.value)}
-                className="w-full h-11 px-3.5 rounded-xl bg-zinc-900 border border-zinc-800 text-white font-mono text-xs focus:outline-none focus:border-[#F39200]"
-              />
-            </div>
-
-            <div>
-              <label className="text-zinc-400 block mb-1">
-                Anon Public Key (VITE_SUPABASE_ANON_KEY)
-              </label>
-              <input
-                type="password"
-                placeholder="eyJh..."
-                value={sbKeyInput}
-                onChange={(e) => setSbKeyInput(e.target.value)}
-                className="w-full h-11 px-3.5 rounded-xl bg-zinc-900 border border-zinc-800 text-white font-mono text-xs focus:outline-none focus:border-[#F39200]"
-              />
-            </div>
-
-            <div className="flex gap-2 pt-1">
-              <button
-                type="submit"
-                className="h-11 px-6 rounded-xl bg-[#F39200] hover:bg-[#E08400] text-black font-bold text-xs flex items-center gap-1.5 cursor-pointer shadow-md shadow-[#F39200]/20"
-              >
-                <Check className="w-4 h-4" />
-                Guardar y Probar Conexión
-              </button>
-
-              {sbConfig.isConfigured && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    clearSupabaseConfig();
-                    setSbConfig(getSupabaseConfig());
-                    setSbUrlInput('');
-                    setSbKeyInput('');
-                    setSbTestResult(null);
-                  }}
-                  className="h-11 px-4 rounded-xl bg-zinc-900 border border-zinc-800 text-red-400 hover:text-red-300 text-xs font-semibold cursor-pointer"
-                >
-                  Desconectar
-                </button>
-              )}
-            </div>
-          </form>
-
-          {/* Test connection report */}
-          {sbTestResult && (
-            <div
-              className={`p-4 rounded-2xl border text-xs flex items-start gap-3 ${
-                sbTestResult.success
-                  ? 'bg-emerald-950/40 border-emerald-500/50 text-emerald-200'
-                  : 'bg-amber-950/40 border-amber-500/50 text-amber-200'
-              }`}
-            >
-              {sbTestResult.success ? (
-                <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0" />
-              ) : (
-                <AlertTriangle className="w-5 h-5 text-amber-400 shrink-0" />
-              )}
-              <div>
-                <p className="font-bold">
-                  {sbTestResult.success ? 'Conexión Exitosa' : 'Aviso de Configuración'}
-                </p>
-                <p className="mt-0.5 leading-relaxed">{sbTestResult.message}</p>
-              </div>
-            </div>
-          )}
-
-          <div className="p-5 rounded-2xl bg-zinc-950/80 border border-zinc-800 space-y-3">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-              <div>
-                <span className="font-bold text-white text-xs block">
-                  Script de Base de Datos para Supabase (17 tablas, con Notitas e Instantáneas):
-                </span>
-                <p className="text-[11px] text-zinc-400 mt-0.5">
-                  Este es el código SQL exacto que tenés que pegar en el <strong>SQL Editor</strong> de tu proyecto de Supabase.
-                </p>
-              </div>
-
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={handleCopySql}
-                  className={`h-9 px-4 rounded-xl font-bold text-xs flex items-center gap-1.5 cursor-pointer transition-all ${
-                    copiedSql
-                      ? 'bg-emerald-500 text-black'
-                      : 'bg-[#F39200] hover:bg-[#E08400] text-black shadow-md shadow-[#F39200]/20'
-                  }`}
-                >
-                  {copiedSql ? (
-                    <>
-                      <CheckCircle2 className="w-4 h-4" />
-                      <span>¡Copiado al portapapeles!</span>
-                    </>
-                  ) : (
-                    <>
-                      <Copy className="w-4 h-4" />
-                      <span>Copiar Script SQL</span>
-                    </>
-                  )}
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => setShowSqlCode(!showSqlCode)}
-                  className="h-9 px-3 rounded-xl bg-zinc-900 border border-zinc-800 hover:border-zinc-700 text-zinc-300 text-xs font-semibold cursor-pointer"
-                >
-                  {showSqlCode ? 'Ocultar' : 'Ver código'}
-                </button>
-              </div>
-            </div>
-
-            {showSqlCode && (
-              <div className="mt-3 relative">
-                <pre className="max-h-60 overflow-y-auto p-4 rounded-xl bg-black border border-zinc-800 text-[10px] font-mono text-zinc-300 leading-relaxed select-all">
-                  {schemaSql}
-                </pre>
-              </div>
-            )}
-          </div>
-        </div>
       )}
 
 

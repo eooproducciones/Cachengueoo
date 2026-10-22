@@ -17,6 +17,11 @@ export function cleanSupabaseUrl(raw: string | null): string | null {
   return u.replace(/\/+$/, '');
 }
 
+// Default production Supabase credentials (permanentes y protegidas con RLS)
+const DEFAULT_SUPABASE_URL = 'https://gqpgncrxyomktbvmoimp.supabase.co';
+const DEFAULT_SUPABASE_ANON_KEY =
+  'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImdxcGduY3J4eW9ta3Ridm1vaW1wIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTI2OTA2MDMsImV4cCI6MjEwODI2NjYwM30.yzk7Aj5OQwGjpTI5YYWbfJVHl0mav1rh44NNfEM4Hz8';
+
 export function getSupabaseConfig(): SupabaseConfig {
   const envUrl = (import.meta.env as Record<string, string | undefined>).VITE_SUPABASE_URL || null;
   const envKey = (import.meta.env as Record<string, string | undefined>).VITE_SUPABASE_ANON_KEY || null;
@@ -24,8 +29,8 @@ export function getSupabaseConfig(): SupabaseConfig {
   const storedUrl = localStorage.getItem(SUPABASE_STORAGE_URL_KEY);
   const storedKey = localStorage.getItem(SUPABASE_STORAGE_KEY_KEY);
 
-  const url = cleanSupabaseUrl(storedUrl || envUrl);
-  const anonKey = storedKey || envKey;
+  const url = cleanSupabaseUrl(storedUrl || envUrl || DEFAULT_SUPABASE_URL);
+  const anonKey = storedKey || envKey || DEFAULT_SUPABASE_ANON_KEY;
 
   return {
     url,
