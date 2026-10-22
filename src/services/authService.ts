@@ -1,5 +1,6 @@
 import { UserProfile } from '../types';
 import { getSupabaseClient } from './supabaseClient';
+import { buildUserProfileFromSources, packProfileInterests } from '../utils/profileMetadata';
 
 const USER_STORAGE_KEY = 'cachengueoo_current_user';
 const USERS_LIST_STORAGE_KEY = 'cachengueoo_registered_users';
@@ -56,11 +57,25 @@ export const authService = {
     return [];
   },
 
-  updateProfile(profile: Partial<UserProfile>): UserProfile | null {
+  async updateProfile(profile: Partial<UserProfile>): Promise<UserProfile | null> {
     const current = this.getCurrentUser();
     if (!current) return null;
 
-    const updated = { ...current, ...profile };
+    const updated: UserProfile = {
+      ...current,
+      ...profile,
+      avatarUrl: profile.avatarUrl || (profile.photos && profile.photos[0]) || current.avatarUrl,
+      photos:
+        profile.photos && profile.photos.length > 0 ? profile.photos : current.photos,
+      drinks: profile.drinks && profile.drinks.length > 0 ? profile.drinks : current.drinks,
+      musicPreferences:
+        profile.musicPreferences && profile.musicPreferences.length > 0
+          ? profile.musicPreferences
+          : current.musicPreferences,
+      zodiacSign: profile.zodiacSign || current.zodiacSign,
+    };
+
+    // Guardar inmediatamente en localStorage y sessionStorage
     localStorage.setItem(USER_STORAGE_KEY, JSON.stringify(updated));
     sessionStorage.setItem(USER_STORAGE_KEY, JSON.stringify(updated));
 
@@ -69,32 +84,59 @@ export const authService = {
     const updatedList = all.map((u) => (u.id === current.id ? updated : u));
     localStorage.setItem(USERS_LIST_STORAGE_KEY, JSON.stringify(updatedList));
 
-    // If Supabase is connected:
+    // Si Supabase está conectado, sincronizar en Auth y en tabla profiles
     const client = getSupabaseClient();
     if (client) {
-      const dbUpdates: Record<string, unknown> = {
-        updated_at: new Date().toISOString(),
-      };
-      if (profile.fullName !== undefined) dbUpdates.full_name = profile.fullName;
-      if (profile.nickname !== undefined) dbUpdates.nickname = profile.nickname;
-      if (profile.birthDate !== undefined) dbUpdates.birth_date = profile.birthDate;
-      if (profile.age !== undefined) dbUpdates.age = profile.age;
-      if (profile.avatarUrl !== undefined) dbUpdates.avatar_url = profile.avatarUrl;
-      if (profile.photos !== undefined) dbUpdates.photos = profile.photos;
-      if (profile.gender !== undefined) dbUpdates.gender = profile.gender;
-      if (profile.preference !== undefined) dbUpdates.preference = profile.preference;
-      if (profile.interests !== undefined) dbUpdates.interests = profile.interests;
-      if (profile.bio !== undefined) dbUpdates.bio = profile.bio;
-      if (profile.drinkFavorite !== undefined) dbUpdates.drink_favorite = profile.drinkFavorite;
-      if (profile.instagram !== undefined) dbUpdates.instagram = profile.instagram;
-
-      client
-        .from('profiles')
-        .update(dbUpdates)
-        .eq('id', current.id)
-        .then(({ error }) => {
-          if (error) console.warn('Supabase profile update notice:', error.message);
+      try {
+        // 1. Guardar metadatos completos en Supabase Auth
+        await client.auth.updateUser({
+          data: {
+            full_name: updated.fullName,
+            nickname: updated.nickname,
+            birth_date: updated.birthDate,
+            age: updated.age,
+            avatar_url: updated.avatarUrl,
+            photos: updated.photos,
+            gender: updated.gender,
+            preference: updated.preference,
+            bio: updated.bio,
+            drink_favorite: updated.drinkFavorite,
+            drinks: updated.drinks,
+            zodiac_sign: updated.zodiacSign,
+            music_preferences: updated.musicPreferences,
+            instagram: updated.instagram,
+          },
         });
+
+        // 2. Guardar en public.profiles usando ÚNICAMENTE las columnas existentes
+        const validDbRecord: Record<string, unknown> = {
+          full_name: updated.fullName,
+          nickname: updated.nickname,
+          birth_date: updated.birthDate,
+          age: updated.age,
+          avatar_url: updated.avatarUrl,
+          gender: updated.gender,
+          preference: updated.preference,
+          bio: updated.bio || '',
+          drink_favorite: updated.drinkFavorite || 'Fernet con Coca',
+          instagram: updated.instagram || '',
+          interests: packProfileInterests(updated),
+          updated_at: new Date().toISOString(),
+        };
+
+        await client
+          .from('profiles')
+          .upsert(
+            {
+              id: current.id,
+              email: current.email,
+              ...validDbRecord,
+            },
+            { onConflict: 'id' }
+          );
+      } catch (e) {
+        console.warn('Advertencia al sincronizar perfil en Supabase:', e);
+      }
     }
 
     notifyAuthChange();
@@ -149,33 +191,12 @@ export const authService = {
           .eq('id', data.user.id)
           .maybeSingle();
 
-        const u: UserProfile = {
-          id: data.user.id,
-          email: data.user.email || cleanEmail,
-          fullName: profileData?.full_name || data.user.user_metadata?.full_name || cleanEmail.split('@')[0],
-          nickname: profileData?.nickname || data.user.user_metadata?.nickname || cleanEmail.split('@')[0],
-          birthDate: profileData?.birth_date || data.user.user_metadata?.birth_date || '2001-01-01',
-          age: profileData?.age || data.user.user_metadata?.age || 23,
-          avatarUrl:
-            profileData?.avatar_url ||
-            data.user.user_metadata?.avatar_url ||
-            'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=500&auto=format&fit=crop&q=80',
-          photos: profileData?.avatar_url
-            ? [profileData.avatar_url]
-            : [
-                'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=500&auto=format&fit=crop&q=80',
-              ],
-          gender: profileData?.gender || data.user.user_metadata?.gender || 'otro',
-          preference: profileData?.preference || data.user.user_metadata?.preference || 'todos',
-          interests: profileData?.interests || data.user.user_metadata?.interests || ['Fernet', 'Skyy'],
-          bio: profileData?.bio || data.user.user_metadata?.bio || 'Listo para romper la pista en Cachengueoo.',
-          drinkFavorite: profileData?.drink_favorite || 'Fernet con Coca',
-          drinks: profileData?.interests && profileData.interests.length > 0 ? profileData.interests : ['Fernet', 'Skyy'],
-          instagram: profileData?.instagram || data.user.user_metadata?.instagram || undefined,
-          createdAt: profileData?.created_at || data.user.created_at || new Date().toISOString(),
-          isAdmin: cleanEmail.includes('admin'),
-          role: cleanEmail.includes('admin') ? 'admin' : 'user',
-        };
+        const currentLocal = this.getCurrentUser();
+        const u: UserProfile = buildUserProfileFromSources(
+          data.user,
+          profileData,
+          currentLocal?.id === data.user.id ? currentLocal : null
+        );
 
         localStorage.setItem(USER_STORAGE_KEY, JSON.stringify(u));
         sessionStorage.setItem(USER_STORAGE_KEY, JSON.stringify(u));
@@ -197,50 +218,75 @@ export const authService = {
     const client = getSupabaseClient();
 
     if (client && password) {
+      const metaData = {
+        full_name: newUser.fullName,
+        nickname: newUser.nickname,
+        birth_date: newUser.birthDate,
+        age: newUser.age,
+        avatar_url: newUser.avatarUrl,
+        photos: newUser.photos,
+        gender: newUser.gender,
+        preference: newUser.preference,
+        bio: newUser.bio,
+        drink_favorite: newUser.drinkFavorite,
+        drinks: newUser.drinks,
+        zodiac_sign: newUser.zodiacSign,
+        music_preferences: newUser.musicPreferences,
+        instagram: newUser.instagram,
+      };
+
       // 1. Crear el usuario en Supabase Auth enviando toda su metadata
       const { data, error } = await client.auth.signUp({
         email: newUser.email,
         password,
         options: {
-          data: {
-            full_name: newUser.fullName,
-            nickname: newUser.nickname,
-            birth_date: newUser.birthDate,
-            age: newUser.age,
-            avatar_url: newUser.avatarUrl,
-            gender: newUser.gender,
-            preference: newUser.preference,
-            bio: newUser.bio,
-            drink_favorite: newUser.drinkFavorite,
-            instagram: newUser.instagram,
-          },
+          data: metaData,
         },
       });
 
-      if (error) {
+      let userId = data?.user?.id;
+
+      // Si el usuario ya existe en Supabase Auth, iniciar sesión y actualizar metadata
+      if (error && error.message.toLowerCase().includes('already registered')) {
+        const signInRes = await client.auth.signInWithPassword({
+          email: newUser.email,
+          password,
+        });
+        if (!signInRes.error && signInRes.data?.user) {
+          userId = signInRes.data.user.id;
+          await client.auth.updateUser({ data: metaData });
+        } else {
+          return {
+            success: false,
+            message: 'Este correo ya está registrado en Cachengueoo. Ingresá en "Iniciar sesión" con tu contraseña.',
+          };
+        }
+      } else if (error) {
         return { success: false, message: error.message };
       }
 
-      if (data?.user) {
-        // 2. Guardar con upsert en la tabla public.profiles de Supabase
+      if (userId) {
+        // 2. Guardar en public.profiles usando ÚNICAMENTE las columnas existentes + interests empaquetados
+        const validDbRecord = {
+          id: userId,
+          email: newUser.email,
+          full_name: newUser.fullName,
+          nickname: newUser.nickname,
+          birth_date: newUser.birthDate,
+          age: newUser.age,
+          avatar_url: newUser.avatarUrl,
+          gender: newUser.gender,
+          preference: newUser.preference,
+          interests: packProfileInterests(newUser),
+          bio: newUser.bio || '',
+          drink_favorite: newUser.drinkFavorite || 'Fernet con Coca',
+          instagram: newUser.instagram || '',
+          is_verified_in_venue: false,
+          updated_at: new Date().toISOString(),
+        };
+
         const { error: upsertErr } = await client.from('profiles').upsert(
-          {
-            id: data.user.id,
-            email: newUser.email,
-            full_name: newUser.fullName,
-            nickname: newUser.nickname,
-            birth_date: newUser.birthDate,
-            age: newUser.age,
-            avatar_url: newUser.avatarUrl,
-            gender: newUser.gender,
-            preference: newUser.preference,
-            interests: newUser.interests || [],
-            bio: newUser.bio || '',
-            drink_favorite: newUser.drinkFavorite || 'Fernet con Coca',
-            instagram: newUser.instagram || '',
-            is_verified_in_venue: false,
-            updated_at: new Date().toISOString(),
-          },
+          validDbRecord,
           { onConflict: 'id' }
         );
 
@@ -250,9 +296,9 @@ export const authService = {
 
         const registeredProfile: UserProfile = {
           ...newUser,
-          id: data.user.id,
-          isAdmin: false,
-          role: 'user',
+          id: userId,
+          isAdmin: newUser.email.includes('admin'),
+          role: newUser.email.includes('admin') ? 'admin' : 'user',
         };
 
         localStorage.setItem(USER_STORAGE_KEY, JSON.stringify(registeredProfile));
@@ -266,8 +312,8 @@ export const authService = {
     // Guardado local de contingencia
     const localUser: UserProfile = {
       ...newUser,
-      isAdmin: false,
-      role: 'user',
+      isAdmin: newUser.email.includes('admin'),
+      role: newUser.email.includes('admin') ? 'admin' : 'user',
     };
     localStorage.setItem(USER_STORAGE_KEY, JSON.stringify(localUser));
     sessionStorage.setItem(USER_STORAGE_KEY, JSON.stringify(localUser));

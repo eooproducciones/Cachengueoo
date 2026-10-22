@@ -1,6 +1,7 @@
 import { INITIAL_MATCHES, MOCK_MATCH_PROFILES } from '../data/mockData';
 import { ChatMessage, LikeAction, MatchPair, MatchProfile } from '../types';
 import { getSupabaseClient } from './supabaseClient';
+import { unpackProfileInterests } from '../utils/profileMetadata';
 
 const MATCHES_STORAGE_KEY = 'cachengueoo_user_matches';
 const LIKES_STORAGE_KEY = 'cachengueoo_user_likes';
@@ -46,22 +47,25 @@ export const matchService = {
           const mapped: MatchProfile[] = data
             .filter((row) => !dismissed.includes(row.id))
             .map((row) => {
+              const unpacked = unpackProfileInterests(row.interests);
               const avatar =
                 row.avatar_url ||
                 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=500&auto=format&fit=crop&q=80';
               const photos =
                 Array.isArray(row.photos) && row.photos.length > 0
                   ? row.photos
-                  : [avatar];
-              const interests =
-                Array.isArray(row.interests) && row.interests.length > 0
-                  ? row.interests
-                  : ['Cachengue', 'Fiesta'];
-              const drink = row.drink_favorite || 'Fernet con Coca';
+                  : [avatar, ...unpacked.extraPhotos].slice(0, 3);
               const drinks =
-                Array.isArray(row.drinks) && row.drinks.length > 0
-                  ? row.drinks
-                  : [drink];
+                unpacked.drinks.length > 0
+                  ? unpacked.drinks
+                  : row.drink_favorite
+                  ? [row.drink_favorite]
+                  : ['Fernet', 'Skyy'];
+              const musicPreferences =
+                unpacked.musicPreferences.length > 0
+                  ? unpacked.musicPreferences
+                  : ['Reggaeton', 'Cumbia', 'Cuarteto'];
+              const zodiacSign = unpacked.zodiacSign || row.zodiac_sign || undefined;
 
               return {
                 userId: row.id,
@@ -71,13 +75,11 @@ export const matchService = {
                 avatarUrl: avatar,
                 photos,
                 bio: row.bio || '¡Disfrutando de la noche en Cachengueoo!',
-                interests,
-                drinkFavorite: drink,
+                interests: unpacked.plainInterests.length > 0 ? unpacked.plainInterests : drinks,
+                drinkFavorite: row.drink_favorite || drinks.join(' & '),
                 drinks,
-                zodiacSign: row.zodiac_sign || undefined,
-                musicPreferences: Array.isArray(row.music_preferences)
-                  ? row.music_preferences
-                  : ['RKT', 'Cachengue', 'Reggaetón'],
+                zodiacSign,
+                musicPreferences,
                 verifiedInVenue: Boolean(row.is_verified_in_venue ?? true),
                 lastPresenceCheck: row.updated_at || new Date().toISOString(),
                 instagram: row.instagram || undefined,

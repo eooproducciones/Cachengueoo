@@ -38,6 +38,7 @@ import {
   DRINK_OPTIONS,
   PRESET_AVATARS,
 } from '../../constants/profileOptions';
+import { compressImageFile } from '../../utils/imageCompressor';
 
 export type AuthModalView =
   | 'choice'
@@ -183,22 +184,20 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   };
 
   // Subir foto desde el dispositivo en Step 3
-  const handlePhotoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handlePhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
     if (regPhotos.length >= 3) {
       setErrorMessage('Podés colocar hasta 3 fotos como máximo.');
       return;
     }
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      const result = event.target?.result as string;
-      if (result) {
-        setRegPhotos([...regPhotos, result].slice(0, 3));
-        setErrorMessage(null);
-      }
-    };
-    reader.readAsDataURL(file);
+    try {
+      const compressed = await compressImageFile(file);
+      setRegPhotos([...regPhotos, compressed].slice(0, 3));
+      setErrorMessage(null);
+    } catch (err) {
+      console.warn('Error compressing photo:', err);
+    }
     e.target.value = '';
   };
 
@@ -330,9 +329,10 @@ export const AuthModal: React.FC<AuthModalProps> = ({
         authProvider,
       };
 
-      await authService.registerUser(newCacheIdUser, regPassword);
-      setRegisteredUser(newCacheIdUser);
-      onAuthSuccess(newCacheIdUser);
+      const regResult = await authService.registerUser(newCacheIdUser, regPassword);
+      const userToUse = regResult.user || newCacheIdUser;
+      setRegisteredUser(userToUse);
+      onAuthSuccess(userToUse);
 
       // Si ya está dentro del boliche, puede pasar directo; si no, vamos a verificación en Cache
       if (isInsideVenue) {

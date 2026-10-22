@@ -32,10 +32,11 @@ import {
   DRINK_OPTIONS,
   PRESET_AVATARS,
 } from '../../constants/profileOptions';
+import { compressImageFile } from '../../utils/imageCompressor';
 
 interface ProfileViewProps {
   currentUser: UserProfile | null;
-  onUpdateProfile: (updates: Partial<UserProfile>) => void;
+  onUpdateProfile: (updates: Partial<UserProfile>) => Promise<UserProfile | null> | void;
   onSwitchDemoUser: (role: 'user' | 'admin' | 'valen') => void;
   onNavigateTab: (tab: string) => void;
   onOpenAuthModal: (mode: 'login' | 'register' | 'choice') => void;
@@ -243,52 +244,59 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
     setEditPhotos(editPhotos.filter((_, idx) => idx !== indexToRemove));
   };
 
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const [isSaving, setIsSaving] = useState(false);
+
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      const result = event.target?.result as string;
-      if (result) {
-        handleAddPhoto(result);
-      }
-    };
-    reader.readAsDataURL(file);
+    try {
+      const compressed = await compressImageFile(file);
+      handleAddPhoto(compressed);
+    } catch (err) {
+      console.warn('Error compressing photo:', err);
+    }
     e.target.value = '';
   };
 
-  const handleSaveEdit = (e: React.FormEvent) => {
+  const handleSaveEdit = async (e: React.FormEvent) => {
     e.preventDefault();
-    const newAge = calculateAge(editBirthDate);
-    const cleanInsta = editInstagram.trim()
-      ? editInstagram.startsWith('@')
-        ? editInstagram.trim()
-        : `@${editInstagram.trim()}`
-      : undefined;
+    setIsSaving(true);
+    try {
+      const newAge = calculateAge(editBirthDate);
+      const cleanInsta = editInstagram.trim()
+        ? editInstagram.startsWith('@')
+          ? editInstagram.trim()
+          : `@${editInstagram.trim()}`
+        : undefined;
 
-    const formattedDrinks = editDrinks.length > 0 ? editDrinks : ['Fernet', 'Skyy'];
+      const formattedDrinks = editDrinks.length > 0 ? editDrinks : ['Fernet', 'Skyy'];
 
-    const updatedData: Partial<UserProfile> = {
-      fullName: editFullName.trim(),
-      nickname: editNickname.trim(),
-      birthDate: editBirthDate,
-      age: newAge,
-      instagram: cleanInsta,
-      gender: editGender,
-      email: editEmail.trim(),
-      preference: editPreference,
-      zodiacSign: editZodiacSign,
-      musicPreferences: editMusicPreferences,
-      drinks: formattedDrinks,
-      drinkFavorite: formattedDrinks.join(' & '),
-      bio: editBio.trim(),
-      photos: editPhotos,
-      avatarUrl: editPhotos[0] || currentUser.avatarUrl,
-      interests: [...formattedDrinks, ...editMusicPreferences.slice(0, 2)],
-    };
+      const updatedData: Partial<UserProfile> = {
+        fullName: editFullName.trim(),
+        nickname: editNickname.trim(),
+        birthDate: editBirthDate,
+        age: newAge,
+        instagram: cleanInsta,
+        gender: editGender,
+        email: editEmail.trim(),
+        preference: editPreference,
+        zodiacSign: editZodiacSign,
+        musicPreferences: editMusicPreferences,
+        drinks: formattedDrinks,
+        drinkFavorite: formattedDrinks.join(' & '),
+        bio: editBio.trim(),
+        photos: editPhotos,
+        avatarUrl: editPhotos[0] || currentUser.avatarUrl,
+        interests: [...formattedDrinks, ...editMusicPreferences.slice(0, 2)],
+      };
 
-    onUpdateProfile(updatedData);
-    setIsEditing(false);
+      await onUpdateProfile(updatedData);
+      setIsEditing(false);
+    } catch (err) {
+      console.error('Error al guardar perfil:', err);
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   return (
@@ -908,10 +916,11 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                 </button>
                 <button
                   type="submit"
-                  className="flex-1 h-11 rounded-xl bg-[#F39200] hover:bg-[#E08400] text-black font-extrabold text-xs flex items-center justify-center gap-2 cursor-pointer shadow-md shadow-[#F39200]/25 transition-all"
+                  disabled={isSaving}
+                  className="flex-1 h-11 rounded-xl bg-[#F39200] hover:bg-[#E08400] disabled:opacity-50 text-black font-extrabold text-xs flex items-center justify-center gap-2 cursor-pointer shadow-md shadow-[#F39200]/25 transition-all"
                 >
                   <Check className="w-4 h-4 stroke-[3]" />
-                  <span>Guardar Cambios</span>
+                  <span>{isSaving ? 'Guardando en Supabase...' : 'Guardar Cambios'}</span>
                 </button>
               </div>
             </form>
