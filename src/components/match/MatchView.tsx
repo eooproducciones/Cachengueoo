@@ -72,7 +72,14 @@ export const MatchView: React.FC<MatchViewProps> = ({
   useEffect(() => {
     setProfiles(matchService.getAvailableProfiles());
     setMatches(matchService.getMatches());
-  }, [matchSubTab]);
+
+    // Cargar perfiles reales registrados en Supabase
+    matchService.fetchAvailableProfiles(currentUser?.id).then((realProfiles) => {
+      if (realProfiles && realProfiles.length > 0) {
+        setProfiles(realProfiles);
+      }
+    });
+  }, [matchSubTab, currentUser?.id]);
 
   // Al pasar a otro perfil, reiniciar a la primera foto y replegar la notita
   useEffect(() => {

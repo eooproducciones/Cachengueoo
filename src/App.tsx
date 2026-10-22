@@ -157,13 +157,6 @@ export default function App() {
       return;
     }
 
-    // Si ya está comprobado físicamente en una locación, entra directo sin demoras
-    if (isInside) {
-      setIsAdminView(false);
-      setCurrentTab('match_pista');
-      return;
-    }
-
     showToast('Comprobando tu ubicación por GPS...');
     try {
       const gpsResult = await presenceService.checkRealGeolocation();
@@ -185,6 +178,14 @@ export default function App() {
         setIsAdminView(false);
         setCurrentTab('match_pista');
       } else {
+        const current = presenceService.getStoredPresence();
+        presenceService.saveStoredPresence({
+          ...current,
+          isInside: false,
+          gpsVerified: false,
+          gpsResult,
+        });
+        window.dispatchEvent(new Event('storage'));
         showToast(
           gpsResult.message ||
             'Estás fuera del radio de las sedes configuradas. Podés validar mediante QR en puerta.'
@@ -193,6 +194,13 @@ export default function App() {
         setIsAuthModalOpen(true);
       }
     } catch (err: unknown) {
+      const current = presenceService.getStoredPresence();
+      presenceService.saveStoredPresence({
+        ...current,
+        isInside: false,
+        gpsVerified: false,
+      });
+      window.dispatchEvent(new Event('storage'));
       const msg = err instanceof Error ? err.message : 'Error al verificar ubicación por GPS';
       showToast(msg);
       setAuthModalMode('verify');
@@ -408,16 +416,19 @@ export default function App() {
         initialMode={authModalMode}
         isInsideVenue={isInside}
         onCheckGps={async () => {
-          await checkGpsPresence();
-          showToast('Ubicación comprobada');
+          await handleAutoGpsAndOpenMatch();
         }}
         onOpenQrScanner={() => {
           setIsQrScannerOpen(true);
         }}
         onProceedToMatch={() => {
-          simulatePresence(true, 'GPS');
-          setCurrentTab('match_pista');
-          showToast('🔥 ¡Acceso desbloqueado a Cachengueoo Match!');
+          const current = presenceService.getStoredPresence();
+          if (current.isInside) {
+            setCurrentTab('match_pista');
+            showToast('🔥 ¡Acceso a Cachengueoo Match!');
+          } else {
+            handleAutoGpsAndOpenMatch();
+          }
         }}
       />
 

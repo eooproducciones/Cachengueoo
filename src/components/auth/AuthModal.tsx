@@ -1290,56 +1290,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                 <UserPlus className="w-3.5 h-3.5 text-[#F39200]" />
                 ¿No tenés cuenta? Crear cuenta
               </button>
-
-              {/* Cuentas de prueba preconfiguradas */}
-              <div className="pt-3 border-t border-zinc-800/80 space-y-2">
-                <span className="text-[10px] uppercase font-bold text-zinc-500 block text-center">
-                  Cuentas de prueba configuradas:
-                </span>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-left">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setLoginEmail('usuario@cachengueoo.com');
-                      setLoginPassword('river??2??');
-                      setErrorMessage(null);
-                    }}
-                    className="p-2.5 rounded-xl bg-zinc-900 hover:bg-zinc-800/80 border border-zinc-800 hover:border-amber-400/50 transition-all cursor-pointer group"
-                  >
-                    <div className="flex items-center gap-1.5 font-bold text-white text-xs mb-0.5">
-                      <User className="w-3.5 h-3.5 text-[#F39200]" />
-                      <span>1. Usuario</span>
-                    </div>
-                    <span className="text-[11px] font-mono text-zinc-400 block truncate">
-                      usuario@cachengueoo.com
-                    </span>
-                    <span className="text-[10px] text-zinc-500 block">
-                      Clave: <strong className="text-amber-400 font-mono">river??2??</strong>
-                    </span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setLoginEmail('admin@cachengueoo.com');
-                      setLoginPassword('river??2??');
-                      setErrorMessage(null);
-                    }}
-                    className="p-2.5 rounded-xl bg-zinc-900 hover:bg-zinc-800/80 border border-zinc-800 hover:border-amber-400/50 transition-all cursor-pointer group"
-                  >
-                    <div className="flex items-center gap-1.5 font-bold text-white text-xs mb-0.5">
-                      <ShieldCheck className="w-3.5 h-3.5 text-amber-400" />
-                      <span>2. Administrador</span>
-                    </div>
-                    <span className="text-[11px] font-mono text-zinc-400 block truncate">
-                      admin@cachengueoo.com
-                    </span>
-                    <span className="text-[10px] text-zinc-500 block">
-                      Clave: <strong className="text-amber-400 font-mono">river??2??</strong> (Directo a Panel)
-                    </span>
-                  </button>
-                </div>
-              </div>
             </div>
           </form>
         )}
@@ -1451,9 +1401,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                   if (onCheckGps) {
                     await onCheckGps();
                   }
-                  if (onProceedToMatch) {
-                    onProceedToMatch();
-                  }
                   onClose();
                 }}
                 className="p-4 rounded-2xl bg-zinc-900/90 hover:bg-zinc-800 border border-zinc-800 hover:border-[#F39200] cursor-pointer transition-all flex flex-col justify-between group shadow-lg"
@@ -1499,20 +1446,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                 <span className="text-[11px] text-zinc-500 group-hover:text-zinc-300">
                   Escaneá el código QR del boliche con tu cámara.
                 </span>
-              </button>
-            </div>
-
-            {/* Acceso demo / bypass para testeo fluido */}
-            <div className="pt-2">
-              <button
-                type="button"
-                onClick={() => {
-                  if (onProceedToMatch) onProceedToMatch();
-                  onClose();
-                }}
-                className="text-[11px] text-zinc-400 hover:text-white underline cursor-pointer"
-              >
-                Simular que ya estoy en Cache (Entrar a Match)
               </button>
             </div>
           </div>

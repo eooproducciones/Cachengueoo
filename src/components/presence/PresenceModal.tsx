@@ -184,60 +184,9 @@ export const PresenceModal: React.FC<PresenceModalProps> = ({
               Escanear QR de Presencia
             </button>
           </div>
-
-          {/* Simulation & Testing Panel for Dev / Sandbox Preview */}
-          <div className="pt-2 border-t border-zinc-800/80">
-            <button
-              onClick={() => setShowSimControls(!showSimControls)}
-              className="flex items-center justify-between w-full text-xs font-semibold text-zinc-400 hover:text-zinc-200 cursor-pointer py-1"
-            >
-              <span className="flex items-center gap-1.5 text-zinc-300">
-                <Sparkles className="w-3.5 h-3.5 text-[#F39200]" />
-                Modo de Prueba / Sandbox
-              </span>
-              <span className="text-[10px] text-zinc-400 uppercase tracking-wider">
-                {showSimControls ? 'Ocultar' : 'Mostrar'}
-              </span>
-            </button>
-
-            {showSimControls && (
-              <div className="mt-3 p-3 rounded-xl bg-zinc-950/70 border border-zinc-800/80 space-y-2">
-                <p className="text-[11px] text-zinc-400 leading-tight">
-                  Herramienta de testing para probar la plataforma fuera de Mendoza:
-                </p>
-                <div className="grid grid-cols-2 gap-2 pt-1">
-                  <button
-                    onClick={() => {
-                      onSimulatePresence(true, 'GPS');
-                      onClose();
-                    }}
-                    className="h-9 rounded-lg bg-emerald-950/40 border border-emerald-600/50 text-emerald-400 text-xs font-semibold hover:bg-emerald-900/40 transition-colors cursor-pointer"
-                  >
-                    Simular ADENTRO 🔥
-                  </button>
-                  <button
-                    onClick={() => {
-                      onSimulatePresence(false);
-                      onClose();
-                    }}
-                    className="h-9 rounded-lg bg-zinc-900 border border-zinc-700 text-zinc-300 text-xs font-semibold hover:bg-zinc-800 transition-colors cursor-pointer"
-                  >
-                    Simular AFUERA 📍
-                  </button>
-                </div>
-                {presence.isInside && (
-                  <button
-                    onClick={onResetPresence}
-                    className="w-full text-center text-[10px] text-red-400 hover:underline pt-1 cursor-pointer block"
-                  >
-                    Reiniciar y salir del boliche
-                  </button>
-                )}
-              </div>
-            )}
-          </div>
         </div>
       </div>
     </div>
   );
 };
+

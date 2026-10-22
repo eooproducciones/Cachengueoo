@@ -85,47 +85,6 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
             </button>
           </div>
 
-          {/* Cuentas de prueba preconfiguradas */}
-          <div className="pt-4 border-t border-zinc-800/80 space-y-2 text-left">
-            <span className="text-[10px] uppercase font-bold text-zinc-500 block text-center">
-              Cuentas de prueba:
-            </span>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
-              <button
-                type="button"
-                onClick={() => onOpenAuthModal('login')}
-                className="p-3 rounded-xl bg-zinc-900 border border-zinc-800 hover:border-amber-400/50 text-left transition-colors"
-              >
-                <div className="font-bold text-white flex items-center gap-1.5">
-                  <User className="w-3.5 h-3.5 text-[#F39200]" />
-                  <span>Usuario</span>
-                </div>
-                <span className="text-[11px] text-zinc-400 block font-mono">
-                  usuario@cachengueoo.com
-                </span>
-                <span className="text-[10px] text-zinc-500 block">
-                  Clave: <strong className="text-zinc-300 font-mono">river??2??</strong>
-                </span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => onOpenAuthModal('login')}
-                className="p-3 rounded-xl bg-zinc-900 border border-zinc-800 hover:border-amber-400/50 text-left transition-colors"
-              >
-                <div className="font-bold text-white flex items-center gap-1.5">
-                  <ShieldCheck className="w-3.5 h-3.5 text-amber-400" />
-                  <span>Administrador</span>
-                </div>
-                <span className="text-[11px] text-zinc-400 block font-mono">
-                  admin@cachengueoo.com
-                </span>
-                <span className="text-[10px] text-zinc-500 block">
-                  Clave: <strong className="text-zinc-300 font-mono">river??2??</strong>
-                </span>
-              </button>
-            </div>
-          </div>
         </div>
       </div>
     );

@@ -1,5 +1,6 @@
 import { INITIAL_MATCHES, MOCK_MATCH_PROFILES } from '../data/mockData';
 import { ChatMessage, LikeAction, MatchPair, MatchProfile } from '../types';
+import { getSupabaseClient } from './supabaseClient';
 
 const MATCHES_STORAGE_KEY = 'cachengueoo_user_matches';
 const LIKES_STORAGE_KEY = 'cachengueoo_user_likes';
@@ -70,8 +71,69 @@ export const matchService = {
 
   getAvailableProfiles(): MatchProfile[] {
     const dismissed = this.getDismissedProfileIds();
-    // En una aplicación real con Supabase:
-    // SELECT * FROM profiles WHERE is_verified_in_venue = true AND id NOT IN (dismissed)
+    return MOCK_MATCH_PROFILES.filter((p) => !dismissed.includes(p.userId));
+  },
+
+  async fetchAvailableProfiles(currentUserId?: string): Promise<MatchProfile[]> {
+    const dismissed = this.getDismissedProfileIds();
+    const client = getSupabaseClient();
+    if (client) {
+      try {
+        let query = client.from('profiles').select('*');
+        if (currentUserId) {
+          query = query.neq('id', currentUserId);
+        }
+        const { data, error } = await query;
+        if (!error && data && data.length > 0) {
+          const mapped: MatchProfile[] = data
+            .filter((row) => !dismissed.includes(row.id))
+            .map((row) => {
+              const avatar =
+                row.avatar_url ||
+                'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=500&auto=format&fit=crop&q=80';
+              const photos =
+                Array.isArray(row.photos) && row.photos.length > 0
+                  ? row.photos
+                  : [avatar];
+              const interests =
+                Array.isArray(row.interests) && row.interests.length > 0
+                  ? row.interests
+                  : ['Cachengue', 'Fiesta'];
+              const drink = row.drink_favorite || 'Fernet con Coca';
+              const drinks =
+                Array.isArray(row.drinks) && row.drinks.length > 0
+                  ? row.drinks
+                  : [drink];
+
+              return {
+                userId: row.id,
+                fullName: row.full_name || row.nickname || 'Cachenguero',
+                nickname: row.nickname || row.full_name || 'Cachenguero',
+                age: Number(row.age) || 23,
+                avatarUrl: avatar,
+                photos,
+                bio: row.bio || '¡Disfrutando de la noche en Cachengueoo!',
+                interests,
+                drinkFavorite: drink,
+                drinks,
+                zodiacSign: row.zodiac_sign || undefined,
+                musicPreferences: Array.isArray(row.music_preferences)
+                  ? row.music_preferences
+                  : ['RKT', 'Cachengue', 'Reggaetón'],
+                verifiedInVenue: Boolean(row.is_verified_in_venue ?? true),
+                lastPresenceCheck: row.updated_at || new Date().toISOString(),
+                instagram: row.instagram || undefined,
+                gender: row.gender || undefined,
+              };
+            });
+          if (mapped.length > 0) {
+            return mapped;
+          }
+        }
+      } catch (e) {
+        console.warn('Error fetching profiles from Supabase:', e);
+      }
+    }
     return MOCK_MATCH_PROFILES.filter((p) => !dismissed.includes(p.userId));
   },
 

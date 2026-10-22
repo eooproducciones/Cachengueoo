@@ -101,7 +101,29 @@ export const authService = {
     // If Supabase is connected:
     const client = getSupabaseClient();
     if (client) {
-      client.from('profiles').update(profile).eq('id', current.id).then();
+      const dbUpdates: Record<string, unknown> = {
+        updated_at: new Date().toISOString(),
+      };
+      if (profile.fullName !== undefined) dbUpdates.full_name = profile.fullName;
+      if (profile.nickname !== undefined) dbUpdates.nickname = profile.nickname;
+      if (profile.birthDate !== undefined) dbUpdates.birth_date = profile.birthDate;
+      if (profile.age !== undefined) dbUpdates.age = profile.age;
+      if (profile.avatarUrl !== undefined) dbUpdates.avatar_url = profile.avatarUrl;
+      if (profile.photos !== undefined) dbUpdates.photos = profile.photos;
+      if (profile.gender !== undefined) dbUpdates.gender = profile.gender;
+      if (profile.preference !== undefined) dbUpdates.preference = profile.preference;
+      if (profile.interests !== undefined) dbUpdates.interests = profile.interests;
+      if (profile.bio !== undefined) dbUpdates.bio = profile.bio;
+      if (profile.drinkFavorite !== undefined) dbUpdates.drink_favorite = profile.drinkFavorite;
+      if (profile.instagram !== undefined) dbUpdates.instagram = profile.instagram;
+
+      client
+        .from('profiles')
+        .update(dbUpdates)
+        .eq('id', current.id)
+        .then(({ error }) => {
+          if (error) console.warn('Supabase profile update notice:', error.message);
+        });
     }
 
     notifyAuthChange();
@@ -115,29 +137,8 @@ export const authService = {
     const cleanEmail = email.trim().toLowerCase();
     const cleanPassword = password.trim();
 
-    // 1. Cuenta de Usuario fija: usuario@cachengueoo.com o usuario@cachuengueoo.com / river??2??
-    const isUserAccount =
-      cleanEmail === 'usuario@cachengueoo.com' || cleanEmail === 'usuario@cachuengueoo.com';
-
-    if (isUserAccount) {
-      if (cleanPassword === 'river??2??') {
-        const u = { ...DEFAULT_EXAMPLE_USER, email: cleanEmail };
-        localStorage.setItem(USER_STORAGE_KEY, JSON.stringify(u));
-        sessionStorage.setItem(USER_STORAGE_KEY, JSON.stringify(u));
-        notifyAuthChange();
-        return { success: true, user: u };
-      }
-      return {
-        success: false,
-        message: 'Contraseña incorrecta para cuenta de usuario. (Clave: river??2??)',
-      };
-    }
-
-    // 2. Cuenta de Administrador fija: admin@cachengueoo.com o admin@cachuengueoo.com / river??2??
-    const isAdminAccount =
-      cleanEmail === 'admin@cachengueoo.com' || cleanEmail === 'admin@cachuengueoo.com';
-
-    if (isAdminAccount) {
+    // 1. Acceso de administrador de emergencia Cachengueoo
+    if (cleanEmail === 'admin@cachengueoo.com' || cleanEmail === 'admin@cachuengueoo.com') {
       if (cleanPassword === 'river??2??') {
         const u = { ...DEFAULT_ADMIN_USER, email: cleanEmail };
         localStorage.setItem(USER_STORAGE_KEY, JSON.stringify(u));
@@ -147,11 +148,11 @@ export const authService = {
       }
       return {
         success: false,
-        message: 'Contraseña incorrecta para cuenta de administrador. (Clave: river??2??)',
+        message: 'Contraseña incorrecta para cuenta de administrador.',
       };
     }
 
-    // Supabase Auth (si está activo)
+    // 2. Supabase Auth REAL en producción
     const client = getSupabaseClient();
     if (client) {
       const { data, error } = await client.auth.signInWithPassword({
@@ -159,127 +160,149 @@ export const authService = {
         password: cleanPassword,
       });
 
-      if (!error && data.user) {
+      if (error) {
+        let errMessage = error.message;
+        if (error.message.includes('Invalid login credentials')) {
+          errMessage = 'Email o contraseña incorrectos en Cachengueoo.';
+        } else if (error.message.includes('Email not confirmed')) {
+          errMessage = 'Debés confirmar tu correo para ingresar (o desactivar "Confirm email" en Supabase Auth Settings).';
+        }
+        return { success: false, message: errMessage };
+      }
+
+      if (data?.user) {
+        // Consultar el perfil real desde la tabla public.profiles de Supabase
         const { data: profileData } = await client
           .from('profiles')
           .select('*')
           .eq('id', data.user.id)
-          .single();
+          .maybeSingle();
 
-        if (profileData) {
-          const u: UserProfile = {
-            id: profileData.id,
-            email: profileData.email,
-            fullName: profileData.full_name,
-            nickname: profileData.nickname,
-            birthDate: profileData.birth_date,
-            age: profileData.age,
-            avatarUrl: profileData.avatar_url,
-            gender: profileData.gender,
-            preference: profileData.preference,
-            interests: profileData.interests || [],
-            bio: profileData.bio || '',
-            drinkFavorite: profileData.drink_favorite || 'Fernet & Skyy',
-            drinks: profileData.drinks || ['Fernet', 'Skyy'],
-            createdAt: profileData.created_at,
-            isAdmin: cleanEmail.includes('admin'),
-            role: cleanEmail.includes('admin') ? 'admin' : 'user',
-          };
-          localStorage.setItem(USER_STORAGE_KEY, JSON.stringify(u));
-          sessionStorage.setItem(USER_STORAGE_KEY, JSON.stringify(u));
-          notifyAuthChange();
-          return { success: true, user: u };
-        }
+        const u: UserProfile = {
+          id: data.user.id,
+          email: data.user.email || cleanEmail,
+          fullName: profileData?.full_name || data.user.user_metadata?.full_name || cleanEmail.split('@')[0],
+          nickname: profileData?.nickname || data.user.user_metadata?.nickname || cleanEmail.split('@')[0],
+          birthDate: profileData?.birth_date || data.user.user_metadata?.birth_date || '2001-01-01',
+          age: profileData?.age || data.user.user_metadata?.age || 23,
+          avatarUrl:
+            profileData?.avatar_url ||
+            data.user.user_metadata?.avatar_url ||
+            'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=500&auto=format&fit=crop&q=80',
+          photos: profileData?.avatar_url
+            ? [profileData.avatar_url]
+            : [
+                'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=500&auto=format&fit=crop&q=80',
+              ],
+          gender: profileData?.gender || data.user.user_metadata?.gender || 'otro',
+          preference: profileData?.preference || data.user.user_metadata?.preference || 'todos',
+          interests: profileData?.interests || data.user.user_metadata?.interests || ['Fernet', 'Skyy'],
+          bio: profileData?.bio || data.user.user_metadata?.bio || 'Listo para romper la pista en Cachengueoo.',
+          drinkFavorite: profileData?.drink_favorite || 'Fernet con Coca',
+          drinks: profileData?.interests && profileData.interests.length > 0 ? profileData.interests : ['Fernet', 'Skyy'],
+          instagram: profileData?.instagram || data.user.user_metadata?.instagram || undefined,
+          createdAt: profileData?.created_at || data.user.created_at || new Date().toISOString(),
+          isAdmin: cleanEmail.includes('admin'),
+          role: cleanEmail.includes('admin') ? 'admin' : 'user',
+        };
+
+        localStorage.setItem(USER_STORAGE_KEY, JSON.stringify(u));
+        sessionStorage.setItem(USER_STORAGE_KEY, JSON.stringify(u));
+        notifyAuthChange();
+        return { success: true, user: u };
       }
-    }
-
-    // Buscar en usuarios locales registrados previamente
-    const all = this.getAllUsers();
-    const found = all.find((u) => u.email.toLowerCase() === cleanEmail);
-
-    if (found) {
-      if (found.password && found.password !== cleanPassword) {
-        return { success: false, message: 'Contraseña incorrecta' };
-      }
-      localStorage.setItem(USER_STORAGE_KEY, JSON.stringify(found));
-      sessionStorage.setItem(USER_STORAGE_KEY, JSON.stringify(found));
-      notifyAuthChange();
-      return { success: true, user: found };
-    }
-
-    // Ingreso flexible de prueba si la contraseña coincide con river??2??
-    if (cleanPassword === 'river??2??') {
-      const isAdmin = cleanEmail.includes('admin');
-      const fallbackUser: UserProfile = {
-        ...(isAdmin ? DEFAULT_ADMIN_USER : DEFAULT_EXAMPLE_USER),
-        id: `usr_${Date.now()}`,
-        email: cleanEmail,
-        fullName: cleanEmail.split('@')[0],
-        nickname: cleanEmail.split('@')[0],
-        isAdmin,
-        role: isAdmin ? 'admin' : 'user',
-      };
-      localStorage.setItem(USER_STORAGE_KEY, JSON.stringify(fallbackUser));
-      sessionStorage.setItem(USER_STORAGE_KEY, JSON.stringify(fallbackUser));
-      notifyAuthChange();
-      return { success: true, user: fallbackUser };
     }
 
     return {
       success: false,
-      message: 'Usuario no encontrado. Podés registrarte o usar usuario@cachengueoo.com o admin@cachengueoo.com con river??2??',
+      message: 'No se encontró el usuario. Por favor creá tu Cache ID o corroborá tu email y contraseña.',
     };
   },
 
   async registerUser(
     newUser: UserProfile,
     password?: string
-  ): Promise<{ success: boolean; message?: string }> {
+  ): Promise<{ success: boolean; message?: string; user?: UserProfile }> {
     const client = getSupabaseClient();
 
     if (client && password) {
+      // 1. Crear el usuario en Supabase Auth enviando toda su metadata
       const { data, error } = await client.auth.signUp({
         email: newUser.email,
         password,
+        options: {
+          data: {
+            full_name: newUser.fullName,
+            nickname: newUser.nickname,
+            birth_date: newUser.birthDate,
+            age: newUser.age,
+            avatar_url: newUser.avatarUrl,
+            gender: newUser.gender,
+            preference: newUser.preference,
+            bio: newUser.bio,
+            drink_favorite: newUser.drinkFavorite,
+            instagram: newUser.instagram,
+          },
+        },
       });
 
       if (error) {
         return { success: false, message: error.message };
       }
 
-      if (data.user) {
-        await client.from('profiles').insert({
+      if (data?.user) {
+        // 2. Guardar con upsert en la tabla public.profiles de Supabase
+        const { error: upsertErr } = await client.from('profiles').upsert(
+          {
+            id: data.user.id,
+            email: newUser.email,
+            full_name: newUser.fullName,
+            nickname: newUser.nickname,
+            birth_date: newUser.birthDate,
+            age: newUser.age,
+            avatar_url: newUser.avatarUrl,
+            gender: newUser.gender,
+            preference: newUser.preference,
+            interests: newUser.interests || [],
+            bio: newUser.bio || '',
+            drink_favorite: newUser.drinkFavorite || 'Fernet con Coca',
+            instagram: newUser.instagram || '',
+            is_verified_in_venue: false,
+            updated_at: new Date().toISOString(),
+          },
+          { onConflict: 'id' }
+        );
+
+        if (upsertErr) {
+          console.warn('Advertencia al sincronizar perfil en Supabase:', upsertErr.message);
+        }
+
+        const registeredProfile: UserProfile = {
+          ...newUser,
           id: data.user.id,
-          email: newUser.email,
-          full_name: newUser.fullName,
-          nickname: newUser.nickname,
-          birth_date: newUser.birthDate,
-          age: newUser.age,
-          avatar_url: newUser.avatarUrl,
-          gender: newUser.gender,
-          preference: newUser.preference,
-          interests: newUser.interests,
-          bio: newUser.bio,
-          drink_favorite: newUser.drinkFavorite,
-        });
+          isAdmin: false,
+          role: 'user',
+        };
+
+        localStorage.setItem(USER_STORAGE_KEY, JSON.stringify(registeredProfile));
+        sessionStorage.setItem(USER_STORAGE_KEY, JSON.stringify(registeredProfile));
+        notifyAuthChange();
+
+        return { success: true, user: registeredProfile };
       }
     }
 
-    // Save locally
-    const userToSave: UserProfile = {
+    // Guardado local de contingencia
+    const localUser: UserProfile = {
       ...newUser,
-      password,
       isAdmin: false,
       role: 'user',
     };
-
-    localStorage.setItem(USER_STORAGE_KEY, JSON.stringify(userToSave));
-    sessionStorage.setItem(USER_STORAGE_KEY, JSON.stringify(userToSave));
-    const all = this.getAllUsers();
-    localStorage.setItem(USERS_LIST_STORAGE_KEY, JSON.stringify([...all, userToSave]));
+    localStorage.setItem(USER_STORAGE_KEY, JSON.stringify(localUser));
+    sessionStorage.setItem(USER_STORAGE_KEY, JSON.stringify(localUser));
     notifyAuthChange();
 
-    return { success: true };
+    return { success: true, user: localUser };
   },
 
   async requestPasswordReset(email: string): Promise<{ success: boolean; message: string }> {
