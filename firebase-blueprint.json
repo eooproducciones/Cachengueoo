@@ -1,0 +1,122 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "User profile with display information, preferences and night verification",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "email": { "type": "string", "format": "email" },
+        "fullName": { "type": "string", "maxLength": 100 },
+        "nickname": { "type": "string", "maxLength": 50 },
+        "birthDate": { "type": "string" },
+        "age": { "type": "integer" },
+        "avatarUrl": { "type": "string" },
+        "gender": { "type": "string", "enum": ["hombre", "mujer", "no-binario", "otro"] },
+        "preference": { "type": "string", "enum": ["hombres", "mujeres", "todos"] },
+        "interests": { "type": "array" },
+        "bio": { "type": "string", "maxLength": 500 },
+        "drinkFavorite": { "type": "string", "maxLength": 100 },
+        "instagram": { "type": "string", "maxLength": 50 },
+        "isVerifiedInVenue": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "email", "fullName", "nickname"]
+    },
+    "ClubEvent": {
+      "title": "ClubEvent",
+      "description": "Party event definition for Cachengueoo",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string", "maxLength": 150 },
+        "subtitle": { "type": "string", "maxLength": 200 },
+        "dateStr": { "type": "string" },
+        "dateIso": { "type": "string" },
+        "timeRange": { "type": "string" },
+        "locationName": { "type": "string" },
+        "description": { "type": "string" },
+        "flyerUrl": { "type": "string" },
+        "isActiveTonight": { "type": "boolean" },
+        "validationMode": { "type": "string", "enum": ["GPS_OR_QR", "GPS_ONLY", "QR_ONLY", "GPS_AND_QR"] },
+        "djs": { "type": "array" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "title", "dateIso"]
+    },
+    "VenueLocation": {
+      "title": "VenueLocation",
+      "description": "Geographical perimeter for GPS validation",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string", "maxLength": 120 },
+        "address": { "type": "string", "maxLength": 200 },
+        "city": { "type": "string" },
+        "province": { "type": "string" },
+        "country": { "type": "string" },
+        "latitude": { "type": "number" },
+        "longitude": { "type": "number" },
+        "radiusMeters": { "type": "integer" },
+        "isActive": { "type": "boolean" }
+      },
+      "required": ["id", "name", "latitude", "longitude", "radiusMeters"]
+    },
+    "NightNote": {
+      "title": "NightNote",
+      "description": "Ephemeral user note created during a party night",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "eventId": { "type": "string" },
+        "text": { "type": "string", "maxLength": 140 },
+        "hearts": { "type": "integer" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "expiresAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "userId", "eventId", "text", "expiresAt"]
+    },
+    "NightStory": {
+      "title": "NightStory",
+      "description": "Ephemeral camera photo/video story for Cachengueoo",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "userName": { "type": "string", "maxLength": 100 },
+        "userAvatar": { "type": "string" },
+        "mediaUrl": { "type": "string" },
+        "mediaType": { "type": "string", "enum": ["image", "video"] },
+        "caption": { "type": "string", "maxLength": 200 },
+        "hearts": { "type": "integer" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "expiresAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "userId", "userName", "mediaUrl", "mediaType"]
+    }
+  },
+  "firestore": {
+    "/profiles/{userId}": {
+      "schema": "UserProfile",
+      "description": "Collection of user profiles"
+    },
+    "/events/{eventId}": {
+      "schema": "ClubEvent",
+      "description": "Party events and schedules"
+    },
+    "/venue_locations/{locationId}": {
+      "schema": "VenueLocation",
+      "description": "Geographical points and geofences for GPS entry validation"
+    },
+    "/night_notes/{noteId}": {
+      "schema": "NightNote",
+      "description": "Live party notes posted by attendees"
+    },
+    "/night_stories/{storyId}": {
+      "schema": "NightStory",
+      "description": "Ephemeral instant visual stories posted by attendees"
+    }
+  }
+}

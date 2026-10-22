@@ -1,0 +1,78 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Helper functions
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    // Default deny catch-all
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Test connection document
+    match /test/connection {
+      allow read: if true;
+    }
+
+    // 1. User Profiles
+    match /profiles/{userId} {
+      allow read: if true;
+      allow create: if isOwner(userId) && incoming().id == userId;
+      allow update: if isOwner(userId) && incoming().id == existing().id;
+      allow delete: if isOwner(userId);
+    }
+
+    // 2. Events (Public view, staff write)
+    match /events/{eventId} {
+      allow read: if true;
+      allow write: if isSignedIn();
+    }
+
+    // 3. Venue Locations (Public view, staff write)
+    match /venue_locations/{locationId} {
+      allow read: if true;
+      allow write: if isSignedIn();
+    }
+
+    // 4. Night Notes
+    match /night_notes/{noteId} {
+      allow read: if true;
+      allow create: if isSignedIn() && incoming().userId == request.auth.uid;
+      allow update: if isSignedIn() && (
+        (incoming().userId == existing().userId && incoming().diff(existing()).affectedKeys().hasOnly(['hearts'])) ||
+        (incoming().userId == request.auth.uid)
+      );
+      allow delete: if isSignedIn() && existing().userId == request.auth.uid;
+    }
+
+    // 5. Night Stories
+    match /night_stories/{storyId} {
+      allow read: if true;
+      allow create: if isSignedIn() && incoming().userId == request.auth.uid;
+      allow update: if isSignedIn() && (
+        (incoming().userId == existing().userId && incoming().diff(existing()).affectedKeys().hasOnly(['hearts'])) ||
+        (incoming().userId == request.auth.uid)
+      );
+      allow delete: if isSignedIn() && existing().userId == request.auth.uid;
+    }
+  }
+}
