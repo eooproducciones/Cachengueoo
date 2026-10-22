@@ -20,6 +20,8 @@ import { benefitService } from './services/benefitService';
 import { matchService } from './services/matchService';
 import { UserProfile } from './types';
 import { authService, DEFAULT_EXAMPLE_USER } from './services/authService';
+import { presenceService, PresenceStatus } from './services/presenceService';
+import { syncVenueLocationsFromSupabase } from './config/venue';
 import { CheckCircle2 } from 'lucide-react';
 
 export default function App() {
@@ -56,6 +58,11 @@ export default function App() {
     document.documentElement.scrollTo({ top: 0, left: 0, behavior: 'instant' });
     document.body.scrollTo({ top: 0, left: 0, behavior: 'instant' });
   }, [currentTab]);
+
+  // Sincronizar locaciones activas desde Supabase al iniciar la app
+  useEffect(() => {
+    syncVenueLocationsFromSupabase().catch(() => {});
+  }, []);
 
   // Escuchar cambios de hash para acceder al panel administrativo únicamente mediante URL (#admin)
   useEffect(() => {
@@ -129,8 +136,7 @@ export default function App() {
         return;
       }
       if (!isInside) {
-        setAuthModalMode('verify');
-        setIsAuthModalOpen(true);
+        handleAutoGpsAndOpenMatch();
         return;
       }
       setIsAdminView(false);
@@ -142,19 +148,60 @@ export default function App() {
     setCurrentTab(tab);
   };
 
-  const handleActivateMatch = () => {
+  // Activación automática de Match por GPS
+  const handleAutoGpsAndOpenMatch = async () => {
     const activeUser = user || authService.getCurrentUser();
     if (!activeUser) {
       setAuthModalMode('choice');
       setIsAuthModalOpen(true);
       return;
     }
-    if (!isInside) {
-      setAuthModalMode('verify');
-      setIsAuthModalOpen(true);
+
+    // Si ya está comprobado físicamente en una locación, entra directo sin demoras
+    if (isInside) {
+      setIsAdminView(false);
+      setCurrentTab('match_pista');
       return;
     }
-    setCurrentTab('match_pista');
+
+    showToast('Comprobando tu ubicación por GPS...');
+    try {
+      const gpsResult = await presenceService.checkRealGeolocation();
+      if (gpsResult.isInside) {
+        const current = presenceService.getStoredPresence();
+        const updated: PresenceStatus = {
+          ...current,
+          isInside: true,
+          methodUsed: 'GPS',
+          gpsResult,
+          gpsVerified: true,
+          validatedAt: new Date().toISOString(),
+        };
+        presenceService.saveStoredPresence(updated);
+        window.dispatchEvent(new Event('storage'));
+        showToast(
+          `¡Estás en ${gpsResult.matchedLocationName || 'Cachengueoo'}! Cachengueoo Match activado automáticamente 🔥`
+        );
+        setIsAdminView(false);
+        setCurrentTab('match_pista');
+      } else {
+        showToast(
+          gpsResult.message ||
+            'Estás fuera del radio de las sedes configuradas. Podés validar mediante QR en puerta.'
+        );
+        setAuthModalMode('verify');
+        setIsAuthModalOpen(true);
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Error al verificar ubicación por GPS';
+      showToast(msg);
+      setAuthModalMode('verify');
+      setIsAuthModalOpen(true);
+    }
+  };
+
+  const handleActivateMatch = () => {
+    handleAutoGpsAndOpenMatch();
   };
 
   // Modo Match activo: al entrar a match, el menú inferior cambia a "Menú Match"

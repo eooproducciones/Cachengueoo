@@ -65,6 +65,9 @@ export const presenceService = {
   saveStoredPresence(status: PresenceStatus): void {
     try {
       localStorage.setItem(PRESENCE_CACHE_KEY, JSON.stringify(status));
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('cachengueoo_presence_change', { detail: status }));
+      }
     } catch (e) {
       console.error('Error saving presence state', e);
     }
@@ -75,6 +78,9 @@ export const presenceService = {
    */
   clearPresence(): void {
     localStorage.removeItem(PRESENCE_CACHE_KEY);
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('cachengueoo_presence_change', { detail: { isInside: false } }));
+    }
   },
 
   /**

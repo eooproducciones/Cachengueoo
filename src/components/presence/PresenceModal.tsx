@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { X, MapPin, QrCode, Navigation, Sparkles, RefreshCw, AlertTriangle } from 'lucide-react';
 import { PresenceStatus } from '../../services/presenceService';
 import { VenueConfig, ValidationMode } from '../../types';
@@ -31,6 +31,13 @@ export const PresenceModal: React.FC<PresenceModalProps> = ({
   onResetPresence,
 }) => {
   const [showSimControls, setShowSimControls] = useState(true);
+
+  // Al abrir el modal, comprobar automáticamente por GPS
+  useEffect(() => {
+    if (isOpen && !presence.isInside && !isChecking) {
+      onCheckGps();
+    }
+  }, [isOpen]);
 
   if (!isOpen) return null;
 

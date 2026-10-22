@@ -12,16 +12,23 @@ export function usePresence() {
   const [venueConfig, setVenueConfig] = useState<VenueConfig>(() => getVenueConfig());
   const currentEvent = eventService.getActiveTonightEvent();
 
-  // Escuchar actualizaciones de locaciones y perímetro geográfico
+  // Escuchar actualizaciones de locaciones y estado de presencia en tiempo real
   useEffect(() => {
     const handleVenueChange = () => {
       setVenueConfig(getVenueConfig());
     };
+    const handlePresenceChange = () => {
+      setPresence(presenceService.getStoredPresence());
+    };
     window.addEventListener('cachengueoo_venue_change', handleVenueChange);
+    window.addEventListener('cachengueoo_presence_change', handlePresenceChange);
     window.addEventListener('storage', handleVenueChange);
+    window.addEventListener('storage', handlePresenceChange);
     return () => {
       window.removeEventListener('cachengueoo_venue_change', handleVenueChange);
+      window.removeEventListener('cachengueoo_presence_change', handlePresenceChange);
       window.removeEventListener('storage', handleVenueChange);
+      window.removeEventListener('storage', handlePresenceChange);
     };
   }, []);
 

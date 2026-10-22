@@ -187,6 +187,22 @@ CREATE TABLE IF NOT EXISTS public.admin_users (
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+-- 15. VENUE LOCATIONS (Puntos geográficos y radios en metros de Cachengueoo para validación por GPS)
+CREATE TABLE IF NOT EXISTS public.venue_locations (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  address TEXT DEFAULT '',
+  city TEXT DEFAULT 'Mendoza',
+  province TEXT DEFAULT 'Mendoza',
+  country TEXT DEFAULT 'Argentina',
+  latitude DOUBLE PRECISION NOT NULL,
+  longitude DOUBLE PRECISION NOT NULL,
+  radius_meters INTEGER NOT NULL DEFAULT 180,
+  is_active BOOLEAN DEFAULT TRUE,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
 -- ==============================================================================
 -- ROW LEVEL SECURITY (RLS) POLICIES
 -- ==============================================================================
@@ -196,6 +212,24 @@ ALTER TABLE public.event_presence ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.likes ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.matches ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.messages ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.venue_locations ENABLE ROW LEVEL SECURITY;
+
+-- Venue Locations: Todos pueden ver las locaciones activas para validar su GPS
+CREATE POLICY "Public can view active venue locations"
+  ON public.venue_locations FOR SELECT USING (true);
+
+-- Venue Locations: Permitir insertar y actualizar puntos desde la app / panel admin
+CREATE POLICY "Allow write venue locations"
+  ON public.venue_locations FOR ALL USING (true) WITH CHECK (true);
+
+-- Events y Beneficios: Lectura pública
+ALTER TABLE public.events ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Public can view events"
+  ON public.events FOR SELECT USING (true);
+
+ALTER TABLE public.benefits ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Public can view benefits"
+  ON public.benefits FOR SELECT USING (true);
 
 -- Profiles: Cada usuario puede ver perfiles públicos y actualizar sólo el suyo
 CREATE POLICY "Public profiles are viewable by authenticated users"
@@ -231,3 +265,4 @@ CREATE POLICY "Users can read conversation messages"
 CREATE POLICY "Users can send messages"
   ON public.messages FOR INSERT
   WITH CHECK (auth.uid() = sender_id);
+
