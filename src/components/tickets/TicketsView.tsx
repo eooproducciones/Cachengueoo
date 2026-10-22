@@ -81,7 +81,16 @@ export const TicketsView: React.FC<TicketsViewProps> = ({ currentUser }) => {
       {/* TAB 1: PRÓXIMOS EVENTOS (COMPRA DIRECTA EN PASSLINE) */}
       {activeTab === 'events' && (
         <div className="space-y-6">
-          {events.map((event) => {
+          {events.length === 0 ? (
+            <div className="p-8 rounded-3xl bg-[#121217] border border-zinc-800 text-center space-y-3">
+              <Calendar className="w-10 h-10 text-zinc-600 mx-auto" />
+              <h3 className="text-base font-bold text-white font-display">No hay eventos disponibles</h3>
+              <p className="text-xs text-zinc-400 max-w-xs mx-auto leading-relaxed">
+                Pronto anunciaremos las próximas noches y fiestas de Cachengueoo.
+              </p>
+            </div>
+          ) : (
+            events.map((event) => {
             const isToday = event.isActiveTonight || isEventToday(event);
 
             return (
@@ -177,9 +186,10 @@ export const TicketsView: React.FC<TicketsViewProps> = ({ currentUser }) => {
               </div>
             </div>
           );
-        })}
-      </div>
+        })
       )}
+    </div>
+  )}
 
       {/* TAB 2: MIS ENTRADAS (INFORMACIÓN Y ACCESO A PASSLINE / MAIL) */}
       {activeTab === 'my-tickets' && (

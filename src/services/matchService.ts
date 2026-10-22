@@ -7,48 +7,7 @@ const LIKES_STORAGE_KEY = 'cachengueoo_user_likes';
 const MESSAGES_STORAGE_KEY = 'cachengueoo_chat_messages';
 const DISMISSED_STORAGE_KEY = 'cachengueoo_dismissed_profiles';
 
-const INITIAL_MESSAGES: Record<string, ChatMessage[]> = {
-  match_01: [
-    {
-      id: 'msg_01_1',
-      matchId: 'match_01',
-      senderId: 'usr_me_01',
-      receiverId: 'usr_match_01',
-      text: '¡Hola Valen! Qué temazo acaba de meter el DJ 🔥',
-      createdAt: '2026-10-09T01:16:00Z',
-      read: true,
-    },
-    {
-      id: 'msg_01_2',
-      matchId: 'match_01',
-      senderId: 'usr_match_01',
-      receiverId: 'usr_me_01',
-      text: '¡Totalmente! Estoy por la barra VIP con mis amigas, ¿estás por acá?',
-      createdAt: '2026-10-09T01:19:00Z',
-      read: true,
-    },
-    {
-      id: 'msg_01_3',
-      matchId: 'match_01',
-      senderId: 'usr_match_01',
-      receiverId: 'usr_me_01',
-      text: '¡Nos vemos en la barra VIP! Tengo un Fernet esperándote 😉',
-      createdAt: '2026-10-09T01:25:00Z',
-      read: true,
-    },
-  ],
-  match_02: [
-    {
-      id: 'msg_02_1',
-      matchId: 'match_02',
-      senderId: 'usr_match_02',
-      receiverId: 'usr_me_01',
-      text: '¡Hola Mateo! ¿Estás cerca del escenario?',
-      createdAt: '2026-10-09T01:48:00Z',
-      read: false,
-    },
-  ],
-};
+const INITIAL_MESSAGES: Record<string, ChatMessage[]> = {};
 
 export const matchService = {
   getDismissedProfileIds(): string[] {
@@ -70,8 +29,7 @@ export const matchService = {
   },
 
   getAvailableProfiles(): MatchProfile[] {
-    const dismissed = this.getDismissedProfileIds();
-    return MOCK_MATCH_PROFILES.filter((p) => !dismissed.includes(p.userId));
+    return [];
   },
 
   async fetchAvailableProfiles(currentUserId?: string): Promise<MatchProfile[]> {
@@ -134,7 +92,7 @@ export const matchService = {
         console.warn('Error fetching profiles from Supabase:', e);
       }
     }
-    return MOCK_MATCH_PROFILES.filter((p) => !dismissed.includes(p.userId));
+    return [];
   },
 
   resetSwipes(): void {
@@ -148,7 +106,7 @@ export const matchService = {
     } catch (e) {
       console.error(e);
     }
-    return INITIAL_MATCHES;
+    return [];
   },
 
   saveMatches(matches: MatchPair[]): void {

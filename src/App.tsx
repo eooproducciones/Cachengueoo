@@ -19,10 +19,13 @@ import { eventService } from './services/eventService';
 import { benefitService } from './services/benefitService';
 import { matchService } from './services/matchService';
 import { UserProfile } from './types';
-import { authService, DEFAULT_EXAMPLE_USER } from './services/authService';
+import { authService } from './services/authService';
 import { presenceService, PresenceStatus } from './services/presenceService';
-import { syncVenueLocationsFromSupabase } from './config/venue';
+import { syncVenueLocationsFromSupabase, getVenueConfig } from './config/venue';
+import { VenueLocation } from './types';
 import { CheckCircle2 } from 'lucide-react';
+import { OutOfRangeModal } from './components/presence/OutOfRangeModal';
+import { purgeMockData } from './utils/cleanMockData';
 
 export default function App() {
   const [currentTab, setCurrentTab] = useState<string>('inicio');
@@ -34,6 +37,15 @@ export default function App() {
   const [isAuthModalOpen, setIsAuthModalOpen] = useState<boolean>(false);
   const [authModalMode, setAuthModalMode] = useState<'login' | 'register' | 'choice' | 'verify'>('choice');
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+
+  // Modal OUCH! No estas dentro de Cache
+  const [isOutOfRangeModalOpen, setIsOutOfRangeModalOpen] = useState<boolean>(false);
+  const [outOfRangeDetails, setOutOfRangeDetails] = useState<{
+    distanceMeters?: number;
+    radiusMeters?: number;
+    closestLocationName?: string;
+    customMessage?: string;
+  }>({});
 
   const { user, setUser, updateProfile, switchDemoUser, logout } = useAuth();
   const {
@@ -59,9 +71,16 @@ export default function App() {
     document.body.scrollTo({ top: 0, left: 0, behavior: 'instant' });
   }, [currentTab]);
 
-  // Sincronizar locaciones activas desde Supabase al iniciar la app
+  // Sincronizar locaciones activas desde Supabase al iniciar la app y purgar datos de prueba
   useEffect(() => {
-    syncVenueLocationsFromSupabase().catch(() => {});
+    purgeMockData();
+    syncVenueLocationsFromSupabase()
+      .then((locs) => {
+        if (!locs || locs.length === 0) {
+          presenceService.clearPresence();
+        }
+      })
+      .catch(() => {});
   }, []);
 
   // Escuchar cambios de hash para acceder al panel administrativo únicamente mediante URL (#admin)
@@ -129,18 +148,33 @@ export default function App() {
       return;
     }
 
-    if (tab === 'match' || tab === 'match_pista') {
+    if (
+      tab === 'match' ||
+      tab === 'match_pista' ||
+      tab === 'match_notitas' ||
+      tab === 'match_matches'
+    ) {
       if (!activeUser) {
         setAuthModalMode('choice');
         setIsAuthModalOpen(true);
         return;
       }
+
+      // Si no está verificado adentro, o si la presencia ya expiró, ejecutar verificación GPS obligatoria
+      const targetSub =
+        tab === 'match_notitas'
+          ? 'match_notitas'
+          : tab === 'match_matches'
+          ? 'match_matches'
+          : 'match_pista';
+
       if (!isInside) {
-        handleAutoGpsAndOpenMatch();
+        handleAutoGpsAndOpenMatch(targetSub);
         return;
       }
+
       setIsAdminView(false);
-      setCurrentTab('match_pista');
+      setCurrentTab(targetSub);
       return;
     }
 
@@ -148,8 +182,8 @@ export default function App() {
     setCurrentTab(tab);
   };
 
-  // Activación automática de Match por GPS
-  const handleAutoGpsAndOpenMatch = async () => {
+  // Activación obligatoria de Match por GPS en tiempo real
+  const handleAutoGpsAndOpenMatch = async (targetTab: string = 'match_pista') => {
     const activeUser = user || authService.getCurrentUser();
     if (!activeUser) {
       setAuthModalMode('choice');
@@ -157,7 +191,25 @@ export default function App() {
       return;
     }
 
-    showToast('Comprobando tu ubicación por GPS...');
+    // Verificar si existen sedes configuradas
+    const currentVenue = getVenueConfig();
+    const activeLocations: VenueLocation[] = (currentVenue.locations || []).filter(
+      (l: VenueLocation) => l.isActive
+    );
+    if (activeLocations.length === 0) {
+      presenceService.clearPresence();
+      window.dispatchEvent(new Event('storage'));
+      setOutOfRangeDetails({
+        distanceMeters: 0,
+        radiusMeters: 150,
+        closestLocationName: 'Cachengueoo',
+        customMessage: 'No hay sedes o locaciones configuradas para validar presencia.',
+      });
+      setIsOutOfRangeModalOpen(true);
+      return;
+    }
+
+    showToast('Comprobando tu ubicación GPS en tiempo real...');
     try {
       const gpsResult = await presenceService.checkRealGeolocation();
       if (gpsResult.isInside) {
@@ -173,43 +225,41 @@ export default function App() {
         presenceService.saveStoredPresence(updated);
         window.dispatchEvent(new Event('storage'));
         showToast(
-          `¡Estás en ${gpsResult.matchedLocationName || 'Cachengueoo'}! Cachengueoo Match activado automáticamente 🔥`
+          `¡Estás en ${gpsResult.matchedLocationName || 'Cachengueoo'}! Cachengueoo Match activado 🔥`
         );
         setIsAdminView(false);
-        setCurrentTab('match_pista');
+        setCurrentTab(targetTab);
       } else {
-        const current = presenceService.getStoredPresence();
-        presenceService.saveStoredPresence({
-          ...current,
-          isInside: false,
-          gpsVerified: false,
-          gpsResult,
-        });
+        presenceService.clearPresence();
         window.dispatchEvent(new Event('storage'));
-        showToast(
-          gpsResult.message ||
-            'Estás fuera del radio de las sedes configuradas. Podés validar mediante QR en puerta.'
-        );
-        setAuthModalMode('verify');
-        setIsAuthModalOpen(true);
+        const refLoc = activeLocations[0];
+        setOutOfRangeDetails({
+          distanceMeters: gpsResult.distanceMeters,
+          radiusMeters: refLoc?.radiusMeters || 150,
+          closestLocationName: refLoc?.name || 'Cachengueoo Sede Central',
+          customMessage:
+            gpsResult.message ||
+            'Detectamos que estás fuera del radio permitido de Cachengueoo. Para ingresar a Match tenés que estar dentro de Cache.',
+        });
+        setIsOutOfRangeModalOpen(true);
       }
     } catch (err: unknown) {
-      const current = presenceService.getStoredPresence();
-      presenceService.saveStoredPresence({
-        ...current,
-        isInside: false,
-        gpsVerified: false,
-      });
+      presenceService.clearPresence();
       window.dispatchEvent(new Event('storage'));
       const msg = err instanceof Error ? err.message : 'Error al verificar ubicación por GPS';
-      showToast(msg);
-      setAuthModalMode('verify');
-      setIsAuthModalOpen(true);
+      const refLoc = activeLocations[0];
+      setOutOfRangeDetails({
+        distanceMeters: 0,
+        radiusMeters: refLoc?.radiusMeters || 150,
+        closestLocationName: refLoc?.name || 'Cachengueoo',
+        customMessage: msg,
+      });
+      setIsOutOfRangeModalOpen(true);
     }
   };
 
   const handleActivateMatch = () => {
-    handleAutoGpsAndOpenMatch();
+    handleAutoGpsAndOpenMatch('match_pista');
   };
 
   // Modo Match activo: al entrar a match, el menú inferior cambia a "Menú Match"
@@ -291,9 +341,9 @@ export default function App() {
             {currentTab === 'entradas' && <TicketsView currentUser={user} />}
 
             {/* MÓDULO CACHENGUEOO MATCH (CON MENÚ MATCH Y SUBPESTAÑAS) */}
-            {isMatchMode && currentTab !== 'match_perfil' && (
+            {isMatchMode && currentTab !== 'match_perfil' && user && (
               <MatchView
-                currentUser={user || DEFAULT_EXAMPLE_USER}
+                currentUser={user}
                 isInsideVenue={isInside}
                 onOpenPresenceModal={() => setIsPresenceModalOpen(true)}
                 eventTitle={currentEvent.title}
@@ -326,10 +376,7 @@ export default function App() {
                   currentUser={user || authService.getCurrentUser()}
                   onUpdateProfile={updateProfile}
                   onSwitchDemoUser={switchDemoUser}
-                  onNavigateTab={(tab) => {
-                    if (tab === 'match') setCurrentTab('match_pista');
-                    else handleTabChange(tab);
-                  }}
+                  onNavigateTab={(tab) => handleTabChange(tab)}
                   onOpenAuthModal={(m) => {
                     setAuthModalMode(m);
                     setIsAuthModalOpen(true);
@@ -430,6 +477,25 @@ export default function App() {
             handleAutoGpsAndOpenMatch();
           }
         }}
+      />
+
+      {/* Modal OUCH! No estas dentro de Cache */}
+      <OutOfRangeModal
+        isOpen={isOutOfRangeModalOpen}
+        onClose={() => setIsOutOfRangeModalOpen(false)}
+        onRetryGps={() => {
+          setIsOutOfRangeModalOpen(false);
+          handleAutoGpsAndOpenMatch();
+        }}
+        onOpenQrScanner={() => {
+          setIsOutOfRangeModalOpen(false);
+          setIsQrScannerOpen(true);
+        }}
+        distanceMeters={outOfRangeDetails.distanceMeters}
+        radiusMeters={outOfRangeDetails.radiusMeters}
+        closestLocationName={outOfRangeDetails.closestLocationName}
+        customMessage={outOfRangeDetails.customMessage}
+        isChecking={isChecking}
       />
 
       {/* Notificación Toast flotante */}

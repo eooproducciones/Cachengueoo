@@ -41,18 +41,16 @@ export function usePresence() {
       const gpsResult = await presenceService.checkRealGeolocation();
       const current = presenceService.getStoredPresence();
 
-      const isInside = presenceService.evaluateValidationRule(
-        gpsResult.isInside,
-        Boolean(current.qrVerified),
-        currentEvent.validationMode
-      );
+      // Si la comprobación de GPS indica que está fuera del radio, isInside es estrictamente false
+      const isInside = Boolean(gpsResult.isInside);
 
       const updated: PresenceStatus = {
         ...current,
         isInside,
         methodUsed: 'GPS',
         gpsResult,
-        gpsVerified: gpsResult.isInside,
+        gpsVerified: isInside,
+        qrVerified: isInside ? current.qrVerified : false,
         validatedAt: new Date().toISOString(),
       };
 
@@ -61,10 +59,16 @@ export function usePresence() {
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Error al verificar GPS';
       setErrorMessage(msg);
+      const updated: PresenceStatus = {
+        isInside: false,
+        gpsVerified: false,
+      };
+      presenceService.saveStoredPresence(updated);
+      setPresence(updated);
     } finally {
       setIsChecking(false);
     }
-  }, [currentEvent.validationMode]);
+  }, [currentEvent?.validationMode]);
 
   // Valida código QR
   const validateQr = useCallback((qrToken: string) => {

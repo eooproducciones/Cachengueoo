@@ -43,8 +43,14 @@ export function getVenueConfig(): VenueConfig {
 export function saveVenueConfig(config: VenueConfig): void {
   try {
     localStorage.setItem(VENUE_STORAGE_KEY, JSON.stringify(config));
+    
+    // Al modificar locaciones o radio, invalidar presencia previa para forzar re-evaluación
+    localStorage.removeItem('cachengueoo_presence_state');
+    
     if (typeof window !== 'undefined') {
       window.dispatchEvent(new CustomEvent('cachengueoo_venue_change', { detail: config }));
+      window.dispatchEvent(new CustomEvent('cachengueoo_presence_change', { detail: { isInside: false } }));
+      window.dispatchEvent(new Event('storage'));
     }
 
     // Sincronizar en la nube con Supabase si está conectado
@@ -64,22 +70,40 @@ export async function syncVenueConfigToSupabase(config: VenueConfig): Promise<vo
   if (!supabase) return;
 
   try {
-    if (config.locations && config.locations.length > 0) {
-      const records = config.locations.map((loc) => ({
-        id: loc.id,
-        name: loc.name,
-        address: loc.address || '',
-        city: loc.city || 'Mendoza',
-        province: loc.province || 'Mendoza',
-        country: loc.country || 'Argentina',
-        latitude: loc.latitude,
-        longitude: loc.longitude,
-        radius_meters: loc.radiusMeters,
-        is_active: loc.isActive,
-        updated_at: new Date().toISOString(),
-      }));
+    if (!config.locations || config.locations.length === 0) {
+      // Si el administrador eliminó todas las locaciones, limpiar la tabla en Supabase
+      await supabase.from('venue_locations').delete().neq('id', '___empty___');
+      return;
+    }
 
-      await supabase.from('venue_locations').upsert(records, { onConflict: 'id' });
+    const records = config.locations.map((loc) => ({
+      id: loc.id,
+      name: loc.name,
+      address: loc.address || '',
+      city: loc.city || 'Mendoza',
+      province: loc.province || 'Mendoza',
+      country: loc.country || 'Argentina',
+      latitude: loc.latitude,
+      longitude: loc.longitude,
+      radius_meters: loc.radiusMeters,
+      is_active: loc.isActive,
+      updated_at: new Date().toISOString(),
+    }));
+
+    await supabase.from('venue_locations').upsert(records, { onConflict: 'id' });
+    
+    // Eliminar de Supabase las que hayan sido borradas
+    const activeIds = config.locations.map((l) => l.id);
+    if (activeIds.length > 0) {
+      const { data: allSupabaseRows } = await supabase.from('venue_locations').select('id');
+      if (allSupabaseRows) {
+        const toDelete = allSupabaseRows.filter((r) => !activeIds.includes(r.id)).map((r) => r.id);
+        if (toDelete.length > 0) {
+          for (const delId of toDelete) {
+            await supabase.from('venue_locations').delete().eq('id', delId);
+          }
+        }
+      }
     }
   } catch (e) {
     console.warn('Error in syncVenueConfigToSupabase', e);
@@ -99,7 +123,6 @@ export async function deleteVenueLocationFromSupabase(id: string): Promise<void>
   }
 }
 
-
 /**
  * Descarga las locaciones activas desde Supabase y actualiza el estado local
  */
@@ -116,6 +139,23 @@ export async function syncVenueLocationsFromSupabase(): Promise<VenueLocation[] 
     if (error) {
       console.warn('Error fetching venue locations from Supabase:', error.message);
       return null;
+    }
+
+    // Si la tabla está vacía en Supabase (ej. el admin las borró todas):
+    if (data && data.length === 0) {
+      const current = getVenueConfig();
+      const updated: VenueConfig = {
+        ...current,
+        locations: [],
+      };
+      localStorage.setItem(VENUE_STORAGE_KEY, JSON.stringify(updated));
+      localStorage.removeItem('cachengueoo_presence_state');
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('cachengueoo_venue_change', { detail: updated }));
+        window.dispatchEvent(new CustomEvent('cachengueoo_presence_change', { detail: { isInside: false } }));
+        window.dispatchEvent(new Event('storage'));
+      }
+      return [];
     }
 
     if (data && data.length > 0) {
@@ -211,7 +251,7 @@ export function validateVenuePresence(
       distanceMeters: 0,
       accuracyMeters: Math.round(accuracyMeters),
       isAccuracyAcceptable: true,
-      message: 'No hay locaciones activas configuradas.',
+      message: 'No hay sedes o locaciones configuradas para validar presencia.',
     };
   }
 

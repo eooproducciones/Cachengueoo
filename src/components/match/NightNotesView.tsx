@@ -264,8 +264,17 @@ export const NightNotesView: React.FC<NightNotesViewProps> = ({
           - Permite dejar un corazón en la notita
       */}
       <div className="flex-1 min-h-0 overflow-y-auto p-3.5 space-y-2.5">
-        {profilesWithNotes.map((profile) => {
-          const note = profile.nightNote;
+        {profilesWithNotes.length === 0 ? (
+          <div className="py-12 px-4 text-center space-y-3">
+            <MessageSquareQuote className="w-10 h-10 text-zinc-600 mx-auto" />
+            <h4 className="text-sm font-bold text-white font-display">Todavía no hay notitas en la fiesta</h4>
+            <p className="text-xs text-zinc-400 max-w-xs mx-auto leading-relaxed">
+              Tocá el botón superior "+" para publicar tu notita y romper el hielo con la gente que está en Cachengueoo.
+            </p>
+          </div>
+        ) : (
+          profilesWithNotes.map((profile) => {
+            const note = profile.nightNote;
           if (!note) return null;
 
           const heartsInfo = profileNotesHearts[profile.userId] || {
@@ -325,7 +334,8 @@ export const NightNotesView: React.FC<NightNotesViewProps> = ({
               </div>
             </div>
           );
-        })}
+        })
+        )}
       </div>
 
       {/* Modal para Notita:

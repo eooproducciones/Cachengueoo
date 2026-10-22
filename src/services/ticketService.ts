@@ -11,7 +11,7 @@ export const ticketService = {
     } catch (e) {
       console.error(e);
     }
-    return MOCK_USER_TICKETS;
+    return [];
   },
 
   saveUserTickets(tickets: UserTicket[]): void {

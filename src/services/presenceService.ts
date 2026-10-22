@@ -49,7 +49,29 @@ export const presenceService = {
     try {
       const stored = localStorage.getItem(PRESENCE_CACHE_KEY);
       if (stored) {
-        return JSON.parse(stored);
+        const parsed: PresenceStatus = JSON.parse(stored);
+
+        // 1. Si no hay sedes activas configuradas, NUNCA está adentro
+        const venue = getVenueConfig();
+        const activeLocations = (venue.locations || []).filter((l) => l.isActive);
+        if (activeLocations.length === 0) {
+          return { isInside: false };
+        }
+
+        // 2. Si fue una simulación previa, invalidar estrictamente
+        if (parsed.simulated) {
+          return { isInside: false };
+        }
+
+        // 3. Caducidad estricta de presencia GPS (15 minutos máximo)
+        if (parsed.validatedAt) {
+          const ageMs = Date.now() - new Date(parsed.validatedAt).getTime();
+          if (ageMs > 15 * 60 * 1000) {
+            return { isInside: false };
+          }
+        }
+
+        return parsed;
       }
     } catch (e) {
       console.error('Error parsing cached presence', e);
@@ -175,44 +197,21 @@ export const presenceService = {
     };
   },
 
-  /**
-   * MODO SIMULACIÓN PARA DESARROLLO Y TESTING:
-   * Permite a los usuarios y evaluadores probar la experiencia dentro y fuera del boliche
-   * sin requerir estar físicamente en Mendoza.
-   */
-  setSimulatedPresence(isInside: boolean, method: PresenceMethod = 'GPS'): PresenceStatus {
-    const venue = getVenueConfig();
-    const state: PresenceStatus = isInside
-      ? {
-          isInside: true,
-          methodUsed: method,
-          simulated: true,
-          qrVerified: method === 'QR',
-          gpsVerified: method === 'GPS',
-          validatedAt: new Date().toISOString(),
-          gpsResult: {
-            isInside: true,
-            distanceMeters: 25,
-            accuracyMeters: 12,
-            isAccuracyAcceptable: true,
-            message: '¡Estás en Cachengueoo! 🔥 (Modo Simulación Activo)',
-          },
-        }
-      : {
-          isInside: false,
-          simulated: true,
-          qrVerified: false,
-          gpsVerified: false,
-          validatedAt: new Date().toISOString(),
-          gpsResult: {
-            isInside: false,
-            distanceMeters: 3850,
-            accuracyMeters: 15,
-            isAccuracyAcceptable: true,
-            message: `No estás dentro de Cachengueoo (${venue.city}, ${venue.province}).`,
-          },
-        };
-
+  setSimulatedPresence(_isInside: boolean, _method: PresenceMethod = 'GPS'): PresenceStatus {
+    const state: PresenceStatus = {
+      isInside: false,
+      simulated: false,
+      qrVerified: false,
+      gpsVerified: false,
+      validatedAt: new Date().toISOString(),
+      gpsResult: {
+        isInside: false,
+        distanceMeters: 0,
+        accuracyMeters: 10,
+        isAccuracyAcceptable: true,
+        message: 'Validación en vivo activa requerida por GPS.',
+      },
+    };
     this.saveStoredPresence(state);
     return state;
   },

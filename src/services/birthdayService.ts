@@ -2,20 +2,7 @@ import { BirthdayRequest } from '../types';
 
 const BIRTHDAYS_STORAGE_KEY = 'cachengueoo_birthday_requests';
 
-const INITIAL_REQUESTS: BirthdayRequest[] = [
-  {
-    id: 'bday_01',
-    userId: 'usr_me_01',
-    name: 'Mateo Rossi',
-    email: 'mateo.cachengueoo@gmail.com',
-    phone: '+54 9 261 555-8912',
-    date: '2026-10-16',
-    guestCount: 15,
-    status: 'approved',
-    notes: 'Mesa alta en living central. Descorche de cortesía asignado.',
-    submittedAt: '2026-10-02T15:30:00Z',
-  },
-];
+const INITIAL_REQUESTS: BirthdayRequest[] = [];
 
 export const birthdayService = {
   getRequests(): BirthdayRequest[] {
@@ -25,7 +12,7 @@ export const birthdayService = {
     } catch (e) {
       console.error(e);
     }
-    return INITIAL_REQUESTS;
+    return [];
   },
 
   submitRequest(

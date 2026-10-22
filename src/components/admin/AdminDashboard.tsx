@@ -40,7 +40,7 @@ import { benefitService } from '../../services/benefitService';
 import { birthdayService } from '../../services/birthdayService';
 import { authService } from '../../services/authService';
 import { getVenueConfig, saveVenueConfig } from '../../config/venue';
-import { MOCK_MATCH_PROFILES } from '../../data/mockData';
+import { getSupabaseClient } from '../../services/supabaseClient';
 import { passlineParser, FOUR_PRESET_FLYERS } from '../../services/passlineParser';
 import { VenueMapEditor } from './VenueMapEditor';
 
@@ -121,6 +121,31 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onExitAdmin, onL
 
   // Birthday requests state
   const [birthdays, setBirthdays] = useState<BirthdayRequest[]>(() => birthdayService.getRequests());
+
+  // Registered Users state (real users from Supabase or authService)
+  const [registeredUsers, setRegisteredUsers] = useState<any[]>([]);
+
+  React.useEffect(() => {
+    const fetchUsers = async () => {
+      const supabase = getSupabaseClient();
+      if (supabase) {
+        try {
+          const { data, error } = await supabase
+            .from('profiles')
+            .select('*')
+            .order('created_at', { ascending: false });
+          if (!error && data) {
+            setRegisteredUsers(data);
+            return;
+          }
+        } catch (e) {
+          console.warn('Error loading users from Supabase:', e);
+        }
+      }
+      setRegisteredUsers(authService.getAllUsers());
+    };
+    fetchUsers();
+  }, [adminTab]);
 
 
   // Handle Event Validation Mode Change
@@ -540,30 +565,42 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onExitAdmin, onL
           {/* Active Users */}
           <div className="p-6 rounded-3xl bg-[#121217] border border-zinc-800 space-y-4">
             <h3 className="text-base font-bold text-white font-display">
-              Usuarios Validados en Cachengueoo ({MOCK_MATCH_PROFILES.length})
+              Usuarios Validados en Cachengueoo ({registeredUsers.filter((u: any) => u.is_verified_in_venue).length})
             </h3>
 
             <div className="divide-y divide-zinc-800/80">
-              {MOCK_MATCH_PROFILES.map((usr) => (
-                <div key={usr.userId} className="py-3 flex items-center justify-between text-xs">
-                  <div className="flex items-center gap-3">
-                    <img
-                      src={usr.avatarUrl}
-                      alt={usr.fullName}
-                      className="w-10 h-10 rounded-full object-cover border border-zinc-700"
-                      referrerPolicy="no-referrer"
-                    />
-                    <div>
-                      <h4 className="font-bold text-white">{usr.fullName}</h4>
-                      <p className="text-[11px] text-zinc-400">{usr.lastPresenceCheck}</p>
-                    </div>
-                  </div>
-
-                  <span className="px-2.5 py-1 rounded-full bg-emerald-950/60 border border-emerald-500/40 text-emerald-400 font-semibold text-[10px]">
-                    Activo en Pista 🔥
-                  </span>
+              {registeredUsers.filter((u: any) => u.is_verified_in_venue).length === 0 ? (
+                <div className="py-6 text-center text-zinc-500 text-xs">
+                  No hay usuarios con presencia activa validada en este momento.
                 </div>
-              ))}
+              ) : (
+                registeredUsers
+                  .filter((u: any) => u.is_verified_in_venue)
+                  .map((usr: any) => (
+                    <div key={usr.id || usr.userId} className="py-3 flex items-center justify-between text-xs">
+                      <div className="flex items-center gap-3">
+                        <img
+                          src={
+                            usr.avatar_url ||
+                            usr.avatarUrl ||
+                            'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=400&q=80'
+                          }
+                          alt={usr.full_name || usr.fullName || usr.nickname}
+                          className="w-10 h-10 rounded-full object-cover border border-zinc-700"
+                          referrerPolicy="no-referrer"
+                        />
+                        <div>
+                          <h4 className="font-bold text-white">{usr.full_name || usr.fullName || usr.nickname}</h4>
+                          <p className="text-[11px] text-zinc-400">{usr.email || 'Presencia GPS confirmada'}</p>
+                        </div>
+                      </div>
+
+                      <span className="px-2.5 py-1 rounded-full bg-emerald-950/60 border border-emerald-500/40 text-emerald-400 font-semibold text-[10px]">
+                        Activo en Pista 🔥
+                      </span>
+                    </div>
+                  ))
+              )}
             </div>
           </div>
         </div>
@@ -983,40 +1020,66 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onExitAdmin, onL
           <div className="flex items-center justify-between">
             <div>
               <h3 className="text-base font-bold text-white font-display">Usuarios Registrados</h3>
-              <p className="text-xs text-zinc-400">Control de perfiles, presencia y reportes de Match.</p>
+              <p className="text-xs text-zinc-400">Control de perfiles reales creados en la plataforma.</p>
             </div>
             <span className="text-xs font-mono text-[#F39200]">
-              {MOCK_MATCH_PROFILES.length + 1} perfiles en sistema
+              {registeredUsers.length} perfiles en sistema
             </span>
           </div>
 
           <div className="divide-y divide-zinc-800">
-            {MOCK_MATCH_PROFILES.map((usr) => (
-              <div key={usr.userId} className="py-3.5 flex items-center justify-between text-xs">
-                <div className="flex items-center gap-3">
-                  <img
-                    src={usr.avatarUrl}
-                    alt={usr.fullName}
-                    className="w-11 h-11 rounded-2xl object-cover border border-zinc-700"
-                    referrerPolicy="no-referrer"
-                  />
-                  <div>
-                    <h4 className="font-bold text-white font-display">{usr.fullName} ({usr.nickname})</h4>
-                    <p className="text-[11px] text-zinc-400">{usr.age} años · Trago: {usr.drinkFavorite}</p>
-                    <p className="text-[10px] text-emerald-400 mt-0.5">● Presencia verificada en Cachengueoo</p>
-                  </div>
-                </div>
-
-                <div className="flex gap-2">
-                  <button
-                    onClick={() => alert(`Usuario ${usr.nickname} verificado en sistema.`)}
-                    className="px-2.5 py-1 rounded-lg bg-zinc-900 border border-zinc-800 text-zinc-300 hover:text-white text-[11px] cursor-pointer"
-                  >
-                    Detalles
-                  </button>
-                </div>
+            {registeredUsers.length === 0 ? (
+              <div className="py-12 text-center text-zinc-500 text-xs space-y-1.5">
+                <Users className="w-8 h-8 text-zinc-600 mx-auto mb-2" />
+                <p className="font-bold text-zinc-300">No hay usuarios registrados por el momento</p>
+                <p className="max-w-xs mx-auto text-zinc-500">
+                  A medida que los usuarios reales se registren o inicien sesión con su Cache ID, aparecerán en este listado.
+                </p>
               </div>
-            ))}
+            ) : (
+              registeredUsers.map((usr: any) => {
+                const id = usr.id || usr.userId;
+                const name = usr.full_name || usr.fullName || usr.nickname || 'Usuario';
+                const nick = usr.nickname || usr.full_name || '';
+                const age = usr.age || 23;
+                const drink = usr.drink_favorite || usr.drinkFavorite || 'Fernet con Coca';
+                const avatar =
+                  usr.avatar_url ||
+                  usr.avatarUrl ||
+                  'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=400&q=80';
+                const isVerified = Boolean(usr.is_verified_in_venue ?? false);
+
+                return (
+                  <div key={id} className="py-3.5 flex items-center justify-between text-xs">
+                    <div className="flex items-center gap-3">
+                      <img
+                        src={avatar}
+                        alt={name}
+                        className="w-11 h-11 rounded-2xl object-cover border border-zinc-700"
+                        referrerPolicy="no-referrer"
+                      />
+                      <div>
+                        <h4 className="font-bold text-white font-display">
+                          {name} {nick && nick !== name ? `(${nick})` : ''}
+                        </h4>
+                        <p className="text-[11px] text-zinc-400">
+                          {age} años · Trago favorito: {drink}
+                        </p>
+                        <p className={`text-[10px] mt-0.5 ${isVerified ? 'text-emerald-400' : 'text-zinc-500'}`}>
+                          ● {isVerified ? 'Presencia verificada en Cachengueoo' : 'Sin presencia activa hoy'}
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="flex gap-2">
+                      <span className="px-2.5 py-1 rounded-lg bg-zinc-900 border border-zinc-800 text-zinc-400 text-[11px]">
+                        {usr.email || 'Registrado'}
+                      </span>
+                    </div>
+                  </div>
+                );
+              })
+            )}
           </div>
         </div>
       )}

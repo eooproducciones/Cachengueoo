@@ -95,9 +95,25 @@ export function isEventToday(event: ClubEvent): boolean {
   return false;
 }
 
+const DEFAULT_EVENT_FALLBACK: ClubEvent = {
+  id: 'evt_cachengueoo_night',
+  title: 'CACHENGUEOO NIGHT',
+  dateStr: 'Esta noche',
+  dateIso: new Date().toISOString().split('T')[0],
+  timeRange: '23:00 — 06:00 hs',
+  locationName: 'Cachengueoo Boliche · Mendoza',
+  description: 'Noche en Cachengueoo Mendoza',
+  flyerUrl:
+    'https://images.unsplash.com/photo-1516450360452-9312f5e86fc7?auto=format&fit=crop&w=1200&q=80',
+  isActiveTonight: true,
+  validationMode: 'GPS_OR_QR',
+  djs: [],
+  ticketTypes: [],
+};
+
 export const eventService = {
   getEvents(): ClubEvent[] {
-    let list: ClubEvent[] = MOCK_EVENTS;
+    let list: ClubEvent[] = [];
     try {
       const saved = localStorage.getItem(EVENTS_STORAGE_KEY);
       if (saved) {
@@ -105,6 +121,10 @@ export const eventService = {
       }
     } catch (e) {
       console.error('Error reading events', e);
+    }
+
+    if (!Array.isArray(list)) {
+      list = [];
     }
 
     // Auto-borrado: filtrar automáticamente eventos pasados 12 horas de su fecha y hora
@@ -115,7 +135,7 @@ export const eventService = {
       this.saveEvents(activeEvents);
     }
 
-    const finalList = activeEvents.length > 0 ? activeEvents : MOCK_EVENTS;
+    const finalList = activeEvents;
 
     // Actualizar automáticamente isActiveTonight según la fecha actual y ordenar:
     // 1. El evento de hoy aparece PRIMERO automáticamente
@@ -155,7 +175,7 @@ export const eventService = {
   getActiveTonightEvent(): ClubEvent {
     const events = this.getEvents();
     const todayEvent = events.find((e) => isEventToday(e));
-    return todayEvent || events[0];
+    return todayEvent || events[0] || DEFAULT_EVENT_FALLBACK;
   },
 
   getFeaturedEvents(): ClubEvent[] {

@@ -10,36 +10,7 @@ export function notifyAuthChange() {
   }
 }
 
-// 1. Cuenta de usuario de ejemplo (SIN administración habilitada)
-export const DEFAULT_EXAMPLE_USER: UserProfile = {
-  id: 'usr_cachenguero_01',
-  email: 'usuario@cachengueoo.com',
-  fullName: 'Juan Ignacio Pérez',
-  nickname: 'Juani',
-  birthDate: '2001-09-12',
-  age: 23,
-  avatarUrl:
-    'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=800&q=80',
-  photos: [
-    'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=800&q=80',
-    'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=800&q=80',
-    'https://images.unsplash.com/photo-1517841905240-472988babdf9?auto=format&fit=crop&w=800&q=80',
-  ],
-  gender: 'hombre',
-  preference: 'todos',
-  interests: ['Fernet', 'Skyy', 'Reggaeton', 'Cumbia'],
-  bio: 'Listo para romper la pista en Cachengueoo 💃🕺 Si hay Fernet, hay charla.',
-  drinkFavorite: 'Fernet & Skyy',
-  drinks: ['Fernet', 'Skyy'],
-  zodiacSign: 'Virgo',
-  musicPreferences: ['Reggaeton', 'Cumbia', 'Cuarteto', 'Rock'],
-  instagram: '@juani_cache',
-  createdAt: '2026-03-01T00:00:00Z',
-  isAdmin: false,
-  role: 'user',
-};
-
-// 2. Cuenta de administrador de ejemplo (Pasa directo al panel admin)
+// 1. Cuenta de administrador de emergencia para Cachengueoo
 export const DEFAULT_ADMIN_USER: UserProfile = {
   id: 'usr_admin_01',
   email: 'admin@cachengueoo.com',
@@ -82,7 +53,7 @@ export const authService = {
     } catch (e) {
       console.error(e);
     }
-    return [DEFAULT_EXAMPLE_USER, DEFAULT_ADMIN_USER];
+    return [];
   },
 
   updateProfile(profile: Partial<UserProfile>): UserProfile | null {
@@ -330,15 +301,9 @@ export const authService = {
   },
 
   loginDemo(role: 'user' | 'admin' | 'valen'): UserProfile {
-    if (role === 'admin') {
-      sessionStorage.setItem(USER_STORAGE_KEY, JSON.stringify(DEFAULT_ADMIN_USER));
-      localStorage.setItem(USER_STORAGE_KEY, JSON.stringify(DEFAULT_ADMIN_USER));
-      notifyAuthChange();
-      return DEFAULT_ADMIN_USER;
-    }
-    sessionStorage.setItem(USER_STORAGE_KEY, JSON.stringify(DEFAULT_EXAMPLE_USER));
-    localStorage.setItem(USER_STORAGE_KEY, JSON.stringify(DEFAULT_EXAMPLE_USER));
+    sessionStorage.setItem(USER_STORAGE_KEY, JSON.stringify(DEFAULT_ADMIN_USER));
+    localStorage.setItem(USER_STORAGE_KEY, JSON.stringify(DEFAULT_ADMIN_USER));
     notifyAuthChange();
-    return DEFAULT_EXAMPLE_USER;
+    return DEFAULT_ADMIN_USER;
   },
 };

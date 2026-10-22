@@ -161,61 +161,71 @@ export const HomeView: React.FC<HomeViewProps> = ({
             </div>
 
             <div className="space-y-4">
-              {displayEvents.map((evt) => {
-                const isToday = evt.isActiveTonight || isEventToday(evt);
-
-                return (
-                  <div
-                    key={evt.id}
-                    className="bg-[#121217] border border-zinc-800 rounded-3xl overflow-hidden shadow-xl"
-                  >
-                    <div className="relative aspect-[16/9] w-full">
-                      <img
-                        src={evt.flyerUrl}
-                        alt={evt.title}
-                        referrerPolicy="no-referrer"
-                        className="w-full h-full object-cover"
-                      />
-                      <div className="absolute inset-0 bg-gradient-to-t from-[#121217] via-black/30 to-transparent"></div>
-
-                      <div className="absolute top-3 left-3 px-3 py-1 rounded-full bg-[#F39200] text-black font-black text-[10px] tracking-wider uppercase shadow-lg">
-                        {isToday ? 'HOY EN CACHE 🔥' : 'FECHA DESTACADA ⭐'}
-                      </div>
-
-                      <div className="absolute bottom-3 left-4 right-4">
-                        <h4 className="text-xl font-black text-white font-display uppercase tracking-tight">
-                          {evt.title}
-                        </h4>
-                      </div>
-                    </div>
-
-                  <div className="p-4 space-y-3">
-                    <div className="flex items-center justify-between text-xs text-zinc-400">
-                      <span className="flex items-center gap-1.5 font-medium text-zinc-200">
-                        <Calendar className="w-3.5 h-3.5 text-[#F39200]" />
-                        {evt.dateStr}
-                      </span>
-                      {evt.timeRange && (
-                        <span className="text-zinc-400 text-[11px] font-mono">{evt.timeRange}</span>
-                      )}
-                    </div>
-
-                    {/* Action button */}
-                    <div className="pt-1">
-                      <a
-                        href={evt.passlineUrl || 'https://www.passline.com'}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="w-full h-11 rounded-xl bg-[#F39200] hover:bg-[#E08400] text-black font-bold text-xs flex items-center justify-center gap-1.5 cursor-pointer transition-all shadow-md shadow-[#F39200]/20 active:scale-[0.99]"
-                      >
-                        <Ticket className="w-4 h-4" />
-                        Comprar entrada
-                      </a>
-                    </div>
-                  </div>
+              {displayEvents.length === 0 ? (
+                <div className="p-6 rounded-3xl bg-[#121217] border border-zinc-800 text-center space-y-2">
+                  <Calendar className="w-8 h-8 text-zinc-600 mx-auto" />
+                  <h4 className="text-sm font-bold text-white font-display">No hay eventos publicados por el momento</h4>
+                  <p className="text-xs text-zinc-500 max-w-xs mx-auto">
+                    Pronto se anunciarán las próximas noches y fiestas de Cachengueoo.
+                  </p>
                 </div>
-              );
-            })}
+              ) : (
+                displayEvents.map((evt) => {
+                  const isToday = evt.isActiveTonight || isEventToday(evt);
+
+                  return (
+                    <div
+                      key={evt.id}
+                      className="bg-[#121217] border border-zinc-800 rounded-3xl overflow-hidden shadow-xl"
+                    >
+                      <div className="relative aspect-[16/9] w-full">
+                        <img
+                          src={evt.flyerUrl}
+                          alt={evt.title}
+                          referrerPolicy="no-referrer"
+                          className="w-full h-full object-cover"
+                        />
+                        <div className="absolute inset-0 bg-gradient-to-t from-[#121217] via-black/30 to-transparent"></div>
+
+                        <div className="absolute top-3 left-3 px-3 py-1 rounded-full bg-[#F39200] text-black font-black text-[10px] tracking-wider uppercase shadow-lg">
+                          {isToday ? 'HOY EN CACHE 🔥' : 'FECHA DESTACADA ⭐'}
+                        </div>
+
+                        <div className="absolute bottom-3 left-4 right-4">
+                          <h4 className="text-xl font-black text-white font-display uppercase tracking-tight">
+                            {evt.title}
+                          </h4>
+                        </div>
+                      </div>
+
+                      <div className="p-4 space-y-3">
+                        <div className="flex items-center justify-between text-xs text-zinc-400">
+                          <span className="flex items-center gap-1.5 font-medium text-zinc-200">
+                            <Calendar className="w-3.5 h-3.5 text-[#F39200]" />
+                            {evt.dateStr}
+                          </span>
+                          {evt.timeRange && (
+                            <span className="text-zinc-400 text-[11px] font-mono">{evt.timeRange}</span>
+                          )}
+                        </div>
+
+                        {/* Action button */}
+                        <div className="pt-1">
+                          <a
+                            href={evt.passlineUrl || 'https://www.passline.com'}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="w-full h-11 rounded-xl bg-[#F39200] hover:bg-[#E08400] text-black font-bold text-xs flex items-center justify-center gap-1.5 cursor-pointer transition-all shadow-md shadow-[#F39200]/20 active:scale-[0.99]"
+                          >
+                            <Ticket className="w-4 h-4" />
+                            Comprar entrada
+                          </a>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
             </div>
           </div>
         );

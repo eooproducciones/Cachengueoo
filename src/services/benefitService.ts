@@ -9,24 +9,21 @@ export const benefitService = {
       const saved = localStorage.getItem(BENEFITS_STORAGE_KEY);
       if (saved) {
         const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          const isModern = parsed.some((b: ClubBenefit) => b.actionUrl || b.highlightBadge);
-          if (isModern) {
-            return parsed.map((b: ClubBenefit) => ({
-              ...b,
-              actionLabel: b.actionLabel || 'Obtener beneficio',
-              promoCode:
-                b.promoCode && b.promoCode.trim().length > 0
-                  ? b.promoCode.trim().toUpperCase()
-                  : undefined,
-            }));
-          }
+        if (Array.isArray(parsed)) {
+          return parsed.map((b: ClubBenefit) => ({
+            ...b,
+            actionLabel: b.actionLabel || 'Obtener beneficio',
+            promoCode:
+              b.promoCode && b.promoCode.trim().length > 0
+                ? b.promoCode.trim().toUpperCase()
+                : undefined,
+          }));
         }
       }
     } catch (e) {
       console.error('Error reading benefits from storage', e);
     }
-    return MOCK_BENEFITS;
+    return [];
   },
 
   saveBenefits(benefits: ClubBenefit[]): void {
