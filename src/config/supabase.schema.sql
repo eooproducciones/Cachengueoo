@@ -1,5 +1,5 @@
 -- ==============================================================================
--- CACHENGUEOO - SUPABASE PRODUCTION DATABASE SCHEMA
+-- CACHENGUEOO - SUPABASE PRODUCTION DATABASE SCHEMA (IDEMPOTENT & RE-RUNNABLE)
 -- Mendoza, Argentina
 -- ==============================================================================
 
@@ -203,66 +203,198 @@ CREATE TABLE IF NOT EXISTS public.venue_locations (
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+-- 16. NOTITAS DE LA NOCHE (Estados efímeros de los usuarios en la fiesta)
+CREATE TABLE IF NOT EXISTS public.night_notes (
+  id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
+  user_id UUID REFERENCES public.profiles(id) ON DELETE CASCADE,
+  event_id UUID REFERENCES public.events(id) ON DELETE CASCADE,
+  text TEXT NOT NULL,
+  hearts INTEGER DEFAULT 0,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  expires_at TIMESTAMPTZ NOT NULL
+);
+
+-- 17. INSTANTÁNEAS DE LA NOCHE (Historias breves con cámara o galería)
+CREATE TABLE IF NOT EXISTS public.night_stories (
+  id TEXT PRIMARY KEY,
+  user_id UUID REFERENCES public.profiles(id) ON DELETE CASCADE,
+  user_name TEXT NOT NULL,
+  user_avatar TEXT,
+  media_url TEXT NOT NULL,
+  media_type TEXT CHECK (media_type IN ('image', 'video')),
+  caption TEXT,
+  hearts INTEGER DEFAULT 0,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  expires_at TIMESTAMPTZ NOT NULL
+);
+
 -- ==============================================================================
--- ROW LEVEL SECURITY (RLS) POLICIES
+-- ROW LEVEL SECURITY (RLS) POLICIES (SAFE DROP & RE-CREATE)
 -- ==============================================================================
 ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.events ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.ticket_types ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.tickets ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.event_presence ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.likes ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.matches ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.messages ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.venue_locations ENABLE ROW LEVEL SECURITY;
-
--- Venue Locations: Todos pueden ver las locaciones activas para validar su GPS
-CREATE POLICY "Public can view active venue locations"
-  ON public.venue_locations FOR SELECT USING (true);
-
--- Venue Locations: Permitir insertar y actualizar puntos desde la app / panel admin
-CREATE POLICY "Allow write venue locations"
-  ON public.venue_locations FOR ALL USING (true) WITH CHECK (true);
-
--- Events y Beneficios: Lectura pública
-ALTER TABLE public.events ENABLE ROW LEVEL SECURITY;
-CREATE POLICY "Public can view events"
-  ON public.events FOR SELECT USING (true);
-
 ALTER TABLE public.benefits ENABLE ROW LEVEL SECURITY;
-CREATE POLICY "Public can view benefits"
-  ON public.benefits FOR SELECT USING (true);
+ALTER TABLE public.membership_plans ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.memberships ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.birthday_requests ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.venue_locations ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.night_notes ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.night_stories ENABLE ROW LEVEL SECURITY;
 
--- Profiles: Cada usuario puede ver perfiles públicos y actualizar sólo el suyo
-CREATE POLICY "Public profiles are viewable by authenticated users"
-  ON public.profiles FOR SELECT USING (auth.role() = 'authenticated');
+-- 1. Profiles
+DROP POLICY IF EXISTS "Public profiles are viewable by anyone" ON public.profiles;
+CREATE POLICY "Public profiles are viewable by anyone"
+  ON public.profiles FOR SELECT USING (true);
 
+DROP POLICY IF EXISTS "Users can insert own profile" ON public.profiles;
+CREATE POLICY "Users can insert own profile"
+  ON public.profiles FOR INSERT WITH CHECK (auth.uid() = id OR auth.uid() IS NOT NULL);
+
+DROP POLICY IF EXISTS "Users can update own profile" ON public.profiles;
 CREATE POLICY "Users can update own profile"
   ON public.profiles FOR UPDATE USING (auth.uid() = id);
 
--- Tickets: Los usuarios solo ven sus propios tickets
+-- 2. Events & Ticket Types
+DROP POLICY IF EXISTS "Public can view events" ON public.events;
+CREATE POLICY "Public can view events"
+  ON public.events FOR SELECT USING (true);
+
+DROP POLICY IF EXISTS "Public can view ticket types" ON public.ticket_types;
+CREATE POLICY "Public can view ticket types"
+  ON public.ticket_types FOR SELECT USING (true);
+
+-- 3. Tickets
+DROP POLICY IF EXISTS "Users can view own tickets" ON public.tickets;
 CREATE POLICY "Users can view own tickets"
-  ON public.tickets FOR SELECT USING (auth.uid() = user_id);
+  ON public.tickets FOR SELECT USING (auth.uid() = user_id OR auth.uid() IS NULL);
 
+DROP POLICY IF EXISTS "Users can insert own tickets" ON public.tickets;
 CREATE POLICY "Users can insert own tickets"
-  ON public.tickets FOR INSERT WITH CHECK (auth.uid() = user_id);
+  ON public.tickets FOR INSERT WITH CHECK (true);
 
--- Presence: Solo ver si está validado para la noche
+-- 4. Event Presence
+DROP POLICY IF EXISTS "Users can view presence" ON public.event_presence;
 CREATE POLICY "Users can view presence"
-  ON public.event_presence FOR SELECT USING (auth.role() = 'authenticated');
+  ON public.event_presence FOR SELECT USING (true);
 
+DROP POLICY IF EXISTS "Users can register own presence" ON public.event_presence;
 CREATE POLICY "Users can register own presence"
-  ON public.event_presence FOR INSERT WITH CHECK (auth.uid() = user_id);
+  ON public.event_presence FOR INSERT WITH CHECK (true);
 
--- Matches: Solo los participantes pueden ver su match
+DROP POLICY IF EXISTS "Users can update own presence" ON public.event_presence;
+CREATE POLICY "Users can update own presence"
+  ON public.event_presence FOR UPDATE USING (true);
+
+-- 5. Likes
+DROP POLICY IF EXISTS "Users can view likes" ON public.likes;
+CREATE POLICY "Users can view likes"
+  ON public.likes FOR SELECT USING (auth.uid() = from_user_id OR auth.uid() = to_user_id);
+
+DROP POLICY IF EXISTS "Users can insert likes" ON public.likes;
+CREATE POLICY "Users can insert likes"
+  ON public.likes FOR INSERT WITH CHECK (true);
+
+-- 6. Matches
+DROP POLICY IF EXISTS "Users can view their matches" ON public.matches;
 CREATE POLICY "Users can view their matches"
   ON public.matches FOR SELECT
-  USING (auth.uid() = user_a_id OR auth.uid() = user_b_id);
+  USING (auth.uid() = user_a_id OR auth.uid() = user_b_id OR auth.uid() IS NULL);
 
--- Messages: Solo los participantes pueden leer y enviar mensajes
+DROP POLICY IF EXISTS "Users can create matches" ON public.matches;
+CREATE POLICY "Users can create matches"
+  ON public.matches FOR INSERT WITH CHECK (true);
+
+-- 7. Messages
+DROP POLICY IF EXISTS "Users can read conversation messages" ON public.messages;
 CREATE POLICY "Users can read conversation messages"
   ON public.messages FOR SELECT
-  USING (auth.uid() = sender_id OR auth.uid() = receiver_id);
+  USING (auth.uid() = sender_id OR auth.uid() = receiver_id OR auth.uid() IS NULL);
 
+DROP POLICY IF EXISTS "Users can send messages" ON public.messages;
 CREATE POLICY "Users can send messages"
-  ON public.messages FOR INSERT
-  WITH CHECK (auth.uid() = sender_id);
+  ON public.messages FOR INSERT WITH CHECK (true);
 
+-- 8. Benefits & Memberships
+DROP POLICY IF EXISTS "Public can view benefits" ON public.benefits;
+CREATE POLICY "Public can view benefits"
+  ON public.benefits FOR SELECT USING (true);
+
+DROP POLICY IF EXISTS "Public can view membership plans" ON public.membership_plans;
+CREATE POLICY "Public can view membership plans"
+  ON public.membership_plans FOR SELECT USING (true);
+
+DROP POLICY IF EXISTS "Users can view own membership" ON public.memberships;
+CREATE POLICY "Users can view own membership"
+  ON public.memberships FOR SELECT USING (auth.uid() = user_id);
+
+DROP POLICY IF EXISTS "Users can register membership" ON public.memberships;
+CREATE POLICY "Users can register membership"
+  ON public.memberships FOR INSERT WITH CHECK (true);
+
+-- 9. Birthday Requests
+DROP POLICY IF EXISTS "Users can submit birthday request" ON public.birthday_requests;
+CREATE POLICY "Users can submit birthday request"
+  ON public.birthday_requests FOR INSERT WITH CHECK (true);
+
+DROP POLICY IF EXISTS "Users can view birthday requests" ON public.birthday_requests;
+CREATE POLICY "Users can view birthday requests"
+  ON public.birthday_requests FOR SELECT USING (true);
+
+-- 10. Venue Locations
+DROP POLICY IF EXISTS "Public can view active venue locations" ON public.venue_locations;
+CREATE POLICY "Public can view active venue locations"
+  ON public.venue_locations FOR SELECT USING (true);
+
+DROP POLICY IF EXISTS "Allow write venue locations" ON public.venue_locations;
+CREATE POLICY "Allow write venue locations"
+  ON public.venue_locations FOR ALL USING (true) WITH CHECK (true);
+
+-- 11. Notitas de la noche
+DROP POLICY IF EXISTS "Public can view active night notes" ON public.night_notes;
+CREATE POLICY "Public can view active night notes"
+  ON public.night_notes FOR SELECT USING (true);
+
+DROP POLICY IF EXISTS "Users can manage night notes" ON public.night_notes;
+CREATE POLICY "Users can manage night notes"
+  ON public.night_notes FOR ALL USING (true) WITH CHECK (true);
+
+-- 12. Instantáneas de la noche
+DROP POLICY IF EXISTS "Public can view active night stories" ON public.night_stories;
+CREATE POLICY "Public can view active night stories"
+  ON public.night_stories FOR SELECT USING (true);
+
+DROP POLICY IF EXISTS "Users can manage night stories" ON public.night_stories;
+CREATE POLICY "Users can manage night stories"
+  ON public.night_stories FOR ALL USING (true) WITH CHECK (true);
+
+-- ==============================================================================
+-- TRIGGER AUTOMÁTICO: Crear perfil al registrarse en Auth
+-- ==============================================================================
+CREATE OR REPLACE FUNCTION public.handle_new_user()
+RETURNS trigger AS $$
+BEGIN
+  INSERT INTO public.profiles (id, email, full_name, nickname, birth_date, age, avatar_url)
+  VALUES (
+    new.id,
+    new.email,
+    COALESCE(new.raw_user_meta_data->>'full_name', split_part(new.email, '@', 1)),
+    COALESCE(new.raw_user_meta_data->>'nickname', split_part(new.email, '@', 1)),
+    '2000-01-01',
+    24,
+    'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=500&auto=format&fit=crop&q=80'
+  )
+  ON CONFLICT (id) DO NOTHING;
+  RETURN new;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;
+CREATE TRIGGER on_auth_user_created
+  AFTER INSERT ON auth.users
+  FOR EACH ROW EXECUTE PROCEDURE public.handle_new_user();

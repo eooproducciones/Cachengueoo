@@ -50,6 +50,8 @@ import {
 } from '../../services/supabaseClient';
 import { passlineParser, FOUR_PRESET_FLYERS } from '../../services/passlineParser';
 import { VenueMapEditor } from './VenueMapEditor';
+import schemaSql from '../../config/supabase.schema.sql?raw';
+import { Copy } from 'lucide-react';
 
 // Imágenes de alta resolución predeterminadas para aliados comerciales
 export const PRESET_BENEFIT_IMAGES = [
@@ -138,6 +140,15 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onExitAdmin, onL
     success: boolean;
     message: string;
   } | null>(null);
+  const [copiedSql, setCopiedSql] = useState(false);
+  const [showSqlCode, setShowSqlCode] = useState(false);
+
+  const handleCopySql = () => {
+    navigator.clipboard.writeText(schemaSql);
+    setCopiedSql(true);
+    setTimeout(() => setCopiedSql(false), 3000);
+  };
+
 
   // Handle Event Validation Mode Change
   const handleModeChange = (eventId: string, mode: ValidationMode) => {
@@ -1268,15 +1279,61 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onExitAdmin, onL
             </div>
           )}
 
-          <div className="p-4 rounded-2xl bg-zinc-950/80 border border-zinc-800/80 text-[11px] text-zinc-400 space-y-2">
-            <span className="font-bold text-white block">Script de Migración SQL:</span>
-            <p>
-              El archivo <code className="text-[#F39200]">src/config/supabase.schema.sql</code> contiene la estructura
-              de base de datos completa con RLS para copiar y pegar en el SQL Editor de tu proyecto en Supabase.
-            </p>
+          <div className="p-5 rounded-2xl bg-zinc-950/80 border border-zinc-800 space-y-3">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <div>
+                <span className="font-bold text-white text-xs block">
+                  Script de Base de Datos para Supabase (17 tablas, con Notitas e Instantáneas):
+                </span>
+                <p className="text-[11px] text-zinc-400 mt-0.5">
+                  Este es el código SQL exacto que tenés que pegar en el <strong>SQL Editor</strong> de tu proyecto de Supabase.
+                </p>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handleCopySql}
+                  className={`h-9 px-4 rounded-xl font-bold text-xs flex items-center gap-1.5 cursor-pointer transition-all ${
+                    copiedSql
+                      ? 'bg-emerald-500 text-black'
+                      : 'bg-[#F39200] hover:bg-[#E08400] text-black shadow-md shadow-[#F39200]/20'
+                  }`}
+                >
+                  {copiedSql ? (
+                    <>
+                      <CheckCircle2 className="w-4 h-4" />
+                      <span>¡Copiado al portapapeles!</span>
+                    </>
+                  ) : (
+                    <>
+                      <Copy className="w-4 h-4" />
+                      <span>Copiar Script SQL</span>
+                    </>
+                  )}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setShowSqlCode(!showSqlCode)}
+                  className="h-9 px-3 rounded-xl bg-zinc-900 border border-zinc-800 hover:border-zinc-700 text-zinc-300 text-xs font-semibold cursor-pointer"
+                >
+                  {showSqlCode ? 'Ocultar' : 'Ver código'}
+                </button>
+              </div>
+            </div>
+
+            {showSqlCode && (
+              <div className="mt-3 relative">
+                <pre className="max-h-60 overflow-y-auto p-4 rounded-xl bg-black border border-zinc-800 text-[10px] font-mono text-zinc-300 leading-relaxed select-all">
+                  {schemaSql}
+                </pre>
+              </div>
+            )}
           </div>
         </div>
       )}
+
 
       {/* CREATE EVENT MODAL MANUAL */}
       {showNewEventModal && (

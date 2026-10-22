@@ -9,6 +9,14 @@ export interface SupabaseConfig {
   isConfigured: boolean;
 }
 
+export function cleanSupabaseUrl(raw: string | null): string | null {
+  if (!raw) return null;
+  let u = raw.trim();
+  u = u.replace(/\/+$/, '');
+  u = u.replace(/\/rest\/v1$/i, '');
+  return u.replace(/\/+$/, '');
+}
+
 export function getSupabaseConfig(): SupabaseConfig {
   const envUrl = (import.meta.env as Record<string, string | undefined>).VITE_SUPABASE_URL || null;
   const envKey = (import.meta.env as Record<string, string | undefined>).VITE_SUPABASE_ANON_KEY || null;
@@ -16,7 +24,7 @@ export function getSupabaseConfig(): SupabaseConfig {
   const storedUrl = localStorage.getItem(SUPABASE_STORAGE_URL_KEY);
   const storedKey = localStorage.getItem(SUPABASE_STORAGE_KEY_KEY);
 
-  const url = storedUrl || envUrl;
+  const url = cleanSupabaseUrl(storedUrl || envUrl);
   const anonKey = storedKey || envKey;
 
   return {
@@ -27,7 +35,8 @@ export function getSupabaseConfig(): SupabaseConfig {
 }
 
 export function saveSupabaseConfig(url: string, anonKey: string): void {
-  localStorage.setItem(SUPABASE_STORAGE_URL_KEY, url.trim());
+  const cleanUrl = cleanSupabaseUrl(url) || url.trim();
+  localStorage.setItem(SUPABASE_STORAGE_URL_KEY, cleanUrl);
   localStorage.setItem(SUPABASE_STORAGE_KEY_KEY, anonKey.trim());
   // Reset client instance
   clientInstance = null;
