@@ -81,14 +81,19 @@ export const authService = {
 
     // Update in all users list
     const all = this.getAllUsers();
-    const updatedList = all.map((u) => (u.id === current.id ? updated : u));
-    localStorage.setItem(USERS_LIST_STORAGE_KEY, JSON.stringify(updatedList));
+    const existingIdx = all.findIndex((u) => u.id === current.id || (u.email && u.email === current.email));
+    if (existingIdx >= 0) {
+      all[existingIdx] = updated;
+    } else {
+      all.unshift(updated);
+    }
+    localStorage.setItem(USERS_LIST_STORAGE_KEY, JSON.stringify(all));
 
     // Si Supabase está conectado, sincronizar en Auth y en tabla profiles
     const client = getSupabaseClient();
     if (client) {
+      // 1. Guardar metadatos completos en Supabase Auth
       try {
-        // 1. Guardar metadatos completos en Supabase Auth
         await client.auth.updateUser({
           data: {
             full_name: updated.fullName,
@@ -107,33 +112,46 @@ export const authService = {
             instagram: updated.instagram,
           },
         });
+      } catch (e) {
+        console.warn('Nota: Supabase auth.updateUser omitido o sin sesión activa:', e);
+      }
 
-        // 2. Guardar en public.profiles usando ÚNICAMENTE las columnas existentes
-        const validDbRecord: Record<string, unknown> = {
-          full_name: updated.fullName,
-          nickname: updated.nickname,
-          birth_date: updated.birthDate,
-          age: updated.age,
-          avatar_url: updated.avatarUrl,
-          gender: updated.gender,
-          preference: updated.preference,
-          bio: updated.bio || '',
-          drink_favorite: updated.drinkFavorite || 'Fernet con Coca',
-          instagram: updated.instagram || '',
-          interests: packProfileInterests(updated),
-          updated_at: new Date().toISOString(),
-        };
+      // 2. Guardar en public.profiles usando ÚNICAMENTE las columnas existentes
+      const validDbRecord: Record<string, unknown> = {
+        full_name: updated.fullName,
+        nickname: updated.nickname,
+        birth_date: updated.birthDate,
+        age: updated.age,
+        avatar_url: updated.avatarUrl,
+        gender: updated.gender,
+        preference: updated.preference,
+        bio: updated.bio || '',
+        drink_favorite: updated.drinkFavorite || 'Fernet con Coca',
+        instagram: updated.instagram || '',
+        interests: packProfileInterests(updated),
+        updated_at: new Date().toISOString(),
+      };
 
-        await client
-          .from('profiles')
-          .upsert(
-            {
-              id: current.id,
-              email: current.email,
-              ...validDbRecord,
-            },
-            { onConflict: 'id' }
-          );
+      const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(current.id);
+
+      try {
+        if (isUuid) {
+          await client
+            .from('profiles')
+            .upsert(
+              {
+                id: current.id,
+                email: current.email,
+                ...validDbRecord,
+              },
+              { onConflict: 'id' }
+            );
+        } else if (current.email) {
+          await client
+            .from('profiles')
+            .update(validDbRecord)
+            .eq('email', current.email);
+        }
       } catch (e) {
         console.warn('Advertencia al sincronizar perfil en Supabase:', e);
       }
@@ -203,6 +221,17 @@ export const authService = {
         notifyAuthChange();
         return { success: true, user: u };
       }
+    }
+
+    // Si no se pudo iniciar con Supabase o no hay conexión, verificar usuarios registrados localmente
+    const matchedLocal = this.getAllUsers().find(
+      (u) => u.email.toLowerCase() === cleanEmail
+    );
+    if (matchedLocal) {
+      localStorage.setItem(USER_STORAGE_KEY, JSON.stringify(matchedLocal));
+      sessionStorage.setItem(USER_STORAGE_KEY, JSON.stringify(matchedLocal));
+      notifyAuthChange();
+      return { success: true, user: matchedLocal };
     }
 
     return {
@@ -303,6 +332,11 @@ export const authService = {
 
         localStorage.setItem(USER_STORAGE_KEY, JSON.stringify(registeredProfile));
         sessionStorage.setItem(USER_STORAGE_KEY, JSON.stringify(registeredProfile));
+
+        const allUsers = this.getAllUsers().filter((u) => u.id !== registeredProfile.id && u.email !== registeredProfile.email);
+        allUsers.unshift(registeredProfile);
+        localStorage.setItem(USERS_LIST_STORAGE_KEY, JSON.stringify(allUsers));
+
         notifyAuthChange();
 
         return { success: true, user: registeredProfile };
@@ -317,6 +351,11 @@ export const authService = {
     };
     localStorage.setItem(USER_STORAGE_KEY, JSON.stringify(localUser));
     sessionStorage.setItem(USER_STORAGE_KEY, JSON.stringify(localUser));
+
+    const allUsers = this.getAllUsers().filter((u) => u.id !== localUser.id && u.email !== localUser.email);
+    allUsers.unshift(localUser);
+    localStorage.setItem(USERS_LIST_STORAGE_KEY, JSON.stringify(allUsers));
+
     notifyAuthChange();
 
     return { success: true, user: localUser };

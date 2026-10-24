@@ -30,7 +30,6 @@ import {
   ZODIAC_SIGNS,
   MUSIC_GENRES,
   DRINK_OPTIONS,
-  PRESET_AVATARS,
 } from '../../constants/profileOptions';
 import { compressImageFile } from '../../utils/imageCompressor';
 
@@ -850,9 +849,9 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                   })}
                 </div>
 
-                <label className="w-full h-9 rounded-xl bg-zinc-900 hover:bg-zinc-800 border border-zinc-700 hover:border-[#F39200] text-white font-bold text-[11px] flex items-center justify-center gap-1.5 cursor-pointer transition-all">
-                  <Upload className="w-3.5 h-3.5 text-[#F39200]" />
-                  Subir foto desde tu dispositivo (Cámara / Galería)
+                <label className="w-full h-10 rounded-xl bg-zinc-900 hover:bg-zinc-800 border border-zinc-700 hover:border-[#F39200] text-white font-bold text-[11px] flex items-center justify-center gap-2 cursor-pointer transition-all shadow-sm">
+                  <Camera className="w-4 h-4 text-[#F39200]" />
+                  <span>Subir foto desde tu dispositivo (Cámara / Galería)</span>
                   <input
                     type="file"
                     accept="image/*"
@@ -860,35 +859,6 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                     className="hidden"
                   />
                 </label>
-
-                {/* Presets */}
-                <div>
-                  <span className="text-[10px] uppercase font-bold text-zinc-500 block mb-1">
-                    O elegir de fotos de ejemplo:
-                  </span>
-                  <div className="grid grid-cols-4 gap-1.5">
-                    {PRESET_AVATARS.slice(0, 4).map((p, pIdx) => {
-                      const isUsed = editPhotos.includes(p.url);
-                      return (
-                        <button
-                          key={pIdx}
-                          type="button"
-                          onClick={() => handleAddPhoto(p.url)}
-                          className={`relative aspect-square rounded-xl overflow-hidden border cursor-pointer transition-all ${
-                            isUsed ? 'border-[#F39200] opacity-50 ring-1 ring-[#F39200]' : 'border-zinc-800 hover:border-zinc-500'
-                          }`}
-                        >
-                          <img src={p.url} alt={p.label} className="w-full h-full object-cover" />
-                          {isUsed && (
-                            <div className="absolute inset-0 bg-black/60 flex items-center justify-center">
-                              <Check className="w-3.5 h-3.5 text-[#F39200] stroke-[3]" />
-                            </div>
-                          )}
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
               </div>
 
               {/* 4. BIOGRAFÍA */}

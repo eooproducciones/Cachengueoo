@@ -18,16 +18,18 @@ export function useAuth() {
             .select('*')
             .eq('id', data.user.id)
             .maybeSingle()
-            .then(({ data: profileData }) => {
-              const currentLocal = authService.getCurrentUser();
-              const mergedUser = buildUserProfileFromSources(data.user, profileData, currentLocal);
-              setUser(mergedUser);
-              localStorage.setItem('cachengueoo_current_user', JSON.stringify(mergedUser));
-              sessionStorage.setItem('cachengueoo_current_user', JSON.stringify(mergedUser));
-            })
-            .catch((err) => {
-              console.warn('Error fetching Supabase profile in useAuth:', err);
-            });
+            .then(
+              ({ data: profileData }) => {
+                const currentLocal = authService.getCurrentUser();
+                const mergedUser = buildUserProfileFromSources(data.user, profileData, currentLocal);
+                setUser(mergedUser);
+                localStorage.setItem('cachengueoo_current_user', JSON.stringify(mergedUser));
+                sessionStorage.setItem('cachengueoo_current_user', JSON.stringify(mergedUser));
+              },
+              (err: unknown) => {
+                console.warn('Error fetching Supabase profile in useAuth:', err);
+              }
+            );
         }
       });
     }

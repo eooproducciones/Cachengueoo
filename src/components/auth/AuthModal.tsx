@@ -36,7 +36,6 @@ import {
   ZODIAC_SIGNS,
   MUSIC_GENRES,
   DRINK_OPTIONS,
-  PRESET_AVATARS,
 } from '../../constants/profileOptions';
 import { compressImageFile } from '../../utils/imageCompressor';
 
@@ -110,11 +109,8 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   ]);
   const [regDrinks, setRegDrinks] = useState<string[]>(['Fernet', 'Skyy']);
 
-  // Step 3: Fotos & Bio
-  const [regPhotos, setRegPhotos] = useState<string[]>([
-    PRESET_AVATARS[0].url,
-    PRESET_AVATARS[1].url,
-  ]);
+  // Step 3: Fotos & Bio (inicialmente vacías; el usuario debe subir obligatoriamente su propia foto)
+  const [regPhotos, setRegPhotos] = useState<string[]>([]);
   const [regBio, setRegBio] = useState('Salgo a disfrutar con amigos y tomar un buen Fernet. Si pinta charla en la pista, avisame.');
 
   // Usuario creado recientemente para la verificación
@@ -201,23 +197,8 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     e.target.value = '';
   };
 
-  // Agregar preset de foto en Step 3
-  const handleAddPresetPhoto = (url: string) => {
-    if (regPhotos.includes(url)) return;
-    if (regPhotos.length >= 3) {
-      setRegPhotos([regPhotos[0], regPhotos[1], url]);
-    } else {
-      setRegPhotos([...regPhotos, url]);
-    }
-    setErrorMessage(null);
-  };
-
   // Eliminar foto en Step 3
   const handleRemovePhoto = (index: number) => {
-    if (regPhotos.length <= 1) {
-      setErrorMessage('Debés tener al menos 1 foto en tu perfil.');
-      return;
-    }
     setRegPhotos(regPhotos.filter((_, i) => i !== index));
     setErrorMessage(null);
   };
@@ -1059,13 +1040,16 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                 <div className="grid grid-cols-3 gap-2.5">
                   {[0, 1, 2].map((idx) => {
                     const photoUrl = regPhotos[idx];
+                    const isRequired = idx === 0;
                     return (
                       <div
                         key={idx}
-                        className={`relative aspect-[3/4] rounded-2xl overflow-hidden border-2 flex flex-col items-center justify-center ${
+                        className={`relative aspect-[3/4] rounded-2xl overflow-hidden border-2 flex flex-col items-center justify-center transition-all ${
                           photoUrl
-                            ? 'border-zinc-700 bg-zinc-950'
-                            : 'border-dashed border-zinc-800 bg-zinc-900/50'
+                            ? 'border-[#F39200]/80 bg-zinc-950 shadow-md'
+                            : isRequired
+                            ? 'border-dashed border-[#F39200]/60 bg-[#F39200]/5 hover:bg-[#F39200]/10'
+                            : 'border-dashed border-zinc-800 bg-zinc-900/50 hover:bg-zinc-800/40'
                         }`}
                       >
                         {photoUrl ? (
@@ -1084,16 +1068,22 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                               type="button"
                               onClick={() => handleRemovePhoto(idx)}
                               className="absolute top-1.5 right-1.5 w-6 h-6 rounded-full bg-black/80 hover:bg-red-600 text-white flex items-center justify-center cursor-pointer transition-colors shadow"
+                              title="Eliminar foto"
                             >
                               <Trash2 className="w-3 h-3" />
                             </button>
                           </>
                         ) : (
-                          <label className="w-full h-full flex flex-col items-center justify-center gap-1 cursor-pointer p-2 text-center hover:bg-zinc-800/40 transition-colors">
-                            <Upload className="w-5 h-5 text-zinc-500" />
-                            <span className="text-[10px] text-zinc-500 font-bold">
-                              Foto {idx + 1}
-                            </span>
+                          <label className="w-full h-full flex flex-col items-center justify-center gap-1.5 cursor-pointer p-2 text-center transition-colors">
+                            <Upload className={`w-5 h-5 ${isRequired ? 'text-[#F39200]' : 'text-zinc-500'}`} />
+                            <div className="leading-tight">
+                              <span className={`text-[10px] font-bold block ${isRequired ? 'text-amber-400' : 'text-zinc-400'}`}>
+                                Foto {idx + 1}
+                              </span>
+                              <span className={`text-[8.5px] block ${isRequired ? 'text-amber-500/90 font-extrabold uppercase' : 'text-zinc-600'}`}>
+                                {isRequired ? 'Obligatoria' : 'Opcional'}
+                              </span>
+                            </div>
                             <input
                               type="file"
                               accept="image/*"
@@ -1109,9 +1099,9 @@ export const AuthModal: React.FC<AuthModalProps> = ({
 
                 {/* Botón para subir imagen desde el dispositivo */}
                 <div className="mt-2.5">
-                  <label className="w-full h-9 rounded-xl bg-zinc-900 hover:bg-zinc-800 border border-zinc-700 hover:border-[#F39200] text-white font-bold text-[11px] flex items-center justify-center gap-1.5 cursor-pointer transition-all">
-                    <Upload className="w-3.5 h-3.5 text-[#F39200]" />
-                    Subir foto desde tu dispositivo (Cámara / Galería)
+                  <label className="w-full h-10 rounded-xl bg-zinc-900 hover:bg-zinc-800 border border-zinc-700 hover:border-[#F39200] text-white font-bold text-[11px] flex items-center justify-center gap-2 cursor-pointer transition-all shadow-sm">
+                    <Camera className="w-4 h-4 text-[#F39200]" />
+                    <span>Subir foto desde tu dispositivo (Cámara / Galería)</span>
                     <input
                       type="file"
                       accept="image/*"
@@ -1121,33 +1111,11 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                   </label>
                 </div>
 
-                {/* Presets rápidos */}
-                <div className="mt-2">
-                  <span className="text-[10px] uppercase font-bold text-zinc-500 block mb-1">
-                    O elegí fotos sugeridas de fiesta:
-                  </span>
-                  <div className="grid grid-cols-4 gap-1.5">
-                    {PRESET_AVATARS.slice(0, 4).map((p, pIdx) => {
-                      const isUsed = regPhotos.includes(p.url);
-                      return (
-                        <button
-                          key={pIdx}
-                          type="button"
-                          onClick={() => handleAddPresetPhoto(p.url)}
-                          className={`relative aspect-square rounded-xl overflow-hidden border cursor-pointer transition-all ${
-                            isUsed ? 'border-[#F39200] opacity-50 ring-1 ring-[#F39200]' : 'border-zinc-800 hover:border-zinc-500'
-                          }`}
-                        >
-                          <img src={p.url} alt={p.label} className="w-full h-full object-cover" />
-                          {isUsed && (
-                            <div className="absolute inset-0 bg-black/60 flex items-center justify-center">
-                              <Check className="w-3.5 h-3.5 text-[#F39200] stroke-[3]" />
-                            </div>
-                          )}
-                        </button>
-                      );
-                    })}
-                  </div>
+                <div className="mt-2 p-2.5 rounded-xl bg-amber-500/10 border border-amber-500/20 text-zinc-300 text-[11px] leading-relaxed flex items-start gap-2">
+                  <Sparkles className="w-4 h-4 text-[#F39200] shrink-0 mt-0.5" />
+                  <p>
+                    <strong className="text-white">Foto real obligatoria:</strong> Para activar tu Cache ID y el modo Match, debés subir al menos 1 foto tuya. Podés agregar hasta 3 fotos para mostrar tu mejor estilo en la noche.
+                  </p>
                 </div>
               </div>
 
