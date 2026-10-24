@@ -23,15 +23,6 @@ interface NightNotesViewProps {
   onInviteDrink?: (profile: MatchProfile) => void;
 }
 
-const NOTE_PRESETS = [
-  '¿Quién para bailar cachengue hasta el amanecer? 💃',
-  'Perdí a mis amigos en la pista jajaja 😂',
-  'Team Fernet Branca de autor hoy 🍸',
-  'Recién llegué a Cachengueoo 🔥',
-  'Si suena reggaeton viejo avisen cerca del DJ 🔊',
-  '¿Sale ese trago para romper el hielo? 🥂',
-];
-
 export const NightNotesView: React.FC<NightNotesViewProps> = ({
   currentUser,
   profiles,
@@ -47,13 +38,13 @@ export const NightNotesView: React.FC<NightNotesViewProps> = ({
   const [isCameraOpen, setIsCameraOpen] = useState(false);
   const [viewerStoryIndex, setViewerStoryIndex] = useState<number | null>(null);
 
-  // Estado local para corazones de las notitas de los perfiles
+  // Estado local para corazones de las notitas de los perfiles (inicia en 0 reales)
   const [profileNotesHearts, setProfileNotesHearts] = useState<Record<string, { count: number; userLiked: boolean }>>(() => {
     const initial: Record<string, { count: number; userLiked: boolean }> = {};
     profiles.forEach((p) => {
       if (p.nightNote) {
         initial[p.userId] = {
-          count: p.nightNote.hearts || 4,
+          count: p.nightNote.hearts || 0,
           userLiked: false,
         };
       }
@@ -61,10 +52,15 @@ export const NightNotesView: React.FC<NightNotesViewProps> = ({
     return initial;
   });
 
-  // Corazones acumulados en tus propias notitas e instantáneas hoy
+  // Corazones reales acumulados hoy (comienza en 0, sin valores ficticios)
   const [myCollectedHearts, setMyCollectedHearts] = useState<number>(() => {
-    const noteHearts = currentUser.nightNote?.hearts || 8;
-    return noteHearts;
+    try {
+      const stored = localStorage.getItem(`cachengueoo_user_hearts_${currentUser.id}`);
+      if (stored !== null) return Number(stored) || 0;
+    } catch (e) {
+      console.error(e);
+    }
+    return currentUser.nightNote?.hearts || 0;
   });
 
   // Manejador para publicar nueva notita
@@ -98,7 +94,15 @@ export const NightNotesView: React.FC<NightNotesViewProps> = ({
         if (s.id === storyId) {
           const newHearts = (s.hearts || 0) + 1;
           if (s.userId === currentUser.id) {
-            setMyCollectedHearts((c) => c + 1);
+            setMyCollectedHearts((c) => {
+              const next = c + 1;
+              try {
+                localStorage.setItem(`cachengueoo_user_hearts_${currentUser.id}`, String(next));
+              } catch (e) {
+                console.error(e);
+              }
+              return next;
+            });
           }
           return { ...s, hearts: newHearts };
         }
@@ -114,6 +118,25 @@ export const NightNotesView: React.FC<NightNotesViewProps> = ({
       const current = prev[userId] || { count: 0, userLiked: false };
       const nextLiked = !current.userLiked;
       const nextCount = nextLiked ? current.count + 1 : Math.max(0, current.count - 1);
+      
+      // Si el corazón es para el usuario actual
+      if (userId === currentUser.id) {
+        setMyCollectedHearts(nextCount);
+        try {
+          localStorage.setItem(`cachengueoo_user_hearts_${currentUser.id}`, String(nextCount));
+        } catch (err) {
+          console.error(err);
+        }
+      } else {
+        try {
+          const otherCurrent = Number(localStorage.getItem(`cachengueoo_user_hearts_${userId}`)) || 0;
+          const otherNext = nextLiked ? otherCurrent + 1 : Math.max(0, otherCurrent - 1);
+          localStorage.setItem(`cachengueoo_user_hearts_${userId}`, String(otherNext));
+        } catch (err) {
+          console.error(err);
+        }
+      }
+
       return {
         ...prev,
         [userId]: { count: nextCount, userLiked: nextLiked },
@@ -409,7 +432,7 @@ export const NightNotesView: React.FC<NightNotesViewProps> = ({
               <div className="space-y-4">
                 <div>
                   <label className="text-zinc-300 text-xs block mb-1 font-medium">
-                    ¿Qué estás haciendo ahora? (Visible en toda la fiesta)
+                    ¿Qué estás haciendo ahora?
                   </label>
                   <textarea
                     rows={2}
@@ -425,39 +448,12 @@ export const NightNotesView: React.FC<NightNotesViewProps> = ({
                   </span>
                 </div>
 
-                {/* Ideas rápidas */}
-                <div className="space-y-1.5">
-                  <span className="text-[10px] text-zinc-400 font-bold uppercase tracking-wider flex items-center gap-1">
-                    <Sparkles className="w-3 h-3 text-[#F39200]" />
-                    <span>Ideas para romper el hielo:</span>
-                  </span>
-                  <div className="flex flex-wrap gap-1.5">
-                    {NOTE_PRESETS.slice(0, 3).map((preset) => (
-                      <button
-                        key={preset}
-                        type="button"
-                        onClick={() => setNoteInput(preset)}
-                        className="text-[10px] px-2.5 py-1 rounded-lg bg-zinc-900 hover:bg-zinc-800 text-zinc-300 hover:text-white border border-zinc-800 text-left cursor-pointer transition-colors"
-                      >
-                        {preset}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                <div className="pt-2 flex gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setIsNoteModalOpen(false)}
-                    className="flex-1 py-2.5 rounded-xl bg-zinc-900 border border-zinc-800 text-zinc-400 hover:text-white text-xs font-semibold cursor-pointer"
-                  >
-                    Cancelar
-                  </button>
+                <div className="pt-1">
                   <button
                     type="button"
                     onClick={() => handlePublishNote()}
                     disabled={!noteInput.trim()}
-                    className="flex-1 py-2.5 rounded-xl bg-[#F39200] hover:bg-[#E08400] disabled:opacity-40 disabled:pointer-events-none text-black text-xs font-black cursor-pointer shadow-lg shadow-[#F39200]/20 active:scale-95 transition-all"
+                    className="w-full py-3 rounded-xl bg-[#F39200] hover:bg-[#E08400] disabled:opacity-40 disabled:pointer-events-none text-black text-xs font-black cursor-pointer shadow-lg shadow-[#F39200]/20 active:scale-95 transition-all"
                   >
                     Publicar notita
                   </button>

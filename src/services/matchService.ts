@@ -35,6 +35,11 @@ export const matchService = {
 
   async fetchAvailableProfiles(currentUserId?: string): Promise<MatchProfile[]> {
     const dismissed = this.getDismissedProfileIds();
+    let blockedList: string[] = [];
+    try {
+      blockedList = JSON.parse(localStorage.getItem('cachengueoo_blocked_match_users') || '[]');
+    } catch {}
+
     const client = getSupabaseClient();
     if (client) {
       try {
@@ -45,7 +50,12 @@ export const matchService = {
         const { data, error } = await query;
         if (!error && data && data.length > 0) {
           const mapped: MatchProfile[] = data
-            .filter((row) => !dismissed.includes(row.id))
+            .filter((row) => {
+              if (dismissed.includes(row.id)) return false;
+              if (blockedList.includes(row.id)) return false;
+              if (row.email && blockedList.includes(row.email.toLowerCase())) return false;
+              return true;
+            })
             .map((row) => {
               const unpacked = unpackProfileInterests(row.interests);
               const avatar =

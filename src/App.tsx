@@ -346,7 +346,7 @@ export default function App() {
                 currentUser={user}
                 isInsideVenue={isInside}
                 onOpenPresenceModal={() => setIsPresenceModalOpen(true)}
-                eventTitle={currentEvent.title}
+                eventTitle={currentEvent?.title || 'Cachengueoo Mendoza'}
                 onUpdateUserProfile={updateProfile}
                 matchSubTab={matchSubTab}
                 onNavigateMatchSubTab={(sub) => {
@@ -423,7 +423,7 @@ export default function App() {
         onClose={() => setIsPresenceModalOpen(false)}
         presence={presence}
         venueConfig={venueConfig}
-        validationMode={currentEvent.validationMode}
+        validationMode={currentEvent?.validationMode || 'GPS_OR_QR'}
         onCheckGps={async () => {
           await checkGpsPresence();
           showToast('Ubicación comprobada');

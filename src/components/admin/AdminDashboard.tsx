@@ -31,6 +31,12 @@ import {
   MessageCircle,
   LogOut,
   ArrowLeft,
+  Eye,
+  Ban,
+  UserCheck,
+  Instagram,
+  Sparkles,
+  GlassWater,
 } from 'lucide-react';
 import { ClubEvent, ValidationMode, VenueConfig, BirthdayRequest, ClubBenefit } from '../../types';
 import { eventService } from '../../services/eventService';
@@ -43,6 +49,7 @@ import { getVenueConfig, saveVenueConfig } from '../../config/venue';
 import { getSupabaseClient } from '../../services/supabaseClient';
 import { passlineParser, FOUR_PRESET_FLYERS } from '../../services/passlineParser';
 import { VenueMapEditor } from './VenueMapEditor';
+import { unpackProfileInterests } from '../../utils/profileMetadata';
 
 // Imágenes de alta resolución predeterminadas para aliados comerciales
 export const PRESET_BENEFIT_IMAGES = [
@@ -124,10 +131,53 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onExitAdmin, onL
 
   // Registered Users state (real users from Supabase or authService)
   const [registeredUsers, setRegisteredUsers] = useState<any[]>([]);
+  const [userSearchQuery, setUserSearchQuery] = useState<string>('');
+  const [selectedUserDetail, setSelectedUserDetail] = useState<any | null>(null);
+  const [blockedMatchUsers, setBlockedMatchUsers] = useState<string[]>(() => {
+    try {
+      return JSON.parse(localStorage.getItem('cachengueoo_blocked_match_users') || '[]');
+    } catch {
+      return [];
+    }
+  });
+
+  const handleToggleBlockMatch = (userId: string, email?: string) => {
+    const isCurrentlyBlocked =
+      blockedMatchUsers.includes(userId) ||
+      (email ? blockedMatchUsers.includes(email.toLowerCase()) : false);
+
+    let nextList: string[];
+    if (isCurrentlyBlocked) {
+      nextList = blockedMatchUsers.filter(
+        (id) => id !== userId && (!email || id !== email.toLowerCase())
+      );
+    } else {
+      nextList = [...blockedMatchUsers, userId];
+      if (email && !nextList.includes(email.toLowerCase())) {
+        nextList.push(email.toLowerCase());
+      }
+    }
+
+    setBlockedMatchUsers(nextList);
+    localStorage.setItem('cachengueoo_blocked_match_users', JSON.stringify(nextList));
+    window.dispatchEvent(
+      new CustomEvent('cachengueoo_blocked_users_change', { detail: nextList })
+    );
+
+    // Si el modal está abierto para este usuario, actualizar su estado reflejado
+    if (selectedUserDetail && (selectedUserDetail.id === userId || selectedUserDetail.email === email)) {
+      setSelectedUserDetail({
+        ...selectedUserDetail,
+        isBlocked: !isCurrentlyBlocked,
+      });
+    }
+  };
 
   React.useEffect(() => {
     const fetchUsers = async () => {
+      const localUsers = authService.getAllUsers();
       const supabase = getSupabaseClient();
+      let dbUsers: any[] = [];
       if (supabase) {
         try {
           const { data, error } = await supabase
@@ -135,14 +185,41 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onExitAdmin, onL
             .select('*')
             .order('created_at', { ascending: false });
           if (!error && data) {
-            setRegisteredUsers(data);
-            return;
+            dbUsers = data;
           }
         } catch (e) {
           console.warn('Error loading users from Supabase:', e);
         }
       }
-      setRegisteredUsers(authService.getAllUsers());
+
+      const mergedMap = new Map<string, any>();
+      dbUsers.forEach((u) => {
+        const unpacked = unpackProfileInterests(u.interests);
+        mergedMap.set(u.id || u.email, {
+          ...u,
+          fullName: u.full_name || u.fullName,
+          nickname: u.nickname || u.full_name,
+          zodiacSign: unpacked.zodiacSign || u.zodiac_sign,
+          musicPreferences: unpacked.musicPreferences,
+          drinks: unpacked.drinks,
+          photos:
+            Array.isArray(u.photos) && u.photos.length > 0
+              ? u.photos
+              : [u.avatar_url, ...unpacked.extraPhotos].filter(Boolean),
+        });
+      });
+
+      localUsers.forEach((u) => {
+        const key = u.id || u.email;
+        if (mergedMap.has(key)) {
+          const existing = mergedMap.get(key);
+          mergedMap.set(key, { ...existing, ...u });
+        } else {
+          mergedMap.set(key, u);
+        }
+      });
+
+      setRegisteredUsers(Array.from(mergedMap.values()));
     };
     fetchUsers();
   }, [adminTab]);
@@ -162,7 +239,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onExitAdmin, onL
 
   // Generate New QR for Tonight
   const handleGenerateNewQr = () => {
-    const newToken = presenceService.generateNewNightQr(activeEvent.id);
+    const newToken = presenceService.generateNewNightQr(activeEvent?.id || 'event_cachengueoo');
     setActiveQrToken(newToken);
   };
 
@@ -495,28 +572,52 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onExitAdmin, onL
       {/* TAB: PRESENCIA & QR */}
       {adminTab === 'presencia' && (
         <div className="space-y-6">
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-            <div className="p-5 rounded-3xl bg-[#121217] border border-zinc-800 space-y-1">
-              <span className="text-xs text-zinc-400">Total Personas Adentro</span>
-              <span className="text-3xl font-black text-white font-mono block">348</span>
-              <span className="text-[11px] text-emerald-400 flex items-center gap-1">
-                <span className="w-2 h-2 rounded-full bg-emerald-400"></span>
-                Capacidad actual: 45%
-              </span>
-            </div>
+          {(() => {
+            const verifiedInside = registeredUsers.filter(
+              (u: any) => Boolean(u.is_verified_in_venue || u.isVerified)
+            );
+            const totalInside = verifiedInside.length;
+            const gpsCount = verifiedInside.filter(
+              (u: any) => u.presence_method === 'GPS' || u.presenceMethod === 'GPS'
+            ).length;
+            const qrCount = verifiedInside.filter(
+              (u: any) => u.presence_method === 'QR' || u.presenceMethod === 'QR'
+            ).length;
+            const otherCount = totalInside - gpsCount - qrCount;
+            const finalQrCount = qrCount + (otherCount > 0 && gpsCount === 0 ? otherCount : 0);
+            const capacityLimit = 800;
+            const capacityPct =
+              totalInside > 0 ? Math.min(100, Math.round((totalInside / capacityLimit) * 100)) : 0;
 
-            <div className="p-5 rounded-3xl bg-[#121217] border border-zinc-800 space-y-1">
-              <span className="text-xs text-zinc-400">Validados por GPS</span>
-              <span className="text-3xl font-black text-[#F39200] font-mono block">214</span>
-              <span className="text-[11px] text-zinc-400">61.5% del total</span>
-            </div>
+            return (
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                <div className="p-5 rounded-3xl bg-[#121217] border border-zinc-800 space-y-1">
+                  <span className="text-xs text-zinc-400">Total Personas Adentro</span>
+                  <span className="text-3xl font-black text-white font-mono block">{totalInside}</span>
+                  <span className="text-[11px] text-emerald-400 flex items-center gap-1">
+                    <span className={`w-2 h-2 rounded-full ${totalInside > 0 ? 'bg-emerald-400 animate-ping' : 'bg-zinc-600'}`}></span>
+                    Capacidad en vivo: {capacityPct}%
+                  </span>
+                </div>
 
-            <div className="p-5 rounded-3xl bg-[#121217] border border-zinc-800 space-y-1">
-              <span className="text-xs text-zinc-400">Validados por QR Puerta</span>
-              <span className="text-3xl font-black text-amber-300 font-mono block">134</span>
-              <span className="text-[11px] text-zinc-400">38.5% del total</span>
-            </div>
-          </div>
+                <div className="p-5 rounded-3xl bg-[#121217] border border-zinc-800 space-y-1">
+                  <span className="text-xs text-zinc-400">Validados por GPS</span>
+                  <span className="text-3xl font-black text-[#F39200] font-mono block">{gpsCount}</span>
+                  <span className="text-[11px] text-zinc-400">
+                    {totalInside > 0 ? `${Math.round((gpsCount / totalInside) * 100)}% del total` : 'Sin registros aún'}
+                  </span>
+                </div>
+
+                <div className="p-5 rounded-3xl bg-[#121217] border border-zinc-800 space-y-1">
+                  <span className="text-xs text-zinc-400">Validados por QR Puerta</span>
+                  <span className="text-3xl font-black text-amber-300 font-mono block">{finalQrCount}</span>
+                  <span className="text-[11px] text-zinc-400">
+                    {totalInside > 0 ? `${Math.round((finalQrCount / totalInside) * 100)}% del total` : 'Sin registros aún'}
+                  </span>
+                </div>
+              </div>
+            );
+          })()}
 
           {/* QR Generator */}
           <div className="p-6 rounded-3xl bg-[#121217] border border-zinc-800 space-y-4">
@@ -1016,70 +1117,505 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onExitAdmin, onL
 
       {/* TAB: USUARIOS & MATCH */}
       {adminTab === 'usuarios' && (
-        <div className="p-6 rounded-3xl bg-[#121217] border border-zinc-800 space-y-4">
-          <div className="flex items-center justify-between">
+        <div className="p-6 rounded-3xl bg-[#121217] border border-zinc-800 space-y-5">
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
             <div>
               <h3 className="text-base font-bold text-white font-display">Usuarios Registrados</h3>
-              <p className="text-xs text-zinc-400">Control de perfiles reales creados en la plataforma.</p>
+              <p className="text-xs text-zinc-400">
+                Control de perfiles reales, historial y moderación de acceso a Match.
+              </p>
             </div>
-            <span className="text-xs font-mono text-[#F39200]">
+            <span className="text-xs font-mono px-3 py-1 rounded-full bg-zinc-900 border border-zinc-800 text-[#F39200]">
               {registeredUsers.length} perfiles en sistema
             </span>
           </div>
 
-          <div className="divide-y divide-zinc-800">
-            {registeredUsers.length === 0 ? (
-              <div className="py-12 text-center text-zinc-500 text-xs space-y-1.5">
-                <Users className="w-8 h-8 text-zinc-600 mx-auto mb-2" />
-                <p className="font-bold text-zinc-300">No hay usuarios registrados por el momento</p>
-                <p className="max-w-xs mx-auto text-zinc-500">
-                  A medida que los usuarios reales se registren o inicien sesión con su Cache ID, aparecerán en este listado.
-                </p>
-              </div>
-            ) : (
-              registeredUsers.map((usr: any) => {
+          {/* BUSCADOR DE USUARIOS */}
+          <div className="relative">
+            <Search className="w-4 h-4 text-zinc-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+            <input
+              type="text"
+              placeholder="Buscar por nombre, apodo, email o instagram..."
+              value={userSearchQuery}
+              onChange={(e) => setUserSearchQuery(e.target.value)}
+              className="w-full h-11 pl-10 pr-10 rounded-2xl bg-zinc-900/90 border border-zinc-700/80 text-white placeholder-zinc-500 text-xs focus:outline-none focus:border-[#F39200] transition-colors"
+            />
+            {userSearchQuery && (
+              <button
+                type="button"
+                onClick={() => setUserSearchQuery('')}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-white p-1"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            )}
+          </div>
+
+          {/* LISTADO DE USUARIOS */}
+          <div className="divide-y divide-zinc-800/80">
+            {(() => {
+              const query = userSearchQuery.trim().toLowerCase();
+              const filtered = registeredUsers.filter((usr: any) => {
+                if (!query) return true;
+                const name = (usr.full_name || usr.fullName || '').toLowerCase();
+                const nick = (usr.nickname || '').toLowerCase();
+                const email = (usr.email || '').toLowerCase();
+                const ig = (usr.instagram || '').toLowerCase();
+                return (
+                  name.includes(query) ||
+                  nick.includes(query) ||
+                  email.includes(query) ||
+                  ig.includes(query)
+                );
+              });
+
+              if (filtered.length === 0) {
+                return (
+                  <div className="py-12 text-center text-zinc-500 text-xs space-y-2">
+                    <Users className="w-8 h-8 text-zinc-600 mx-auto" />
+                    <p className="font-bold text-zinc-300">
+                      {registeredUsers.length === 0
+                        ? 'No hay usuarios registrados por el momento'
+                        : `No se encontraron usuarios para "${userSearchQuery}"`}
+                    </p>
+                    <p className="max-w-xs mx-auto text-zinc-500 text-[11px]">
+                      {registeredUsers.length === 0
+                        ? 'A medida que los usuarios reales se registren o inicien sesión con su Cache ID, aparecerán en este listado.'
+                        : 'Probá buscando con otro nombre, apodo, correo o usuario de Instagram.'}
+                    </p>
+                  </div>
+                );
+              }
+
+              return filtered.map((usr: any) => {
                 const id = usr.id || usr.userId;
                 const name = usr.full_name || usr.fullName || usr.nickname || 'Usuario';
                 const nick = usr.nickname || usr.full_name || '';
                 const age = usr.age || 23;
+                const email = usr.email || '';
+                const ig = usr.instagram ? usr.instagram.replace(/^@/, '') : '';
                 const drink = usr.drink_favorite || usr.drinkFavorite || 'Fernet con Coca';
                 const avatar =
                   usr.avatar_url ||
                   usr.avatarUrl ||
                   'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=400&q=80';
-                const isVerified = Boolean(usr.is_verified_in_venue ?? false);
+                const isVerified = Boolean(usr.is_verified_in_venue ?? usr.isVerified ?? false);
+
+                const isBlockedFromMatch =
+                  blockedMatchUsers.includes(id) ||
+                  (email ? blockedMatchUsers.includes(email.toLowerCase()) : false);
+
+                const unpacked = unpackProfileInterests(usr.interests);
+                const zodiac = unpacked.zodiacSign || usr.zodiac_sign || usr.zodiacSign;
 
                 return (
-                  <div key={id} className="py-3.5 flex items-center justify-between text-xs">
-                    <div className="flex items-center gap-3">
+                  <div
+                    key={id}
+                    className="py-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs"
+                  >
+                    <div className="flex items-center gap-3 min-w-0">
                       <img
                         src={avatar}
                         alt={name}
-                        className="w-11 h-11 rounded-2xl object-cover border border-zinc-700"
+                        className="w-12 h-12 rounded-2xl object-cover border border-zinc-700 shrink-0"
                         referrerPolicy="no-referrer"
                       />
-                      <div>
-                        <h4 className="font-bold text-white font-display">
-                          {name} {nick && nick !== name ? `(${nick})` : ''}
-                        </h4>
-                        <p className="text-[11px] text-zinc-400">
-                          {age} años · Trago favorito: {drink}
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <h4 className="font-bold text-white font-display text-sm truncate">
+                            {name}
+                          </h4>
+                          {nick && nick !== name && (
+                            <span className="px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-300 text-[10px] font-mono">
+                              "{nick}"
+                            </span>
+                          )}
+                          {isBlockedFromMatch ? (
+                            <span className="px-2 py-0.5 rounded-full bg-red-950/80 border border-red-500/50 text-red-400 text-[10px] font-bold uppercase tracking-wider flex items-center gap-1">
+                              <Ban className="w-3 h-3" />
+                              Bloqueado de Match
+                            </span>
+                          ) : (
+                            <span className="px-2 py-0.5 rounded-full bg-emerald-950/80 border border-emerald-500/40 text-emerald-400 text-[10px] font-bold uppercase tracking-wider flex items-center gap-1">
+                              <UserCheck className="w-3 h-3" />
+                              Activo en Match
+                            </span>
+                          )}
+                        </div>
+
+                        <p className="text-[11px] text-zinc-400 mt-0.5 truncate">
+                          {age} años {zodiac ? `· ${zodiac}` : ''} · Trago: <span className="text-zinc-300">{drink}</span>
                         </p>
-                        <p className={`text-[10px] mt-0.5 ${isVerified ? 'text-emerald-400' : 'text-zinc-500'}`}>
-                          ● {isVerified ? 'Presencia verificada en Cachengueoo' : 'Sin presencia activa hoy'}
-                        </p>
+
+                        <div className="flex items-center gap-2 mt-1 text-[10px] text-zinc-400 flex-wrap">
+                          {email && (
+                            <span className="text-zinc-400 font-mono truncate max-w-[200px]">
+                              {email}
+                            </span>
+                          )}
+                          {ig && (
+                            <span className="text-[#F39200] font-bold flex items-center gap-0.5">
+                              <Instagram className="w-3 h-3" />@{ig}
+                            </span>
+                          )}
+                          <span
+                            className={`flex items-center gap-1 font-medium ${
+                              isVerified ? 'text-emerald-400' : 'text-zinc-500'
+                            }`}
+                          >
+                            <span
+                              className={`w-1.5 h-1.5 rounded-full ${
+                                isVerified ? 'bg-emerald-400' : 'bg-zinc-600'
+                              }`}
+                            />
+                            {isVerified ? 'Adentro' : 'Sin presencia'}
+                          </span>
+                        </div>
                       </div>
                     </div>
 
-                    <div className="flex gap-2">
-                      <span className="px-2.5 py-1 rounded-lg bg-zinc-900 border border-zinc-800 text-zinc-400 text-[11px]">
-                        {usr.email || 'Registrado'}
-                      </span>
+                    {/* BOTONES DE ACCIÓN */}
+                    <div className="flex items-center gap-2 shrink-0 self-end sm:self-center">
+                      <button
+                        type="button"
+                        onClick={() => setSelectedUserDetail(usr)}
+                        className="h-8 px-3 rounded-xl bg-zinc-900 hover:bg-zinc-800 border border-zinc-700 hover:border-[#F39200] text-zinc-200 hover:text-white font-bold text-xs flex items-center gap-1.5 transition-all cursor-pointer"
+                        title="Ver ficha completa y fotos"
+                      >
+                        <Eye className="w-3.5 h-3.5 text-[#F39200]" />
+                        <span>Ver Detalle</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => handleToggleBlockMatch(id, email)}
+                        className={`h-8 px-3 rounded-xl border text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
+                          isBlockedFromMatch
+                            ? 'bg-emerald-950/60 border-emerald-500/50 text-emerald-300 hover:bg-emerald-900/60'
+                            : 'bg-red-950/50 border-red-500/40 text-red-300 hover:bg-red-900/60'
+                        }`}
+                        title={
+                          isBlockedFromMatch
+                            ? 'Habilitar a este usuario en Match'
+                            : 'Bloquear permanentemente de Match'
+                        }
+                      >
+                        {isBlockedFromMatch ? (
+                          <>
+                            <UserCheck className="w-3.5 h-3.5" />
+                            <span>Desbloquear</span>
+                          </>
+                        ) : (
+                          <>
+                            <Ban className="w-3.5 h-3.5 text-red-400" />
+                            <span>Bloquear</span>
+                          </>
+                        )}
+                      </button>
                     </div>
                   </div>
                 );
-              })
-            )}
+              });
+            })()}
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: VER DETALLE DE USUARIO Y MODERACIÓN */}
+      {selectedUserDetail && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-md animate-in fade-in duration-200">
+          <div className="bg-[#121217] border border-zinc-800 rounded-3xl w-full max-w-lg p-6 space-y-5 max-h-[90vh] overflow-y-auto">
+            {/* Cabecera */}
+            <div className="flex items-center justify-between pb-3 border-b border-zinc-800">
+              <div>
+                <span className="text-[10px] uppercase font-bold text-[#F39200] tracking-wider block">
+                  Ficha Técnica de Usuario
+                </span>
+                <h4 className="text-base font-bold text-white font-display mt-0.5">
+                  {selectedUserDetail.full_name || selectedUserDetail.fullName || selectedUserDetail.nickname || 'Detalle del Perfil'}
+                </h4>
+              </div>
+              <button
+                type="button"
+                onClick={() => setSelectedUserDetail(null)}
+                className="w-8 h-8 rounded-full bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 text-zinc-400 hover:text-white flex items-center justify-center cursor-pointer transition-colors"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Galería de fotos (hasta 3 fotos obligatorias/cargadas) */}
+            {(() => {
+              const unpacked = unpackProfileInterests(selectedUserDetail.interests);
+              const avatar =
+                selectedUserDetail.avatar_url ||
+                selectedUserDetail.avatarUrl ||
+                'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=400&q=80';
+              const rawPhotos = Array.isArray(selectedUserDetail.photos) && selectedUserDetail.photos.length > 0
+                ? selectedUserDetail.photos
+                : [avatar, ...unpacked.extraPhotos];
+              const photos = rawPhotos.filter(Boolean).slice(0, 3);
+
+              return (
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-bold text-zinc-300">
+                      Fotos de Perfil ({photos.length}/3)
+                    </span>
+                    <span className="text-[10px] text-zinc-500">
+                      Subidas por el usuario
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-3 gap-2">
+                    {photos.map((url: string, idx: number) => (
+                      <div
+                        key={idx}
+                        className="relative aspect-[3/4] rounded-2xl overflow-hidden border border-zinc-800 bg-zinc-900 group"
+                      >
+                        <img
+                          src={url}
+                          alt={`Foto ${idx + 1}`}
+                          className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                          referrerPolicy="no-referrer"
+                        />
+                        <div className="absolute top-1.5 left-1.5 px-1.5 py-0.5 rounded-full bg-black/70 backdrop-blur-sm text-[9px] font-bold text-[#F39200]">
+                          #{idx + 1}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              );
+            })()}
+
+            {/* Información Personal y Preferencias */}
+            {(() => {
+              const unpacked = unpackProfileInterests(selectedUserDetail.interests);
+              const id = selectedUserDetail.id || selectedUserDetail.userId;
+              const email = selectedUserDetail.email || '';
+              const isBlocked =
+                blockedMatchUsers.includes(id) ||
+                (email ? blockedMatchUsers.includes(email.toLowerCase()) : false);
+
+              const name =
+                selectedUserDetail.full_name ||
+                selectedUserDetail.fullName ||
+                selectedUserDetail.nickname ||
+                '—';
+              const nick = selectedUserDetail.nickname || '—';
+              const age = selectedUserDetail.age || '—';
+              const birthDate = selectedUserDetail.birth_date || selectedUserDetail.birthDate || '—';
+              const zodiac =
+                unpacked.zodiacSign ||
+                selectedUserDetail.zodiac_sign ||
+                selectedUserDetail.zodiacSign ||
+                '—';
+              const drink =
+                selectedUserDetail.drink_favorite ||
+                selectedUserDetail.drinkFavorite ||
+                (unpacked.drinks.length > 0 ? unpacked.drinks.join(', ') : '—');
+              const ig = (selectedUserDetail.instagram || '').replace(/^@/, '');
+              const bio =
+                selectedUserDetail.bio ||
+                selectedUserDetail.description ||
+                'Sin biografía configurada.';
+              const isVerified = Boolean(
+                selectedUserDetail.is_verified_in_venue ??
+                  selectedUserDetail.isVerified ??
+                  false
+              );
+
+              const music =
+                unpacked.musicPreferences.length > 0
+                  ? unpacked.musicPreferences
+                  : Array.isArray(selectedUserDetail.music_preferences)
+                  ? selectedUserDetail.music_preferences
+                  : [];
+
+              return (
+                <div className="space-y-4 text-xs">
+                  {/* Grid de Datos */}
+                  <div className="grid grid-cols-2 gap-2.5 p-3.5 rounded-2xl bg-zinc-900/60 border border-zinc-800">
+                    <div>
+                      <span className="text-[10px] text-zinc-500 block uppercase font-bold">
+                        Nombre Real
+                      </span>
+                      <span className="text-white font-bold text-xs">{name}</span>
+                    </div>
+                    <div>
+                      <span className="text-[10px] text-zinc-500 block uppercase font-bold">
+                        Apodo / Sobrenombre
+                      </span>
+                      <span className="text-[#F39200] font-bold text-xs">"{nick}"</span>
+                    </div>
+                    <div>
+                      <span className="text-[10px] text-zinc-500 block uppercase font-bold">
+                        Edad / Cumpleaños
+                      </span>
+                      <span className="text-zinc-200">
+                        {age} años {birthDate !== '—' ? `(${birthDate})` : ''}
+                      </span>
+                    </div>
+                    <div>
+                      <span className="text-[10px] text-zinc-500 block uppercase font-bold">
+                        Signo Zodíaco
+                      </span>
+                      <span className="text-zinc-200">{zodiac}</span>
+                    </div>
+                    <div>
+                      <span className="text-[10px] text-zinc-500 block uppercase font-bold">
+                        Trago Favorito
+                      </span>
+                      <span className="text-zinc-200 flex items-center gap-1">
+                        <GlassWater className="w-3 h-3 text-[#F39200]" />
+                        {drink}
+                      </span>
+                    </div>
+                    <div>
+                      <span className="text-[10px] text-zinc-500 block uppercase font-bold">
+                        Presencia en Fiesta
+                      </span>
+                      <span
+                        className={`font-bold flex items-center gap-1 ${
+                          isVerified ? 'text-emerald-400' : 'text-zinc-500'
+                        }`}
+                      >
+                        <span
+                          className={`w-2 h-2 rounded-full ${
+                            isVerified ? 'bg-emerald-400 animate-pulse' : 'bg-zinc-600'
+                          }`}
+                        />
+                        {isVerified ? 'Verificado en el boliche' : 'Sin presencia activa'}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Redes y Contacto */}
+                  <div className="p-3.5 rounded-2xl bg-zinc-900/60 border border-zinc-800 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] text-zinc-500 uppercase font-bold">
+                        Contacto e Instagram
+                      </span>
+                      {ig && (
+                        <a
+                          href={`https://instagram.com/${ig}`}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="text-[11px] font-bold text-[#F39200] hover:underline flex items-center gap-1"
+                        >
+                          <Instagram className="w-3.5 h-3.5" />
+                          Ver en Instagram
+                          <ExternalLink className="w-3 h-3" />
+                        </a>
+                      )}
+                    </div>
+                    <div className="text-zinc-300 font-mono text-[11px] flex flex-col gap-1">
+                      {email && <span>Email: {email}</span>}
+                      {ig && <span>Instagram: @{ig}</span>}
+                    </div>
+                  </div>
+
+                  {/* Gustos Musicales */}
+                  {music.length > 0 && (
+                    <div className="p-3.5 rounded-2xl bg-zinc-900/60 border border-zinc-800 space-y-1.5">
+                      <span className="text-[10px] text-zinc-500 uppercase font-bold block">
+                        Géneros Musicales
+                      </span>
+                      <div className="flex flex-wrap gap-1.5">
+                        {music.map((genre: string, i: number) => (
+                          <span
+                            key={i}
+                            className="px-2.5 py-0.5 rounded-lg bg-zinc-800 text-zinc-300 text-[11px] border border-zinc-700/60"
+                          >
+                            🎵 {genre}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Biografía */}
+                  <div className="p-3.5 rounded-2xl bg-zinc-900/60 border border-zinc-800 space-y-1">
+                    <span className="text-[10px] text-zinc-500 uppercase font-bold block">
+                      Biografía / Notita
+                    </span>
+                    <p className="text-zinc-300 italic leading-relaxed text-xs">
+                      "{bio}"
+                    </p>
+                  </div>
+
+                  {/* SECCIÓN DE MODERACIÓN Y BLOQUEO DE MATCH */}
+                  <div
+                    className={`p-4 rounded-2xl border space-y-3 ${
+                      isBlocked
+                        ? 'bg-red-950/30 border-red-500/40'
+                        : 'bg-zinc-950/80 border-zinc-800'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        {isBlocked ? (
+                          <Ban className="w-4 h-4 text-red-400 shrink-0" />
+                        ) : (
+                          <UserCheck className="w-4 h-4 text-emerald-400 shrink-0" />
+                        )}
+                        <span className="text-xs font-bold text-white">
+                          Estado en Cachengueoo Match:
+                        </span>
+                      </div>
+                      <span
+                        className={`text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider ${
+                          isBlocked
+                            ? 'bg-red-500/20 text-red-300 border border-red-500/40'
+                            : 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
+                        }`}
+                      >
+                        {isBlocked ? 'Acceso Bloqueado' : 'Habilitado'}
+                      </span>
+                    </div>
+
+                    <p className="text-[11px] text-zinc-400 leading-snug">
+                      {isBlocked
+                        ? 'Este usuario tiene prohibido el ingreso a Match por reportes o mal comportamiento. No puede deslizar ni interactuar, y su perfil fue removido de la baraja de los demás.'
+                        : 'Si el usuario tiene un comportamiento inadecuado, podés bloquearlo permanentemente de la sección de Match.'}
+                    </p>
+
+                    <button
+                      type="button"
+                      onClick={() => handleToggleBlockMatch(id, email)}
+                      className={`w-full py-2.5 rounded-xl font-bold text-xs flex items-center justify-center gap-2 cursor-pointer transition-all ${
+                        isBlocked
+                          ? 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-md shadow-emerald-900/40'
+                          : 'bg-red-600 hover:bg-red-500 text-white shadow-md shadow-red-900/40'
+                      }`}
+                    >
+                      {isBlocked ? (
+                        <>
+                          <UserCheck className="w-4 h-4" />
+                          <span>Desbloquear y Permitir Acceso a Match</span>
+                        </>
+                      ) : (
+                        <>
+                          <Ban className="w-4 h-4" />
+                          <span>Bloquear Permanentemente de Match</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </div>
+              );
+            })()}
+
+            {/* Botón Cerrar */}
+            <div className="pt-2">
+              <button
+                type="button"
+                onClick={() => setSelectedUserDetail(null)}
+                className="w-full h-11 rounded-xl bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 text-zinc-300 font-bold text-xs cursor-pointer transition-colors"
+              >
+                Cerrar Ficha
+              </button>
+            </div>
           </div>
         </div>
       )}

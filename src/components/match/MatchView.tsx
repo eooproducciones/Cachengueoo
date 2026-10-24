@@ -19,6 +19,7 @@ import {
   Instagram,
   ExternalLink,
   Music,
+  Ban,
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { MatchPair, MatchProfile, UserProfile } from '../../types';
@@ -68,6 +69,44 @@ export const MatchView: React.FC<MatchViewProps> = ({
   const [currentPhotoIndex, setCurrentPhotoIndex] = useState(0);
   const [isNoteExpanded, setIsNoteExpanded] = useState(false);
   const expandedScrollRef = useRef<HTMLDivElement>(null);
+
+  // Estado de bloqueo permanente por administración
+  const [isBlockedFromMatch, setIsBlockedFromMatch] = useState(() => {
+    try {
+      const list: string[] = JSON.parse(
+        localStorage.getItem('cachengueoo_blocked_match_users') || '[]'
+      );
+      const uid = currentUser?.id;
+      const email = currentUser?.email?.toLowerCase();
+      return (
+        (Boolean(uid) && list.includes(uid)) ||
+        (Boolean(email) && list.includes(email!))
+      );
+    } catch {
+      return false;
+    }
+  });
+
+  useEffect(() => {
+    const handleBlockedChange = () => {
+      try {
+        const list: string[] = JSON.parse(
+          localStorage.getItem('cachengueoo_blocked_match_users') || '[]'
+        );
+        const uid = currentUser?.id;
+        const email = currentUser?.email?.toLowerCase();
+        setIsBlockedFromMatch(
+          (Boolean(uid) && list.includes(uid)) ||
+          (Boolean(email) && list.includes(email!))
+        );
+      } catch {}
+    };
+
+    window.addEventListener('cachengueoo_blocked_users_change', handleBlockedChange);
+    return () => {
+      window.removeEventListener('cachengueoo_blocked_users_change', handleBlockedChange);
+    };
+  }, [currentUser]);
 
   useEffect(() => {
     setProfiles(matchService.getAvailableProfiles());
@@ -198,6 +237,48 @@ export const MatchView: React.FC<MatchViewProps> = ({
       setDragOffset({ x: 0, y: 0 });
     }
   };
+
+  // PANTALLA SI EL USUARIO FUE BLOQUEADO DE MATCH POR EL ADMIN
+  if (isBlockedFromMatch) {
+    return (
+      <div className="h-full flex items-center justify-center p-4">
+        <div className="max-w-md w-full bg-[#121217] border border-red-500/40 rounded-3xl p-6 text-center shadow-2xl relative overflow-hidden space-y-4">
+          <div className="w-16 h-16 rounded-2xl bg-red-950/80 border border-red-500/50 flex items-center justify-center mx-auto text-red-400">
+            <Ban className="w-8 h-8" />
+          </div>
+
+          <div className="space-y-1.5">
+            <span className="px-2.5 py-0.5 rounded-full bg-red-950 text-red-400 border border-red-500/30 text-[10px] font-bold uppercase tracking-wider inline-block">
+              Acceso Suspendido
+            </span>
+            <h2 className="text-xl font-black text-white font-display uppercase tracking-tight">
+              Bloqueado de Match
+            </h2>
+            <p className="text-xs text-zinc-400 leading-relaxed max-w-xs mx-auto">
+              Tu acceso a Cachengueoo Match fue suspendido de forma permanente por la administración debido a un incumplimiento de las normas de convivencia o reportes de la comunidad.
+            </p>
+          </div>
+
+          <div className="p-3.5 rounded-2xl bg-zinc-900/80 border border-zinc-800 text-[11px] text-zinc-400 text-left space-y-1">
+            <p className="font-semibold text-zinc-300">Medida de seguridad activa:</p>
+            <p>
+              Tu perfil fue retirado de la baraja y no podés enviar notitas ni hacer match con otros asistentes.
+            </p>
+          </div>
+
+          {onNavigateToGeneralTab && (
+            <button
+              type="button"
+              onClick={() => onNavigateToGeneralTab('home')}
+              className="w-full h-11 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-white font-bold text-xs cursor-pointer transition-colors shadow-sm"
+            >
+              Volver a la Pantalla de Inicio
+            </button>
+          )}
+        </div>
+      </div>
+    );
+  }
 
   // PANTALLA BLOQUEADA SI NO ESTÁ DENTRO DE CACHENGUEOO
   if (!isInsideVenue) {

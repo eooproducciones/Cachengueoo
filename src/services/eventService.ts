@@ -95,22 +95,6 @@ export function isEventToday(event: ClubEvent): boolean {
   return false;
 }
 
-const DEFAULT_EVENT_FALLBACK: ClubEvent = {
-  id: 'evt_cachengueoo_night',
-  title: 'CACHENGUEOO NIGHT',
-  dateStr: 'Esta noche',
-  dateIso: new Date().toISOString().split('T')[0],
-  timeRange: '23:00 — 06:00 hs',
-  locationName: 'Cachengueoo Boliche · Mendoza',
-  description: 'Noche en Cachengueoo Mendoza',
-  flyerUrl:
-    'https://images.unsplash.com/photo-1516450360452-9312f5e86fc7?auto=format&fit=crop&w=1200&q=80',
-  isActiveTonight: true,
-  validationMode: 'GPS_OR_QR',
-  djs: [],
-  ticketTypes: [],
-};
-
 export const eventService = {
   getEvents(): ClubEvent[] {
     let list: ClubEvent[] = [];
@@ -172,10 +156,11 @@ export const eventService = {
     }
   },
 
-  getActiveTonightEvent(): ClubEvent {
+  getActiveTonightEvent(): ClubEvent | null {
     const events = this.getEvents();
+    if (!events || events.length === 0) return null;
     const todayEvent = events.find((e) => isEventToday(e));
-    return todayEvent || events[0] || DEFAULT_EVENT_FALLBACK;
+    return todayEvent || events[0] || null;
   },
 
   getFeaturedEvents(): ClubEvent[] {

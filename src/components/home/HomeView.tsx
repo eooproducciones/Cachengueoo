@@ -16,7 +16,7 @@ import { isEventToday } from '../../services/eventService';
 interface HomeViewProps {
   currentUser: UserProfile | null;
   presence: PresenceStatus;
-  tonightEvent: ClubEvent;
+  tonightEvent?: ClubEvent | null;
   upcomingEvents?: ClubEvent[];
   benefits?: ClubBenefit[];
   onNavigateTab: (tab: string) => void;
@@ -116,9 +116,10 @@ export const HomeView: React.FC<HomeViewProps> = ({
 
       {/* SECTION 2: PRÓXIMAS FECHAS */}
       {(() => {
+        // Solo mostrar eventos que realmente existan (cargados en admin). Si no hay eventos cargados, no inventar ninguno.
         const allList = (upcomingEvents && upcomingEvents.length > 0)
           ? upcomingEvents
-          : (tonightEvent ? [tonightEvent] : []);
+          : (tonightEvent && tonightEvent.id && tonightEvent.title ? [tonightEvent] : []);
 
         // 1. Detectar si hay evento de hoy (por fecha actual del día)
         const todayEvt = allList.find((e) => isEventToday(e) || e.isActiveTonight);
