@@ -65,6 +65,13 @@ export const MatchView: React.FC<MatchViewProps> = ({
   const startPos = useRef({ x: 0, y: 0 });
   const hasDragged = useRef(false);
 
+  // Estados para apartados: Conectá y Mis Match
+  const [matchSection, setMatchSection] = useState<'conecta' | 'mismatch'>('conecta');
+  const [conectaProfiles, setConectaProfiles] = useState<MatchProfile[]>([]);
+  const [loadingConecta, setLoadingConecta] = useState(false);
+  const [inspectingConectaProfile, setInspectingConectaProfile] = useState<MatchProfile | null>(null);
+  const [inspectingPhotoIndex, setInspectingPhotoIndex] = useState(0);
+
   // Navegación de fotos del perfil actual (hasta 3 fotos)
   const [currentPhotoIndex, setCurrentPhotoIndex] = useState(0);
   const [isNoteExpanded, setIsNoteExpanded] = useState(false);
@@ -109,15 +116,26 @@ export const MatchView: React.FC<MatchViewProps> = ({
   }, [currentUser]);
 
   useEffect(() => {
-    setProfiles(matchService.getAvailableProfiles());
-    setMatches(matchService.getMatches());
-
-    // Cargar perfiles reales registrados en Supabase
+    // 1. Cargar perfiles para explorar en la pista
     matchService.fetchAvailableProfiles(currentUser?.id).then((realProfiles) => {
       if (realProfiles && realProfiles.length > 0) {
         setProfiles(realProfiles);
       }
     });
+
+    // 2. Cargar personas que dieron corazón (Conectá) y Matches mutuos
+    if (currentUser?.id) {
+      setLoadingConecta(true);
+      Promise.all([
+        matchService.fetchIncomingLikes(currentUser.id),
+        matchService.fetchUserMatches(currentUser.id),
+      ])
+        .then(([incoming, userMatches]) => {
+          setConectaProfiles(incoming);
+          setMatches(userMatches);
+        })
+        .finally(() => setLoadingConecta(false));
+    }
   }, [matchSubTab, currentUser?.id]);
 
   // Al pasar a otro perfil, reiniciar a la primera foto y replegar la notita
@@ -164,22 +182,22 @@ export const MatchView: React.FC<MatchViewProps> = ({
     setCurrentPhotoIndex((prev) => (prev + 1) % profilePhotos.length);
   };
 
-  const handleSwipe = (action: 'like' | 'pass' | 'superlike') => {
+  const handleSwipe = async (action: 'like' | 'pass' | 'superlike') => {
     if (!currentProfile) return;
 
     setSwipeDirection(action === 'pass' ? 'left' : 'right');
 
-    setTimeout(() => {
-      const result = matchService.registerSwipe(
-        currentUser.id,
-        currentProfile,
-        action,
-        'evt_tonight_01'
-      );
+    const result = await matchService.registerSwipe(
+      currentUser.id,
+      currentProfile,
+      action,
+      'evt_tonight_01'
+    );
 
+    setTimeout(() => {
       if (result.isMatch && result.newMatch) {
         setCelebrationMatch(result.newMatch);
-        setMatches(matchService.getMatches());
+        matchService.fetchUserMatches(currentUser.id).then(setMatches);
 
         confetti({
           particleCount: 90,
@@ -202,10 +220,46 @@ export const MatchView: React.FC<MatchViewProps> = ({
     handleSwipe('superlike');
   };
 
-  const handleResetCards = () => {
-    matchService.resetSwipes();
-    setProfiles(matchService.getAvailableProfiles());
+  // Botón volver a revisar perfiles
+  const handleResetCards = async () => {
+    matchService.resetSwipes(currentUser?.id);
+    setSwipeDirection(null);
+    setDragOffset({ x: 0, y: 0 });
+    setCurrentPhotoIndex(0);
+    const fresh = await matchService.fetchAvailableProfiles(currentUser?.id);
+    setProfiles(fresh);
     setCurrentIndex(0);
+  };
+
+  // Acciones desde el apartado Conectá
+  const handleLikeFromConecta = async (target: MatchProfile) => {
+    const result = await matchService.registerSwipe(
+      currentUser.id,
+      target,
+      'like',
+      'evt_tonight_01'
+    );
+    setConectaProfiles((prev) => prev.filter((p) => p.userId !== target.userId));
+    setInspectingConectaProfile(null);
+
+    if (result.isMatch && result.newMatch) {
+      setCelebrationMatch(result.newMatch);
+      const updated = await matchService.fetchUserMatches(currentUser.id);
+      setMatches(updated);
+
+      confetti({
+        particleCount: 90,
+        spread: 80,
+        origin: { y: 0.6 },
+        colors: ['#F39200', '#FFFFFF', '#10B981'],
+      });
+    }
+  };
+
+  const handlePassFromConecta = async (target: MatchProfile) => {
+    await matchService.recordPass(currentUser.id, target.userId);
+    setConectaProfiles((prev) => prev.filter((p) => p.userId !== target.userId));
+    setInspectingConectaProfile(null);
   };
 
   // Pointer drag gestures
@@ -343,82 +397,366 @@ export const MatchView: React.FC<MatchViewProps> = ({
     );
   }
 
-  // VISTA SUBTAB: MATCHES Y CHAT
+  // VISTA SUBTAB: MATCHES, CONECTÁ Y CHAT
   if (matchSubTab === 'matches') {
     return (
-      <div className="h-full w-full max-w-md mx-auto flex flex-col overflow-hidden bg-[#09090b] select-none p-4">
-        <div className="shrink-0 flex items-center justify-between pb-3 border-b border-zinc-800">
-          <div>
-            <h2 className="text-base font-black text-white font-display uppercase tracking-tight">
-              Tus Matches de Esta Noche
-            </h2>
-            <p className="text-[11px] text-zinc-400">
-              Personas que hicieron match con vos en <span className="text-[#F39200] font-semibold">{eventTitle}</span>
-            </p>
-          </div>
-          <span className="px-2.5 py-1 rounded-full bg-[#F39200]/15 border border-[#F39200]/30 text-[#F39200] text-xs font-black">
-            {matches.length}
-          </span>
+      <div className="h-full w-full max-w-md mx-auto flex flex-col overflow-hidden bg-[#09090b] select-none p-3 sm:p-4">
+        {/* Selector de Apartados: Conectá vs Mis Match */}
+        <div className="shrink-0 grid grid-cols-2 gap-2 p-1 bg-zinc-900/90 border border-zinc-800 rounded-2xl mb-3">
+          <button
+            type="button"
+            onClick={() => setMatchSection('conecta')}
+            className={`py-2 px-3 rounded-xl font-bold text-xs flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+              matchSection === 'conecta'
+                ? 'bg-[#F39200] text-black shadow-md shadow-[#F39200]/25'
+                : 'text-zinc-400 hover:text-white'
+            }`}
+          >
+            <span>Conectá</span>
+            {conectaProfiles.length > 0 && (
+              <span
+                className={`px-1.5 py-0.2 rounded-full text-[10px] font-black ${
+                  matchSection === 'conecta'
+                    ? 'bg-black text-[#F39200]'
+                    : 'bg-[#F39200] text-black'
+                }`}
+              >
+                {conectaProfiles.length}
+              </span>
+            )}
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setMatchSection('mismatch')}
+            className={`py-2 px-3 rounded-xl font-bold text-xs flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+              matchSection === 'mismatch'
+                ? 'bg-[#F39200] text-black shadow-md shadow-[#F39200]/25'
+                : 'text-zinc-400 hover:text-white'
+            }`}
+          >
+            <span>Mis Match</span>
+            {matches.length > 0 && (
+              <span
+                className={`px-1.5 py-0.2 rounded-full text-[10px] font-black ${
+                  matchSection === 'mismatch'
+                    ? 'bg-black text-[#F39200]'
+                    : 'bg-zinc-800 text-zinc-300'
+                }`}
+              >
+                {matches.length}
+              </span>
+            )}
+          </button>
         </div>
 
-        <div className="flex-1 min-h-0 overflow-y-auto space-y-2.5 pt-3">
-          {matches.length === 0 ? (
-            <div className="p-8 rounded-3xl bg-[#121217] border border-zinc-800 text-center space-y-3 mt-4">
-              <div className="w-12 h-12 rounded-2xl bg-zinc-900 border border-zinc-800 flex items-center justify-center mx-auto text-[#F39200]">
-                <Heart className="w-6 h-6 fill-[#F39200]/30" />
-              </div>
-              <h3 className="text-sm font-bold text-white font-display">
-                Todavía no tenés matches
-              </h3>
-              <p className="text-xs text-zinc-400 max-w-xs mx-auto leading-relaxed">
-                Deslizá a la derecha en la pista o invitales un trago para romper el hielo.
-              </p>
-              <button
-                onClick={() => onNavigateMatchSubTab && onNavigateMatchSubTab('pista')}
-                className="px-4 py-2 rounded-xl bg-[#F39200] text-black font-extrabold text-xs cursor-pointer shadow-md shadow-[#F39200]/20"
-              >
-                Ir a la Pista
-              </button>
+        {/* ===================== APARTADO 1: CONECTÁ ===================== */}
+        {matchSection === 'conecta' && (
+          <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
+            <div className="shrink-0 pb-2">
+              <h2 className="text-base font-black text-white font-display uppercase tracking-tight">
+                Conectá
+              </h2>
             </div>
-          ) : (
-            matches.map((item) => {
-              const partner = item.partnerProfile;
-              if (!partner) return null;
 
-              return (
-                <div
-                  key={item.id}
-                  onClick={() => setSelectedChatMatch(item)}
-                  className="p-3.5 rounded-2xl bg-[#121217] border border-zinc-800 hover:border-[#F39200]/60 flex items-center gap-3.5 cursor-pointer transition-all active:scale-[0.99] shadow-md group"
-                >
-                  <div className="relative shrink-0">
-                    <img
-                      src={partner.avatarUrl}
-                      alt={partner.fullName}
-                      className="w-13 h-13 rounded-2xl object-cover border border-zinc-700 group-hover:border-[#F39200] transition-colors"
-                      referrerPolicy="no-referrer"
+            <div className="flex-1 min-h-0 overflow-y-auto pt-2 pb-6">
+              {loadingConecta ? (
+                <div className="flex items-center justify-center py-16 text-zinc-400 text-xs gap-2">
+                  <div className="w-4 h-4 border-2 border-[#F39200] border-t-transparent rounded-full animate-spin"></div>
+                  Cargando conexiones...
+                </div>
+              ) : conectaProfiles.length === 0 ? (
+                <div className="p-8 rounded-3xl bg-[#121217] border border-zinc-800 text-center space-y-3 mt-4">
+                  <div className="w-12 h-12 rounded-2xl bg-zinc-900 border border-zinc-800 flex items-center justify-center mx-auto text-[#F39200]">
+                    <Heart className="w-6 h-6 fill-[#F39200]/30" />
+                  </div>
+                  <h3 className="text-sm font-bold text-white font-display">
+                    No tenés nuevas conexiones por ahora
+                  </h3>
+                  <p className="text-xs text-zinc-400 max-w-xs mx-auto leading-relaxed">
+                    Cuando otras personas te den corazón en la pista, aparecerán acá para que puedas conectar.
+                  </p>
+                  <button
+                    onClick={() => onNavigateMatchSubTab && onNavigateMatchSubTab('pista')}
+                    className="px-4 py-2 rounded-xl bg-[#F39200] text-black font-extrabold text-xs cursor-pointer shadow-md shadow-[#F39200]/20 active:scale-95 transition-all"
+                  >
+                    Ir a la Pista
+                  </button>
+                </div>
+              ) : (
+                <div className="grid grid-cols-2 gap-3">
+                  {conectaProfiles.map((item) => (
+                    <div
+                      key={item.userId}
+                      className="rounded-2xl bg-[#121217] border border-zinc-800/90 overflow-hidden flex flex-col justify-between shadow-lg hover:border-[#F39200]/50 transition-all group"
+                    >
+                      <div className="relative aspect-[3/4] w-full bg-zinc-900 overflow-hidden">
+                        <img
+                          src={item.avatarUrl || item.photos?.[0]}
+                          alt={item.fullName}
+                          className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                          referrerPolicy="no-referrer"
+                        />
+                        <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/20 to-transparent pointer-events-none" />
+                        <div className="absolute bottom-2 inset-x-2 pointer-events-none">
+                          <h4 className="text-sm font-black text-white font-display truncate drop-shadow">
+                            {item.nickname}, {item.age}
+                          </h4>
+                          {item.drinkFavorite && (
+                            <span className="text-[10px] text-zinc-300 truncate block">
+                              🍸 {item.drinkFavorite}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="p-2.5 bg-[#121217]">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setInspectingPhotoIndex(0);
+                            setInspectingConectaProfile(item);
+                          }}
+                          className="w-full py-2 px-3 rounded-xl bg-[#F39200] hover:bg-[#E08400] text-black font-black text-xs flex items-center justify-center gap-1.5 cursor-pointer shadow-md shadow-[#F39200]/20 active:scale-95 transition-all"
+                        >
+                          Ver perfil
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* ===================== APARTADO 2: MIS MATCH ===================== */}
+        {matchSection === 'mismatch' && (
+          <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
+            <div className="shrink-0 pb-2">
+              <h2 className="text-base font-black text-white font-display uppercase tracking-tight">
+                Mis Match
+              </h2>
+            </div>
+
+            <div className="flex-1 min-h-0 overflow-y-auto space-y-2.5 pt-2 pb-6">
+              {matches.length === 0 ? (
+                <div className="p-8 rounded-3xl bg-[#121217] border border-zinc-800 text-center space-y-3 mt-4">
+                  <div className="w-12 h-12 rounded-2xl bg-zinc-900 border border-zinc-800 flex items-center justify-center mx-auto text-[#F39200]">
+                    <Heart className="w-6 h-6 fill-[#F39200]/30" />
+                  </div>
+                  <h3 className="text-sm font-bold text-white font-display">
+                    Todavía no tenés matches
+                  </h3>
+                  <p className="text-xs text-zinc-400 max-w-xs mx-auto leading-relaxed">
+                    Deslizá a la derecha en la pista o respondé a quienes te dieron corazón en Conectá.
+                  </p>
+                  <button
+                    onClick={() => onNavigateMatchSubTab && onNavigateMatchSubTab('pista')}
+                    className="px-4 py-2 rounded-xl bg-[#F39200] text-black font-extrabold text-xs cursor-pointer shadow-md shadow-[#F39200]/20 active:scale-95 transition-all"
+                  >
+                    Ir a la Pista
+                  </button>
+                </div>
+              ) : (
+                matches.map((item) => {
+                  const partner = item.partnerProfile;
+                  if (!partner) return null;
+
+                  return (
+                    <div
+                      key={item.id}
+                      onClick={() => setSelectedChatMatch(item)}
+                      className="p-3.5 rounded-2xl bg-[#121217] border border-zinc-800 hover:border-[#F39200]/60 flex items-center gap-3.5 cursor-pointer transition-all active:scale-[0.99] shadow-md group"
+                    >
+                      <div className="relative shrink-0">
+                        <img
+                          src={partner.avatarUrl}
+                          alt={partner.fullName}
+                          className="w-13 h-13 rounded-2xl object-cover border border-zinc-700 group-hover:border-[#F39200] transition-colors"
+                          referrerPolicy="no-referrer"
+                        />
+                        <span className="absolute -bottom-1 -right-1 w-3.5 h-3.5 rounded-full bg-emerald-500 border-2 border-black" title="En la fiesta"></span>
+                      </div>
+
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center justify-between mb-0.5">
+                          <h4 className="text-sm font-black text-white font-display truncate">
+                            {partner.nickname}, {partner.age}
+                          </h4>
+                          <span className="text-[10px] text-[#F39200] font-bold">
+                            {item.lastMessageAt || 'Ahora'}
+                          </span>
+                        </div>
+                        <p className="text-xs text-zinc-400 truncate">
+                          {item.lastMessageSnippet || '¡Nuevo Match! Tocá para chatear.'}
+                        </p>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* MODAL REUTILIZANDO LA EXACTA INTERFAZ DE PERFIL PARA VER PERFIL EN CONECTÁ */}
+        {inspectingConectaProfile && (() => {
+          const inspPhotos =
+            inspectingConectaProfile.photos && inspectingConectaProfile.photos.length > 0
+              ? inspectingConectaProfile.photos.slice(0, 3)
+              : [inspectingConectaProfile.avatarUrl];
+          const inspSafeIdx = Math.min(inspectingPhotoIndex, Math.max(0, inspPhotos.length - 1));
+          const inspActivePhoto = inspPhotos[inspSafeIdx] || inspectingConectaProfile.avatarUrl;
+
+          return (
+            <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-black/90 backdrop-blur-md animate-in fade-in duration-200">
+              <div className="relative w-full max-w-sm h-[88vh] max-h-[700px] rounded-3xl overflow-hidden border border-zinc-800 bg-zinc-950 shadow-2xl flex flex-col justify-between">
+                {/* Foto a pantalla completa */}
+                <img
+                  key={inspActivePhoto}
+                  src={inspActivePhoto}
+                  alt={inspectingConectaProfile.fullName}
+                  referrerPolicy="no-referrer"
+                  className="absolute inset-0 w-full h-full object-cover object-center pointer-events-none"
+                />
+
+                {/* Zonas de toque para fotos */}
+                {inspPhotos.length > 1 && (
+                  <div className="absolute inset-x-0 top-14 bottom-32 z-15 flex pointer-events-auto">
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setInspectingPhotoIndex((prev) =>
+                          prev > 0 ? prev - 1 : inspPhotos.length - 1
+                        )
+                      }
+                      className="w-1/2 h-full cursor-pointer focus:outline-none"
+                      aria-label="Foto anterior"
                     />
-                    <span className="absolute -bottom-1 -right-1 w-3.5 h-3.5 rounded-full bg-emerald-500 border-2 border-black" title="En la fiesta"></span>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setInspectingPhotoIndex((prev) => (prev + 1) % inspPhotos.length)
+                      }
+                      className="w-1/2 h-full cursor-pointer focus:outline-none"
+                      aria-label="Siguiente foto"
+                    />
+                  </div>
+                )}
+
+                {/* Barra superior: líneas de fotos y botón salir */}
+                <div className="relative z-20 p-3 flex flex-col gap-2 pointer-events-auto">
+                  <div className="w-full flex gap-1.5 px-0.5">
+                    {inspPhotos.map((_, idx) => (
+                      <div
+                        key={idx}
+                        className={`h-1 flex-1 rounded-full transition-all duration-300 ${
+                          idx === inspSafeIdx
+                            ? 'bg-white shadow-[0_0_8px_rgba(255,255,255,0.9)]'
+                            : 'bg-white/35 backdrop-blur-sm'
+                        }`}
+                      />
+                    ))}
                   </div>
 
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center justify-between mb-0.5">
-                      <h4 className="text-sm font-black text-white font-display truncate">
-                        {partner.nickname}, {partner.age}
-                      </h4>
-                      <span className="text-[10px] text-[#F39200] font-bold">
-                        {item.lastMessageAt || 'Ahora'}
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-black/65 backdrop-blur-md border border-white/10 text-zinc-300 text-[10.5px]">
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse shrink-0"></span>
+                      <span className="truncate">
+                        estoy en <span className="font-semibold text-white">{eventTitle}</span>
                       </span>
                     </div>
-                    <p className="text-xs text-zinc-400 truncate">
-                      {item.lastMessageSnippet || '¡Nuevo Match en Cachengueoo! Tocá para chatear.'}
-                    </p>
+
+                    <button
+                      type="button"
+                      onClick={() => setInspectingConectaProfile(null)}
+                      className="w-8 h-8 rounded-full bg-black/75 backdrop-blur-md border border-white/20 text-white flex items-center justify-center cursor-pointer hover:bg-black transition-colors shadow-lg active:scale-95"
+                      title="Cerrar vista"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
                   </div>
                 </div>
-              );
-            })
-          )}
-        </div>
+
+                {/* Gradiente inferior oscuro */}
+                <div className="absolute inset-x-0 bottom-0 h-[68%] bg-gradient-to-t from-black via-black/80 to-transparent pointer-events-none z-10" />
+
+                {/* Información y botones de interacción */}
+                <div className="relative z-20 p-4 pb-4 flex flex-col justify-end space-y-3 pointer-events-auto">
+                  <div className="space-y-1 w-full min-w-0">
+                    <div className="flex items-center gap-1.5">
+                      <h3 className="text-xl sm:text-2xl font-black text-white font-display tracking-tight leading-none drop-shadow-md truncate">
+                        {inspectingConectaProfile.nickname}{' '}
+                        <span className="font-light text-zinc-300">
+                          {inspectingConectaProfile.age}
+                        </span>
+                      </h3>
+                      <span title="Verificado en la fiesta">
+                        <CheckCircle2 className="w-4 h-4 text-sky-400 fill-sky-400/20 stroke-[2.5]" />
+                      </span>
+                    </div>
+
+                    {/* Notita de la noche si tiene */}
+                    {inspectingConectaProfile.nightNote && (
+                      <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-black/80 backdrop-blur-md border border-[#F39200]/70 text-[11px] text-white shadow-lg">
+                        <MessageSquareQuote className="w-3.5 h-3.5 text-[#F39200] shrink-0" />
+                        <span className="font-medium truncate text-zinc-200">
+                          "{inspectingConectaProfile.nightNote.text}"
+                        </span>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Datos rápidos del perfil */}
+                  <div className="flex flex-wrap gap-1.5 text-[11px]">
+                    {inspectingConectaProfile.drinkFavorite && (
+                      <span className="px-2.5 py-1 rounded-lg bg-black/70 backdrop-blur-md border border-white/10 text-white font-medium flex items-center gap-1">
+                        🍸 {inspectingConectaProfile.drinkFavorite}
+                      </span>
+                    )}
+                    {inspectingConectaProfile.zodiacSign && (
+                      <span className="px-2.5 py-1 rounded-lg bg-black/70 backdrop-blur-md border border-white/10 text-amber-300 font-medium flex items-center gap-1">
+                        ✨ {inspectingConectaProfile.zodiacSign}
+                      </span>
+                    )}
+                  </div>
+
+                  {inspectingConectaProfile.bio && (
+                    <p className="text-xs text-zinc-300 line-clamp-2 leading-relaxed">
+                      {inspectingConectaProfile.bio}
+                    </p>
+                  )}
+
+                  {/* Botones de Interacción: ✕ Pasar y ❤️ Corazón */}
+                  <div className="pt-2 flex items-center justify-center gap-8">
+                    {/* Botón PASAR (✕) */}
+                    <button
+                      type="button"
+                      onClick={() => handlePassFromConecta(inspectingConectaProfile)}
+                      className="w-16 h-16 rounded-full bg-zinc-950/90 border-2 border-rose-500/80 text-rose-500 hover:text-white hover:bg-rose-600/30 flex items-center justify-center shadow-2xl active:scale-90 transition-all cursor-pointer group"
+                      aria-label="Pasar"
+                      title="Pasar"
+                    >
+                      <X className="w-8 h-8 stroke-[3] group-hover:scale-110 transition-transform" />
+                    </button>
+
+                    {/* Botón CORAZÓN (❤️) */}
+                    <button
+                      type="button"
+                      onClick={() => handleLikeFromConecta(inspectingConectaProfile)}
+                      className="w-16 h-16 rounded-full bg-zinc-950/90 border-2 border-emerald-400 text-emerald-400 hover:text-white hover:bg-emerald-600/30 flex items-center justify-center shadow-2xl active:scale-90 transition-all cursor-pointer group"
+                      aria-label="Corazón"
+                      title="Corazón"
+                    >
+                      <Heart className="w-8 h-8 fill-emerald-400 stroke-emerald-400 group-hover:scale-110 transition-transform" />
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          );
+        })()}
 
         {/* Modal de Chat Privado */}
         {selectedChatMatch && (
@@ -437,6 +775,56 @@ export const MatchView: React.FC<MatchViewProps> = ({
               setMatches(matchService.getMatches());
             }}
           />
+        )}
+
+        {/* Modal de Celebración de Match dentro de la vista Matches / Conectá */}
+        {celebrationMatch && celebrationMatch.partnerProfile && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/90 backdrop-blur-lg animate-in zoom-in-95 duration-200">
+            <div className="max-w-sm w-full bg-[#121217] border border-[#F39200]/40 rounded-3xl p-6 text-center space-y-4 shadow-2xl relative">
+              <h3 className="text-2xl font-black text-white font-display uppercase tracking-tight">
+                ¡Hicieron Match!
+              </h3>
+
+              <div className="flex items-center justify-center -space-x-3 py-1">
+                <img
+                  src={currentUser.avatarUrl}
+                  alt={currentUser.fullName}
+                  className="w-16 h-16 rounded-full object-cover border-2 border-[#F39200] shadow-xl"
+                  referrerPolicy="no-referrer"
+                />
+                <div className="w-8 h-8 rounded-full bg-[#F39200] text-black font-black flex items-center justify-center z-10 shadow-md text-sm">
+                  ❤️
+                </div>
+                <img
+                  src={celebrationMatch.partnerProfile.avatarUrl}
+                  alt={celebrationMatch.partnerProfile.fullName}
+                  className="w-16 h-16 rounded-full object-cover border-2 border-[#F39200] shadow-xl"
+                  referrerPolicy="no-referrer"
+                />
+              </div>
+
+              <div className="space-y-2 pt-2">
+                <button
+                  onClick={() => {
+                    const m = celebrationMatch;
+                    setCelebrationMatch(null);
+                    setSelectedChatMatch(m);
+                  }}
+                  className="w-full h-11 rounded-xl bg-[#F39200] hover:bg-[#E08400] text-black font-bold text-xs flex items-center justify-center gap-2 cursor-pointer shadow-lg shadow-[#F39200]/20 active:scale-95 transition-all"
+                >
+                  <MessageCircle className="w-4 h-4" />
+                  Escribir ahora por chat
+                </button>
+
+                <button
+                  onClick={() => setCelebrationMatch(null)}
+                  className="w-full h-9 rounded-xl bg-zinc-900 border border-zinc-800 text-zinc-300 font-medium text-xs cursor-pointer hover:text-white transition-colors"
+                >
+                  Seguir mirando
+                </button>
+              </div>
+            </div>
+          </div>
         )}
       </div>
     );
@@ -1000,12 +1388,8 @@ export const MatchView: React.FC<MatchViewProps> = ({
       {celebrationMatch && celebrationMatch.partnerProfile && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/90 backdrop-blur-lg animate-in zoom-in-95 duration-200">
           <div className="max-w-sm w-full bg-[#121217] border border-[#F39200]/40 rounded-3xl p-6 text-center space-y-4 shadow-2xl relative">
-            <span className="inline-block px-3 py-0.5 rounded-full bg-[#F39200]/10 border border-[#F39200]/30 text-[#F39200] text-[10px] font-bold tracking-widest uppercase">
-              ¡HICIERON MATCH!
-            </span>
-
-            <h3 className="text-xl font-black text-white font-display uppercase tracking-tight">
-              ESTÁN EN <span className="text-[#F39200]">CACHENGUEOO</span>
+            <h3 className="text-2xl font-black text-white font-display uppercase tracking-tight">
+              ¡Hicieron Match!
             </h3>
 
             {/* Colisión de avatares */}
@@ -1027,19 +1411,14 @@ export const MatchView: React.FC<MatchViewProps> = ({
               />
             </div>
 
-            <p className="text-xs text-zinc-300 max-w-xs mx-auto leading-relaxed">
-              Vos y <strong className="text-white">{celebrationMatch.partnerProfile.nickname}</strong> se
-              gustaron esta noche. ¿Sale ese primer trago en la barra?
-            </p>
-
-            <div className="space-y-2 pt-1">
+            <div className="space-y-2 pt-2">
               <button
                 onClick={() => {
                   const m = celebrationMatch;
                   setCelebrationMatch(null);
                   setSelectedChatMatch(m);
                 }}
-                className="w-full h-11 rounded-xl bg-[#F39200] hover:bg-[#E08400] text-black font-bold text-xs flex items-center justify-center gap-2 cursor-pointer shadow-lg shadow-[#F39200]/20"
+                className="w-full h-11 rounded-xl bg-[#F39200] hover:bg-[#E08400] text-black font-bold text-xs flex items-center justify-center gap-2 cursor-pointer shadow-lg shadow-[#F39200]/20 active:scale-95 transition-all"
               >
                 <MessageCircle className="w-4 h-4" />
                 Escribir ahora por chat
@@ -1047,7 +1426,7 @@ export const MatchView: React.FC<MatchViewProps> = ({
 
               <button
                 onClick={() => setCelebrationMatch(null)}
-                className="w-full h-9 rounded-xl bg-zinc-900 border border-zinc-800 text-zinc-300 font-medium text-xs cursor-pointer hover:text-white"
+                className="w-full h-9 rounded-xl bg-zinc-900 border border-zinc-800 text-zinc-300 font-medium text-xs cursor-pointer hover:text-white transition-colors"
               >
                 Seguir en la Pista
               </button>

@@ -18,7 +18,7 @@ import { usePresence } from './hooks/usePresence';
 import { eventService } from './services/eventService';
 import { benefitService } from './services/benefitService';
 import { matchService } from './services/matchService';
-import { UserProfile } from './types';
+import { UserProfile, ClubEvent, ClubBenefit } from './types';
 import { authService } from './services/authService';
 import { presenceService, PresenceStatus } from './services/presenceService';
 import { syncVenueLocationsFromSupabase, getVenueConfig } from './config/venue';
@@ -26,6 +26,7 @@ import { VenueLocation } from './types';
 import { CheckCircle2 } from 'lucide-react';
 import { OutOfRangeModal } from './components/presence/OutOfRangeModal';
 import { purgeMockData } from './utils/cleanMockData';
+import { getSupabaseClient } from './services/supabaseClient';
 
 export default function App() {
   const [currentTab, setCurrentTab] = useState<string>('inicio');
@@ -60,9 +61,29 @@ export default function App() {
     resetPresence,
   } = usePresence();
 
-  const events = eventService.getEvents();
-  const benefits = benefitService.getBenefits();
+  const [events, setEvents] = useState<ClubEvent[]>(() => eventService.getEvents());
+  const [benefits, setBenefits] = useState<ClubBenefit[]>(() => benefitService.getBenefits());
   const matchesCount = matchService.getMatches().length;
+
+  useEffect(() => {
+    const handleEventsChange = () => setEvents(eventService.getEvents());
+    const handleBenefitsChange = () => setBenefits(benefitService.getBenefits());
+
+    window.addEventListener('cachengueoo_events_updated', handleEventsChange);
+    window.addEventListener('cachengueoo_benefits_updated', handleBenefitsChange);
+    window.addEventListener('storage', handleEventsChange);
+    window.addEventListener('storage', handleBenefitsChange);
+
+    eventService.syncEventsFromSupabase().then(setEvents).catch(() => {});
+    benefitService.syncBenefitsFromSupabase().then(setBenefits).catch(() => {});
+
+    return () => {
+      window.removeEventListener('cachengueoo_events_updated', handleEventsChange);
+      window.removeEventListener('cachengueoo_benefits_updated', handleBenefitsChange);
+      window.removeEventListener('storage', handleEventsChange);
+      window.removeEventListener('storage', handleBenefitsChange);
+    };
+  }, []);
 
   // Al cambiar de pestaña, asegura que la pantalla se desplace al principio absoluto
   useEffect(() => {
@@ -74,13 +95,7 @@ export default function App() {
   // Sincronizar locaciones activas desde Supabase al iniciar la app y purgar datos de prueba
   useEffect(() => {
     purgeMockData();
-    syncVenueLocationsFromSupabase()
-      .then((locs) => {
-        if (!locs || locs.length === 0) {
-          presenceService.clearPresence();
-        }
-      })
-      .catch(() => {});
+    syncVenueLocationsFromSupabase().catch(() => {});
   }, []);
 
   // Escuchar cambios de hash para acceder al panel administrativo únicamente mediante URL (#admin)
@@ -191,6 +206,26 @@ export default function App() {
       return;
     }
 
+    // Si la presencia ya está validada y activa durante la noche, ingresar directo sin volver a pedir GPS
+    const currentStored = presenceService.getStoredPresence();
+    if (currentStored.isInside) {
+      const client = getSupabaseClient();
+      if (client && activeUser?.id) {
+        Promise.resolve(
+          client
+            .from('profiles')
+            .update({
+              is_verified_in_venue: true,
+              updated_at: new Date().toISOString(),
+            })
+            .eq('id', activeUser.id)
+        ).catch(() => {});
+      }
+      setIsAdminView(false);
+      setCurrentTab(targetTab);
+      return;
+    }
+
     // Verificar si existen sedes configuradas
     const currentVenue = getVenueConfig();
     const activeLocations: VenueLocation[] = (currentVenue.locations || []).filter(
@@ -224,6 +259,21 @@ export default function App() {
         };
         presenceService.saveStoredPresence(updated);
         window.dispatchEvent(new Event('storage'));
+
+        // Sincronizar en Supabase para que este perfil aparezca activo a los demás usuarios por 8 horas
+        const client = getSupabaseClient();
+        if (client && activeUser?.id) {
+          client
+            .from('profiles')
+            .update({
+              is_verified_in_venue: true,
+              updated_at: new Date().toISOString(),
+            })
+            .eq('id', activeUser.id)
+            .then(() => {})
+            .catch(() => {});
+        }
+
         showToast(
           `¡Estás en ${gpsResult.matchedLocationName || 'Cachengueoo'}! Cachengueoo Match activado 🔥`
         );

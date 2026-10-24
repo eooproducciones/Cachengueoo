@@ -92,7 +92,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   // Step 1: Información General
   const [regFullName, setRegFullName] = useState('');
   const [regNickname, setRegNickname] = useState('');
-  const [regBirthDate, setRegBirthDate] = useState('2002-06-18');
+  const [regBirthDate, setRegBirthDate] = useState('');
   const [regInstagram, setRegInstagram] = useState('');
   const [regGender, setRegGender] = useState<UserGender>('hombre');
   const [regEmail, setRegEmail] = useState('');
@@ -101,17 +101,13 @@ export const AuthModal: React.FC<AuthModalProps> = ({
 
   // Step 2: Match & Gustos
   const [regPreference, setRegPreference] = useState<PreferenceGender>('todos');
-  const [regZodiacSign, setRegZodiacSign] = useState<string>('Leo');
-  const [regMusicPreferences, setRegMusicPreferences] = useState<string[]>([
-    'Reggaeton',
-    'Cuarteto',
-    'Cumbia',
-  ]);
-  const [regDrinks, setRegDrinks] = useState<string[]>(['Fernet', 'Skyy']);
+  const [regZodiacSign, setRegZodiacSign] = useState<string>('');
+  const [regMusicPreferences, setRegMusicPreferences] = useState<string[]>([]);
+  const [regDrinks, setRegDrinks] = useState<string[]>([]);
 
   // Step 3: Fotos & Bio (inicialmente vacías; el usuario debe subir obligatoriamente su propia foto)
   const [regPhotos, setRegPhotos] = useState<string[]>([]);
-  const [regBio, setRegBio] = useState('Salgo a disfrutar con amigos y tomar un buen Fernet. Si pinta charla en la pista, avisame.');
+  const [regBio, setRegBio] = useState('');
 
   // Usuario creado recientemente para la verificación
   const [registeredUser, setRegisteredUser] = useState<UserProfile | null>(null);
@@ -600,16 +596,15 @@ export const AuthModal: React.FC<AuthModalProps> = ({
             <div className="space-y-3.5 text-xs">
               {/* Nombre completo */}
               <div>
-                <label className="text-zinc-300 block mb-1 font-bold flex items-center justify-between">
+                <label className="text-zinc-300 block mb-1 font-bold">
                   <span>Nombre completo <span className="text-red-400">*</span></span>
-                  <span className="text-[10px] text-zinc-500">Tal como figura en tu DNI</span>
                 </label>
                 <div className="relative">
                   <User className="w-4 h-4 text-zinc-500 absolute left-3 top-3 pointer-events-none" />
                   <input
                     type="text"
                     required
-                    placeholder="ej. Mateo Rossi"
+                    placeholder=""
                     value={regFullName}
                     onChange={(e) => setRegFullName(e.target.value)}
                     className="w-full h-10 pl-9 pr-3 rounded-xl bg-zinc-900 border border-zinc-800 text-white font-medium focus:outline-none focus:border-[#F39200]"
@@ -627,7 +622,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                   <input
                     type="text"
                     required
-                    placeholder="ej. Teo (visible en la pista)"
+                    placeholder=""
                     value={regNickname}
                     onChange={(e) => setRegNickname(e.target.value)}
                     className="w-full h-10 px-3 rounded-xl bg-zinc-900 border border-zinc-800 text-white font-medium focus:outline-none focus:border-[#F39200]"
@@ -670,7 +665,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                   </label>
                   <input
                     type="text"
-                    placeholder="@tu_usuario"
+                    placeholder=""
                     value={regInstagram}
                     onChange={(e) => setRegInstagram(e.target.value)}
                     className="w-full h-10 px-3 rounded-xl bg-zinc-900 border border-zinc-800 text-white font-medium focus:outline-none focus:border-[#F39200]"
@@ -689,8 +684,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                   >
                     <option value="hombre">Hombre</option>
                     <option value="mujer">Mujer</option>
-                    <option value="no-binario">No binario</option>
-                    <option value="otro">Otro</option>
                   </select>
                 </div>
               </div>
@@ -705,7 +698,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                   <input
                     type="email"
                     required
-                    placeholder="tu.email@gmail.com"
+                    placeholder=""
                     value={regEmail}
                     onChange={(e) => setRegEmail(e.target.value)}
                     className="w-full h-10 pl-9 pr-3 rounded-xl bg-zinc-900 border border-zinc-800 text-white font-medium focus:outline-none focus:border-[#F39200]"
@@ -725,7 +718,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                     <input
                       type={showPassword ? 'text' : 'password'}
                       required
-                      placeholder="Mínimo 4 caracteres"
+                      placeholder=""
                       value={regPassword}
                       onChange={(e) => setRegPassword(e.target.value)}
                       className="w-full h-10 pl-9 pr-9 rounded-xl bg-zinc-900 border border-zinc-800 text-white font-medium focus:outline-none focus:border-[#F39200]"
@@ -767,7 +760,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                     <input
                       type={showRepeatPassword ? 'text' : 'password'}
                       required
-                      placeholder="Reescribí tu contraseña"
+                      placeholder=""
                       value={regRepeatPassword}
                       onChange={(e) => setRegRepeatPassword(e.target.value)}
                       className={`w-full h-10 pl-9 pr-9 rounded-xl bg-zinc-900 border text-white font-medium focus:outline-none ${
@@ -1009,7 +1002,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                     PASO 3 DE 3 · FOTOS & BIOGRAFÍA
                   </span>
                   <h3 className="text-base font-black text-white font-display">
-                    Tus fotos de fiesta
+                    Tu foto
                   </h3>
                 </div>
               </div>

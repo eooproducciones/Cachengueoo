@@ -1,6 +1,7 @@
 import { UserProfile } from '../types';
 import { getSupabaseClient } from './supabaseClient';
 import { buildUserProfileFromSources, packProfileInterests } from '../utils/profileMetadata';
+import { presenceService } from './presenceService';
 
 const USER_STORAGE_KEY = 'cachengueoo_current_user';
 const USERS_LIST_STORAGE_KEY = 'cachengueoo_registered_users';
@@ -378,10 +379,11 @@ export const authService = {
   logout(): void {
     const client = getSupabaseClient();
     if (client) {
-      client.auth.signOut().then();
+      client.auth.signOut().then(() => {}, () => {});
     }
     sessionStorage.removeItem(USER_STORAGE_KEY);
     localStorage.removeItem(USER_STORAGE_KEY);
+    presenceService.clearPresence();
     notifyAuthChange();
   },
 

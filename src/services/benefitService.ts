@@ -1,5 +1,5 @@
-import { MOCK_BENEFITS } from '../data/mockData';
 import { ClubBenefit } from '../types';
+import { getSupabaseClient } from './supabaseClient';
 
 const BENEFITS_STORAGE_KEY = 'cachengueoo_benefits_list';
 
@@ -50,6 +50,24 @@ export const benefitService = {
       id: `ben_${Date.now()}`,
     };
     this.saveBenefits([newBen, ...list]);
+
+    // Sincronizar en Supabase si está disponible
+    const supabase = getSupabaseClient();
+    if (supabase) {
+      supabase
+        .from('benefits')
+        .insert({
+          title: newBen.title,
+          description: newBen.description,
+          condition: newBen.condition,
+          expiry_time: newBen.expiryTime || null,
+          tag: newBen.tag || 'BARRA',
+          only_members: Boolean(newBen.onlyMembers),
+          active: newBen.active ?? true,
+        })
+        .then(() => {}, () => {});
+    }
+
     return newBen;
   },
 
@@ -63,5 +81,40 @@ export const benefitService = {
     const list = this.getBenefits();
     const updated = list.filter((b) => b.id !== id);
     this.saveBenefits(updated);
+
+    // Borrar también en Supabase si está disponible
+    const supabase = getSupabaseClient();
+    if (supabase) {
+      supabase.from('benefits').delete().eq('id', id).then(() => {}, () => {});
+    }
+  },
+
+  async syncBenefitsFromSupabase(): Promise<ClubBenefit[]> {
+    const supabase = getSupabaseClient();
+    if (!supabase) return this.getBenefits();
+
+    try {
+      const { data, error } = await supabase.from('benefits').select('*');
+      if (!error && Array.isArray(data) && data.length > 0) {
+        const mapped: ClubBenefit[] = data.map((d: any) => ({
+          id: d.id,
+          title: d.title,
+          description: d.description,
+          condition: d.condition,
+          expiryTime: d.expiry_time,
+          tag: d.tag,
+          onlyMembers: d.only_members,
+          active: d.active,
+          actionLabel: d.action_label || 'Obtener beneficio',
+          highlightBadge: d.highlight_badge || 'PROMO',
+          actionUrl: d.action_url || '',
+        }));
+        this.saveBenefits(mapped);
+        return mapped;
+      }
+    } catch {
+      // Usar cache local
+    }
+    return this.getBenefits();
   },
 };

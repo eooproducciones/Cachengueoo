@@ -143,6 +143,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onExitAdmin, onL
 
   const [userToDelete, setUserToDelete] = useState<any | null>(null);
   const [isDeletingUser, setIsDeletingUser] = useState(false);
+  const [eventToDelete, setEventToDelete] = useState<ClubEvent | null>(null);
+  const [benefitToDelete, setBenefitToDelete] = useState<ClubBenefit | null>(null);
 
   const handleConfirmDeleteUser = async () => {
     if (!userToDelete) return;
@@ -819,15 +821,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onExitAdmin, onL
                       {evt.isFeatured ? 'Destacada' : 'Destacar'}
                     </button>
 
-                    {events.length > 1 && (
-                      <button
-                        onClick={() => handleDeleteEvent(evt.id)}
-                        className="p-2 rounded-xl bg-zinc-900 border border-zinc-800 text-zinc-500 hover:text-red-400 cursor-pointer"
-                        title="Eliminar evento"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
-                    )}
+                    <button
+                      type="button"
+                      onClick={() => setEventToDelete(evt)}
+                      className="p-2 rounded-xl bg-zinc-900 hover:bg-red-950/40 border border-zinc-800 hover:border-red-500/40 text-zinc-500 hover:text-red-400 cursor-pointer transition-colors"
+                      title="Eliminar evento"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
                   </div>
                 </div>
 
@@ -1024,7 +1025,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onExitAdmin, onL
 
                         <button
                           type="button"
-                          onClick={() => handleDeleteBenefit(b.id)}
+                          onClick={() => setBenefitToDelete(b)}
                           className="w-8 h-8 rounded-xl bg-zinc-900 hover:bg-red-950/40 border border-zinc-800 hover:border-red-500/40 text-zinc-500 hover:text-red-400 flex items-center justify-center cursor-pointer transition-colors"
                           title="Eliminar beneficio"
                         >
@@ -1722,6 +1723,104 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onExitAdmin, onL
                     <span>Sí, Eliminar</span>
                   </>
                 )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: CONFIRMAR ELIMINACIÓN DE EVENTO */}
+      {eventToDelete && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-md animate-in fade-in duration-200">
+          <div className="bg-[#121217] border border-red-500/40 rounded-3xl w-full max-w-sm p-6 space-y-4 shadow-2xl shadow-red-950/40">
+            <div className="w-14 h-14 rounded-2xl bg-red-950/80 border border-red-500/50 flex items-center justify-center mx-auto text-red-400">
+              <Trash2 className="w-7 h-7" />
+            </div>
+
+            <div className="text-center space-y-1">
+              <span className="text-[10px] uppercase font-bold text-red-400 tracking-wider">
+                Zona de Peligro
+              </span>
+              <h4 className="text-base font-black text-white font-display">
+                ¿Eliminar {eventToDelete.title}?
+              </h4>
+              <p className="text-xs text-zinc-400 leading-relaxed">
+                Esta acción eliminará de forma permanente el evento de la cartelera y de la base de datos.
+              </p>
+            </div>
+
+            <div className="p-3 rounded-2xl bg-zinc-900/80 border border-zinc-800 text-[11px] text-zinc-300 space-y-1">
+              <p className="font-semibold text-white">{eventToDelete.title}</p>
+              <p className="text-zinc-400 text-[10px]">{eventToDelete.dateStr} · {eventToDelete.timeRange}</p>
+            </div>
+
+            <div className="pt-2 flex gap-2">
+              <button
+                type="button"
+                onClick={() => setEventToDelete(null)}
+                className="flex-1 h-10 rounded-xl bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 text-zinc-300 font-bold text-xs cursor-pointer transition-colors"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  handleDeleteEvent(eventToDelete.id);
+                  setEventToDelete(null);
+                }}
+                className="flex-1 h-10 rounded-xl bg-red-600 hover:bg-red-500 text-white font-bold text-xs cursor-pointer transition-colors shadow-lg shadow-red-950/60 flex items-center justify-center gap-1.5"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>Sí, Eliminar</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: CONFIRMAR ELIMINACIÓN DE BENEFICIO */}
+      {benefitToDelete && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-md animate-in fade-in duration-200">
+          <div className="bg-[#121217] border border-red-500/40 rounded-3xl w-full max-w-sm p-6 space-y-4 shadow-2xl shadow-red-950/40">
+            <div className="w-14 h-14 rounded-2xl bg-red-950/80 border border-red-500/50 flex items-center justify-center mx-auto text-red-400">
+              <Trash2 className="w-7 h-7" />
+            </div>
+
+            <div className="text-center space-y-1">
+              <span className="text-[10px] uppercase font-bold text-red-400 tracking-wider">
+                Zona de Peligro
+              </span>
+              <h4 className="text-base font-black text-white font-display">
+                ¿Eliminar {benefitToDelete.title}?
+              </h4>
+              <p className="text-xs text-zinc-400 leading-relaxed">
+                Esta acción eliminará de forma permanente el beneficio y sus accesos de la plataforma.
+              </p>
+            </div>
+
+            <div className="p-3 rounded-2xl bg-zinc-900/80 border border-zinc-800 text-[11px] text-zinc-300 space-y-1">
+              <p className="font-semibold text-white">{benefitToDelete.title}</p>
+              <p className="text-zinc-400 text-[10px]">{benefitToDelete.highlightBadge} · {benefitToDelete.partnerName || 'Alianza'}</p>
+            </div>
+
+            <div className="pt-2 flex gap-2">
+              <button
+                type="button"
+                onClick={() => setBenefitToDelete(null)}
+                className="flex-1 h-10 rounded-xl bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 text-zinc-300 font-bold text-xs cursor-pointer transition-colors"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  handleDeleteBenefit(benefitToDelete.id);
+                  setBenefitToDelete(null);
+                }}
+                className="flex-1 h-10 rounded-xl bg-red-600 hover:bg-red-500 text-white font-bold text-xs cursor-pointer transition-colors shadow-lg shadow-red-950/60 flex items-center justify-center gap-1.5"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>Sí, Eliminar</span>
               </button>
             </div>
           </div>

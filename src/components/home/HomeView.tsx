@@ -11,7 +11,7 @@ import {
 } from 'lucide-react';
 import { ClubBenefit, ClubEvent, UserProfile } from '../../types';
 import { PresenceStatus } from '../../services/presenceService';
-import { isEventToday } from '../../services/eventService';
+import { isEventToday, isEventPast } from '../../services/eventService';
 
 interface HomeViewProps {
   currentUser: UserProfile | null;
@@ -39,7 +39,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
   return (
     <div className="max-w-xl mx-auto px-4 py-4 space-y-6">
       {/* SECTION 1: PRESENCE HERO BANNER */}
-      {presence.isInside ? (
+      {Boolean(currentUser) && presence.isInside ? (
         /* DENTRO DE CACHENGUEOO -> MATCH CALL TO ACTION SOBRIO */
         <div className="bg-[#121217] border border-[#F39200]/40 rounded-3xl p-5 shadow-xl relative overflow-hidden animate-in fade-in duration-300">
           <div className="flex items-center justify-between mb-2">
@@ -116,13 +116,16 @@ export const HomeView: React.FC<HomeViewProps> = ({
 
       {/* SECTION 2: PRÓXIMAS FECHAS */}
       {(() => {
-        // Solo mostrar eventos que realmente existan (cargados en admin). Si no hay eventos cargados, no inventar ninguno.
-        const allList = (upcomingEvents && upcomingEvents.length > 0)
-          ? upcomingEvents
-          : (tonightEvent && tonightEvent.id && tonightEvent.title ? [tonightEvent] : []);
+        // Solo mostrar eventos que realmente existan (cargados en admin) y que NO hayan pasado
+        const validUpcoming = (upcomingEvents || []).filter((e) => !isEventPast(e));
+        const validTonight = tonightEvent && isEventToday(tonightEvent) && !isEventPast(tonightEvent) ? tonightEvent : null;
+
+        const allList = validUpcoming.length > 0
+          ? validUpcoming
+          : (validTonight && validTonight.id && validTonight.title ? [validTonight] : []);
 
         // 1. Detectar si hay evento de hoy (por fecha actual del día)
-        const todayEvt = allList.find((e) => isEventToday(e) || e.isActiveTonight);
+        const todayEvt = allList.find((e) => isEventToday(e));
 
         // 2. Eventos marcados como destacados para el inicio
         const featuredList = allList.filter((e) => e.isFeatured);
@@ -146,8 +149,8 @@ export const HomeView: React.FC<HomeViewProps> = ({
         }
 
         const displayEvents = Array.from(eventsMap.values()).sort((a, b) => {
-          const aIsToday = a.isActiveTonight || isEventToday(a);
-          const bIsToday = b.isActiveTonight || isEventToday(b);
+          const aIsToday = isEventToday(a);
+          const bIsToday = isEventToday(b);
           if (aIsToday && !bIsToday) return -1;
           if (!aIsToday && bIsToday) return 1;
           return (a.dateIso || '').localeCompare(b.dateIso || '');

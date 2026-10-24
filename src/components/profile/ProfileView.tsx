@@ -24,6 +24,9 @@ import {
   Upload,
   X,
   UserPlus,
+  Eye,
+  Heart,
+  Info,
 } from 'lucide-react';
 import { UserProfile, UserGender, PreferenceGender } from '../../types';
 import {
@@ -154,6 +157,8 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
       : ['Fernet', 'Skyy'];
 
   const [isEditing, setIsEditing] = useState(false);
+  const [showMatchPreview, setShowMatchPreview] = useState(false);
+  const [previewPhotoIndex, setPreviewPhotoIndex] = useState(0);
 
   // Form states
   const [editFullName, setEditFullName] = useState(currentUser.fullName || '');
@@ -466,6 +471,21 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                 </button>
               )}
             </div>
+          </div>
+
+          {/* BOTÓN DESTACADO: ¿CÓMO ME VEO EN MATCH? */}
+          <div className="pt-3 mt-3 border-t border-zinc-800/80">
+            <button
+              type="button"
+              onClick={() => {
+                setPreviewPhotoIndex(0);
+                setShowMatchPreview(true);
+              }}
+              className="w-full h-11 rounded-2xl bg-gradient-to-r from-[#F39200]/20 via-amber-500/10 to-[#F39200]/20 hover:from-[#F39200]/30 hover:to-[#F39200]/30 border border-[#F39200]/50 text-[#F39200] hover:text-amber-300 font-extrabold text-xs flex items-center justify-center gap-2 cursor-pointer shadow-lg shadow-[#F39200]/10 transition-all active:scale-[0.99] group"
+            >
+              <Eye className="w-4 h-4 text-[#F39200] group-hover:scale-110 transition-transform" />
+              <span>Cómo me veo en Match</span>
+            </button>
           </div>
         </div>
       </div>
@@ -894,6 +914,159 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: VISTA PREVIA "¿CÓMO ME VEO EN MATCH?" */}
+      {showMatchPreview && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/85 backdrop-blur-md animate-in fade-in duration-200">
+          <div className="bg-[#121217] border border-zinc-800 rounded-3xl w-full max-w-sm overflow-hidden flex flex-col shadow-2xl max-h-[92vh]">
+            {/* Header modal */}
+            <div className="p-3.5 border-b border-zinc-800 flex items-center justify-between bg-zinc-950/70">
+              <div className="flex items-center gap-2">
+                <Eye className="w-4 h-4 text-[#F39200]" />
+                <span className="text-xs font-bold text-white font-display">
+                  Cómo me veo en Match
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowMatchPreview(false)}
+                className="w-7 h-7 rounded-full bg-zinc-900 hover:bg-zinc-800 text-zinc-400 hover:text-white flex items-center justify-center cursor-pointer transition-colors"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Tarjeta idéntica a la Pista de Match */}
+            <div className="p-3 flex-1 overflow-y-auto">
+              <div className="relative aspect-[3/4] w-full rounded-3xl overflow-hidden border border-zinc-800 bg-zinc-950 shadow-xl select-none flex flex-col justify-between">
+                {/* Foto activa */}
+                <img
+                  src={userPhotos[Math.min(previewPhotoIndex, userPhotos.length - 1)]}
+                  alt={currentUser.fullName}
+                  referrerPolicy="no-referrer"
+                  className="absolute inset-0 w-full h-full object-cover object-center pointer-events-none"
+                />
+
+                {/* Zonas de tap para cambiar foto */}
+                {userPhotos.length > 1 && (
+                  <div className="absolute inset-x-0 top-14 bottom-32 z-10 flex">
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setPreviewPhotoIndex((prev) =>
+                          prev > 0 ? prev - 1 : userPhotos.length - 1
+                        )
+                      }
+                      className="w-1/2 h-full cursor-pointer focus:outline-none"
+                      title="Foto anterior"
+                    />
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setPreviewPhotoIndex((prev) => (prev + 1) % userPhotos.length)
+                      }
+                      className="w-1/2 h-full cursor-pointer focus:outline-none"
+                      title="Siguiente foto"
+                    />
+                  </div>
+                )}
+
+                {/* Segmentos de fotos superiores */}
+                <div className="relative z-20 p-3 space-y-2">
+                  <div className="w-full flex gap-1.5 px-0.5">
+                    {userPhotos.map((_, idx) => (
+                      <div
+                        key={idx}
+                        className={`h-1 flex-1 rounded-full transition-all duration-300 ${
+                          idx === previewPhotoIndex
+                            ? 'bg-white shadow-[0_0_8px_rgba(255,255,255,0.9)]'
+                            : 'bg-white/35 backdrop-blur-sm'
+                        }`}
+                      />
+                    ))}
+                  </div>
+
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-black/65 backdrop-blur-md border border-white/10 text-zinc-300 text-[10px] shadow-sm">
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse shrink-0"></span>
+                      <span>estoy en Cachengueoo</span>
+                    </div>
+                    <span className="px-2 py-0.5 rounded-full bg-[#F39200]/90 text-black text-[9px] font-black uppercase tracking-wider">
+                      Tu Perfil
+                    </span>
+                  </div>
+                </div>
+
+                {/* Gradiente inferior con datos del perfil */}
+                <div className="relative z-20 p-4 pt-12 bg-gradient-to-t from-black/95 via-black/75 to-transparent space-y-2">
+                  <div className="space-y-0.5">
+                    <div className="flex items-baseline gap-2">
+                      <h3 className="text-xl font-black text-white font-display">
+                        {currentUser.fullName}
+                      </h3>
+                      <span className="text-base text-zinc-300 font-bold">
+                        {currentUser.age}
+                      </span>
+                    </div>
+                    {currentUser.nickname && currentUser.nickname !== currentUser.fullName && (
+                      <p className="text-xs text-[#F39200] font-semibold">
+                        "{currentUser.nickname}"
+                      </p>
+                    )}
+                  </div>
+
+                  {/* Chips: Tragos y Signo */}
+                  <div className="flex flex-wrap gap-1.5 pt-0.5">
+                    {userDrinks.slice(0, 2).map((drink, i) => (
+                      <span
+                        key={i}
+                        className="px-2 py-0.5 rounded-lg bg-black/60 backdrop-blur-md border border-[#F39200]/40 text-[#F39200] text-[10px] font-bold flex items-center gap-1"
+                      >
+                        <GlassWater className="w-2.5 h-2.5" />
+                        {drink}
+                      </span>
+                    ))}
+                    {currentUser.zodiacSign && (
+                      <span className="px-2 py-0.5 rounded-lg bg-black/60 backdrop-blur-md border border-amber-400/40 text-amber-300 text-[10px] font-bold flex items-center gap-1">
+                        <Sparkles className="w-2.5 h-2.5 text-amber-400" />
+                        {currentUser.zodiacSign}
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Biografía */}
+                  {currentUser.bio && (
+                    <p className="text-[11px] text-zinc-200 line-clamp-2 italic leading-relaxed pt-0.5">
+                      "{currentUser.bio}"
+                    </p>
+                  )}
+
+                  {/* Botones simulados de Match */}
+                  <div className="flex items-center justify-center gap-4 pt-2">
+                    <div className="w-11 h-11 rounded-full bg-zinc-950/80 border border-zinc-700 text-rose-400 flex items-center justify-center text-xs font-bold opacity-80">
+                      ✕
+                    </div>
+                    <div className="w-13 h-13 rounded-full bg-emerald-500/20 border-2 border-emerald-400 text-emerald-400 flex items-center justify-center shadow-lg opacity-80">
+                      <Heart className="w-6 h-6 fill-emerald-400" />
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Footer con botón cerrar */}
+            <div className="p-3 bg-zinc-950/70 border-t border-zinc-800">
+              <button
+                type="button"
+                onClick={() => setShowMatchPreview(false)}
+                className="w-full h-10 rounded-xl bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 text-zinc-200 font-bold text-xs cursor-pointer transition-colors"
+              >
+                Cerrar Vista Previa
+              </button>
+            </div>
           </div>
         </div>
       )}

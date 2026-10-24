@@ -63,10 +63,10 @@ export const presenceService = {
           return { isInside: false };
         }
 
-        // 3. Caducidad estricta de presencia GPS (15 minutos máximo)
+        // 3. Caducidad de presencia: 8 horas (cubre la noche entera de fiesta sin pedir ubicación constantemente)
         if (parsed.validatedAt) {
           const ageMs = Date.now() - new Date(parsed.validatedAt).getTime();
-          if (ageMs > 15 * 60 * 1000) {
+          if (ageMs > 8 * 60 * 60 * 1000) {
             return { isInside: false };
           }
         }

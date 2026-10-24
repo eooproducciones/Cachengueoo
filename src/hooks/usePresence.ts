@@ -91,15 +91,8 @@ export function usePresence() {
     setPresence({ isInside: false });
   }, []);
 
-  // Verificación periódica cada 3 minutos si está activo
-  useEffect(() => {
-    if (!presence.simulated && presence.isInside) {
-      const interval = setInterval(() => {
-        checkGpsPresence();
-      }, 3 * 60 * 1000);
-      return () => clearInterval(interval);
-    }
-  }, [presence.isInside, presence.simulated, checkGpsPresence]);
+  // La geolocalización solo se ejecuta por acción explícita del usuario (al pulsar Validar o ingresar a Match),
+  // evitando que el navegador muestre carteles de permiso cada 3 minutos en segundo plano.
 
   return {
     presence,

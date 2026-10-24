@@ -1,72 +1,14 @@
-import { MOCK_EVENTS } from '../data/mockData';
 import { ClubEvent, ValidationMode } from '../types';
+import { getSupabaseClient } from './supabaseClient';
 
 const EVENTS_STORAGE_KEY = 'cachengueoo_events_list';
 
 /**
- * Calcula la fecha y hora de expiración: 12 horas después de la finalización del evento.
- * Si el evento es en dateIso y el horario es "23:00 a 06:00", el evento termina a las 06:00 del día siguiente.
- * Pasadas 12 horas de esa hora de cierre (a las 18:00), debe borrarse automáticamente.
- */
-export function calculateEventExpiration(dateIso: string, timeRange: string): string {
-  try {
-    const [year, month, day] = dateIso.split('-').map(Number);
-    let endHour = 6;
-    let endMinute = 0;
-
-    const timeMatches = (timeRange || '').match(/(\d{1,2}):(\d{2})/g);
-    if (timeMatches && timeMatches.length >= 2) {
-      const [h, m] = timeMatches[timeMatches.length - 1].split(':').map(Number);
-      endHour = h;
-      endMinute = m;
-    } else if (timeMatches && timeMatches.length === 1) {
-      const [h, m] = timeMatches[0].split(':').map(Number);
-      if (h >= 18) {
-        endHour = 6;
-        endMinute = 0;
-      } else {
-        endHour = h;
-        endMinute = m;
-      }
-    }
-
-    const endDate = new Date(year, month - 1, day);
-    // Si la hora de cierre es de madrugada (<= 12 hs), corresponde al día siguiente de la fecha del evento
-    if (endHour <= 12) {
-      endDate.setDate(endDate.getDate() + 1);
-    }
-    endDate.setHours(endHour, endMinute, 0, 0);
-
-    // 12 horas después de la finalización del evento
-    const expirationDate = new Date(endDate.getTime() + 12 * 60 * 60 * 1000);
-    return expirationDate.toISOString();
-  } catch {
-    return new Date(Date.now() + 36 * 60 * 60 * 1000).toISOString();
-  }
-}
-
-export function isEventExpired(event: ClubEvent): boolean {
-  try {
-    const now = Date.now();
-    if (event.expiresAtIso) {
-      return now > new Date(event.expiresAtIso).getTime();
-    }
-    if (event.dateIso) {
-      const exp = calculateEventExpiration(event.dateIso, event.timeRange || '00:00 — 06:00');
-      return now > new Date(exp).getTime();
-    }
-  } catch (e) {
-    console.error('Error evaluating event expiration', e);
-  }
-  return false;
-}
-
-/**
  * Determina si el evento corresponde a la noche actual (hoy o madrugada en curso).
- * En la vida nocturna, si son las 04:00 AM del Sábado, la fiesta del Viernes sigue siendo la noche en curso.
+ * En la vida nocturna, si son las 04:00 AM del Sábado, la fiesta del Viernes sigue siendo la noche en curso (hasta las 08:00 AM).
  */
 export function isEventToday(event: ClubEvent): boolean {
-  if (!event.dateIso) return false;
+  if (!event || !event.dateIso) return false;
 
   const now = new Date();
   const currentYear = now.getFullYear();
@@ -95,6 +37,34 @@ export function isEventToday(event: ClubEvent): boolean {
   return false;
 }
 
+/**
+ * Determina si un evento ya finalizó (está en el pasado).
+ * Si no es la fiesta de hoy ni la fiesta en curso de la madrugada (< 08:00 AM),
+ * y la fecha dateIso es anterior a la fecha de hoy, EL EVENTO YA PASÓ.
+ */
+export function isEventPast(event: ClubEvent): boolean {
+  if (!event || !event.dateIso) return false;
+  if (isEventToday(event)) return false;
+
+  const now = new Date();
+  const currentYear = now.getFullYear();
+  const currentMonth = String(now.getMonth() + 1).padStart(2, '0');
+  const currentDay = String(now.getDate()).padStart(2, '0');
+  const todayIso = `${currentYear}-${currentMonth}-${currentDay}`;
+
+  return event.dateIso < todayIso;
+}
+
+/**
+ * Determina si un evento está expirado para auto-borrado
+ */
+export function isEventExpired(event: ClubEvent): boolean {
+  if (event.expiresAtIso) {
+    return Date.now() > new Date(event.expiresAtIso).getTime();
+  }
+  return isEventPast(event);
+}
+
 export const eventService = {
   getEvents(): ClubEvent[] {
     let list: ClubEvent[] = [];
@@ -111,20 +81,15 @@ export const eventService = {
       list = [];
     }
 
-    // Auto-borrado: filtrar automáticamente eventos pasados 12 horas de su fecha y hora
-    const activeEvents = list.filter((event) => !isEventExpired(event));
+    // Auto-borrado estricto: eliminar automáticamente cualquier evento que ya haya pasado
+    const activeEvents = list.filter((event) => !isEventPast(event) && !isEventExpired(event));
 
-    // Si se eliminaron eventos expirados, persistir inmediatamente la lista depurada
+    // Si se eliminaron eventos pasados, persistir inmediatamente la lista depurada
     if (activeEvents.length !== list.length) {
       this.saveEvents(activeEvents);
     }
 
-    const finalList = activeEvents;
-
-    // Actualizar automáticamente isActiveTonight según la fecha actual y ordenar:
-    // 1. El evento de hoy aparece PRIMERO automáticamente
-    // 2. Los demás eventos se ordenan cronológicamente por fecha ascendente
-    return finalList
+    return activeEvents
       .map((evt) => ({
         ...evt,
         isActiveTonight: isEventToday(evt),
@@ -136,7 +101,7 @@ export const eventService = {
         if (aIsToday && !bIsToday) return -1;
         if (!aIsToday && bIsToday) return 1;
 
-        // Orden cronológico por fecha: del más próximo al más lejano
+        // Orden cronológico por fecha ascendente
         const timeA = a.dateIso ? new Date(a.dateIso).getTime() : Infinity;
         const timeB = b.dateIso ? new Date(b.dateIso).getTime() : Infinity;
 
@@ -151,6 +116,9 @@ export const eventService = {
   saveEvents(events: ClubEvent[]): void {
     try {
       localStorage.setItem(EVENTS_STORAGE_KEY, JSON.stringify(events));
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('cachengueoo_events_updated', { detail: events }));
+      }
     } catch (e) {
       console.error('Error saving events', e);
     }
@@ -160,14 +128,14 @@ export const eventService = {
     const events = this.getEvents();
     if (!events || events.length === 0) return null;
     const todayEvent = events.find((e) => isEventToday(e));
-    return todayEvent || events[0] || null;
+    // NUNCA devolver un evento pasado ni un evento de la semana que viene como si fuera de hoy
+    return todayEvent || null;
   },
 
   getFeaturedEvents(): ClubEvent[] {
     const events = this.getEvents();
-    const featured = events.filter((e) => e.isFeatured);
+    const featured = events.filter((e) => e.isFeatured && !isEventPast(e));
     if (featured.length > 0) {
-      // Ordenar con el evento de hoy primero (si está destacado) y luego por fecha
       return [...featured].sort((a, b) => {
         const aIsToday = isEventToday(a);
         const bIsToday = isEventToday(b);
@@ -210,18 +178,36 @@ export const eventService = {
 
   createEvent(newEvent: Omit<ClubEvent, 'id'>): ClubEvent {
     const events = this.getEvents();
-    const expiresAt =
-      newEvent.expiresAtIso || calculateEventExpiration(newEvent.dateIso, newEvent.timeRange);
-
     const isToday = isEventToday({ ...newEvent, id: '' } as ClubEvent);
 
     const created: ClubEvent = {
       ...newEvent,
       id: `evt_${Date.now()}`,
       isActiveTonight: isToday,
-      expiresAtIso: expiresAt,
     };
     this.saveEvents([created, ...events]);
+
+    // Sincronizar creación en Supabase
+    const supabase = getSupabaseClient();
+    if (supabase) {
+      supabase
+        .from('events')
+        .insert({
+          title: created.title,
+          subtitle: created.subtitle || '',
+          date_str: created.dateStr,
+          date_iso: created.dateIso,
+          time_range: created.timeRange,
+          location_name: created.locationName,
+          description: created.description || '',
+          flyer_url: created.flyerUrl || null,
+          is_active_tonight: created.isActiveTonight,
+          validation_mode: created.validationMode || 'GPS_OR_QR',
+          djs: created.djs || [],
+        })
+        .then(() => {}, () => {});
+    }
+
     return created;
   },
 
@@ -229,5 +215,52 @@ export const eventService = {
     const events = this.getEvents();
     const updated = events.filter((e) => e.id !== eventId);
     this.saveEvents(updated);
+
+    // Borrar también en Supabase si está disponible
+    const supabase = getSupabaseClient();
+    if (supabase) {
+      supabase.from('events').delete().eq('id', eventId).then(() => {}, () => {});
+    }
+  },
+
+  /**
+   * Sincronizar eventos con Supabase al abrir la aplicación
+   */
+  async syncEventsFromSupabase(): Promise<ClubEvent[]> {
+    const supabase = getSupabaseClient();
+    if (!supabase) return this.getEvents();
+
+    try {
+      const { data, error } = await supabase
+        .from('events')
+        .select('*')
+        .order('date_iso', { ascending: true });
+
+      if (!error && Array.isArray(data) && data.length > 0) {
+        const mapped: ClubEvent[] = data.map((d: any) => ({
+          id: d.id,
+          title: d.title,
+          subtitle: d.subtitle || '',
+          dateStr: d.date_str,
+          dateIso: d.date_iso,
+          timeRange: d.time_range,
+          locationName: d.location_name,
+          description: d.description || '',
+          flyerUrl: d.flyer_url || '',
+          isActiveTonight: d.is_active_tonight,
+          validationMode: d.validation_mode || 'GPS_OR_QR',
+          djs: d.djs || [],
+          passlineUrl: d.passline_url || 'https://www.passline.com',
+          ticketTypes: [],
+        }));
+
+        const clean = mapped.filter((e) => !isEventPast(e));
+        this.saveEvents(clean);
+        return clean;
+      }
+    } catch {
+      // Usar cache local
+    }
+    return this.getEvents();
   },
 };
