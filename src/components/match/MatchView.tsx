@@ -1096,33 +1096,56 @@ const ChatModal: React.FC<ChatModalProps> = ({
   const [messages, setMessages] = useState(() => matchService.getMessages(match.id));
   const [inputText, setInputText] = useState('');
   const [showMenu, setShowMenu] = useState(false);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const partner = match.partnerProfile;
   if (!partner) return null;
 
-  const handleSend = (textToSend = inputText) => {
+  // Sincronización en vivo con Supabase
+  useEffect(() => {
+    // 1. Cargar historial completo de Supabase
+    matchService.fetchMessages(match.id).then((fresh) => {
+      if (fresh && fresh.length > 0) {
+        setMessages(fresh);
+      }
+    });
+
+    // 2. Suscribirse a nuevos mensajes en tiempo real
+    const unsubscribe = matchService.subscribeToMessages(match.id, (incoming) => {
+      setMessages((prev) => {
+        if (prev.some((m) => m.id === incoming.id)) return prev;
+        return [...prev, incoming];
+      });
+    });
+
+    return () => {
+      unsubscribe();
+    };
+  }, [match.id]);
+
+  // Auto-scroll al recibir o enviar mensajes
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages]);
+
+  const handleSend = async (textToSend = inputText) => {
     if (!textToSend.trim()) return;
 
-    const newMsg = matchService.sendMessage(
+    const text = textToSend.trim();
+    setInputText('');
+
+    // Envío real a Supabase y caché local
+    const newMsg = await matchService.sendMessage(
       match.id,
       currentUser.id,
       partner.userId,
-      textToSend.trim()
+      text
     );
 
-    setMessages((prev) => [...prev, newMsg]);
-    setInputText('');
-
-    setTimeout(() => {
-      const responses = [
-        '¡Genial! Estoy cerca de la barra principal con un gin tonic 😉',
-        '¡Dale! ¿De qué parte de Mendoza sos?',
-        '¡Reee! Si pasás por la pista avisame 🍸',
-      ];
-      const randomText = responses[Math.floor(Math.random() * responses.length)];
-      const reply = matchService.sendMessage(match.id, partner.userId, currentUser.id, randomText);
-      setMessages((prev) => [...prev, reply]);
-    }, 1200);
+    setMessages((prev) => {
+      if (prev.some((m) => m.id === newMsg.id)) return prev;
+      return [...prev, newMsg];
+    });
   };
 
   const handleBlock = () => {
@@ -1256,6 +1279,7 @@ const ChatModal: React.FC<ChatModalProps> = ({
               </div>
             );
           })}
+          <div ref={messagesEndRef} />
         </div>
 
         {/* Quick Icebreakers */}

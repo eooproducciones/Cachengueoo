@@ -141,6 +141,30 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onExitAdmin, onL
     }
   });
 
+  const [userToDelete, setUserToDelete] = useState<any | null>(null);
+  const [isDeletingUser, setIsDeletingUser] = useState(false);
+
+  const handleConfirmDeleteUser = async () => {
+    if (!userToDelete) return;
+    const uid = userToDelete.id || userToDelete.userId;
+    const email = userToDelete.email;
+    setIsDeletingUser(true);
+    try {
+      await authService.deleteUser(uid, email);
+      setRegisteredUsers((prev) =>
+        prev.filter((u: any) => (u.id || u.userId) !== uid && (!email || u.email?.toLowerCase() !== email.toLowerCase()))
+      );
+      if (selectedUserDetail && ((selectedUserDetail.id || selectedUserDetail.userId) === uid || selectedUserDetail.email === email)) {
+        setSelectedUserDetail(null);
+      }
+      setUserToDelete(null);
+    } catch (err) {
+      console.error('Error al eliminar usuario:', err);
+    } finally {
+      setIsDeletingUser(false);
+    }
+  };
+
   const handleToggleBlockMatch = (userId: string, email?: string) => {
     const isCurrentlyBlocked =
       blockedMatchUsers.includes(userId) ||
@@ -1312,6 +1336,15 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onExitAdmin, onL
                           </>
                         )}
                       </button>
+
+                      <button
+                        type="button"
+                        onClick={() => setUserToDelete(usr)}
+                        className="h-8 px-2.5 rounded-xl bg-red-950/40 hover:bg-red-900/60 border border-red-500/30 hover:border-red-500 text-red-400 hover:text-white transition-all cursor-pointer flex items-center justify-center shadow-sm"
+                        title="Eliminar usuario definitivamente del sistema"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
                     </div>
                   </div>
                 );
@@ -1602,6 +1635,22 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onExitAdmin, onL
                       )}
                     </button>
                   </div>
+
+                  {/* SECCIÓN DE ELIMINACIÓN DEFINITIVA */}
+                  <div className="pt-2 border-t border-zinc-800/80">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const target = selectedUserDetail;
+                        setSelectedUserDetail(null);
+                        setUserToDelete(target);
+                      }}
+                      className="w-full py-2.5 rounded-xl bg-red-950/40 hover:bg-red-900/60 border border-red-500/30 text-red-300 hover:text-white font-bold text-xs flex items-center justify-center gap-2 cursor-pointer transition-all"
+                    >
+                      <Trash2 className="w-3.5 h-3.5 text-red-400" />
+                      <span>Eliminar Usuario de la Plataforma</span>
+                    </button>
+                  </div>
                 </div>
               );
             })()}
@@ -1614,6 +1663,65 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onExitAdmin, onL
                 className="w-full h-11 rounded-xl bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 text-zinc-300 font-bold text-xs cursor-pointer transition-colors"
               >
                 Cerrar Ficha
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: CONFIRMAR ELIMINACIÓN DE USUARIO */}
+      {userToDelete && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-md animate-in fade-in duration-200">
+          <div className="bg-[#121217] border border-red-500/40 rounded-3xl w-full max-w-sm p-6 space-y-4 shadow-2xl shadow-red-950/40">
+            <div className="w-14 h-14 rounded-2xl bg-red-950/80 border border-red-500/50 flex items-center justify-center mx-auto text-red-400">
+              <Trash2 className="w-7 h-7" />
+            </div>
+
+            <div className="text-center space-y-1">
+              <span className="text-[10px] uppercase font-bold text-red-400 tracking-wider">
+                Zona de Peligro
+              </span>
+              <h4 className="text-base font-black text-white font-display">
+                ¿Eliminar a {userToDelete.full_name || userToDelete.fullName || userToDelete.nickname || 'este usuario'}?
+              </h4>
+              <p className="text-xs text-zinc-400 leading-relaxed">
+                Esta acción eliminará de forma permanente la cuenta, perfil, fotos y accesos del usuario en la plataforma y base de datos.
+              </p>
+            </div>
+
+            <div className="p-3 rounded-2xl bg-zinc-900/80 border border-zinc-800 text-[11px] text-zinc-300 space-y-1">
+              <p className="font-semibold text-white">
+                {userToDelete.full_name || userToDelete.fullName || userToDelete.nickname}
+              </p>
+              {userToDelete.email && <p className="text-zinc-400 font-mono text-[10px]">{userToDelete.email}</p>}
+            </div>
+
+            <div className="pt-2 flex gap-2">
+              <button
+                type="button"
+                disabled={isDeletingUser}
+                onClick={() => setUserToDelete(null)}
+                className="flex-1 h-10 rounded-xl bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 text-zinc-300 font-bold text-xs cursor-pointer transition-colors"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                disabled={isDeletingUser}
+                onClick={handleConfirmDeleteUser}
+                className="flex-1 h-10 rounded-xl bg-red-600 hover:bg-red-500 text-white font-bold text-xs cursor-pointer transition-colors shadow-lg shadow-red-950/60 flex items-center justify-center gap-1.5"
+              >
+                {isDeletingUser ? (
+                  <>
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                    <span>Borrando...</span>
+                  </>
+                ) : (
+                  <>
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>Sí, Eliminar</span>
+                  </>
+                )}
               </button>
             </div>
           </div>

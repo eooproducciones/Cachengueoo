@@ -152,19 +152,38 @@ export const matchService = {
     });
     localStorage.setItem(LIKES_STORAGE_KEY, JSON.stringify(likes));
 
-    // En la noche de Cachengueoo, para simular la experiencia vibrante del boliche,
-    // creamos un Match instantáneo (o probabilístico si es un like regular)
-    const isMatch = true; // Permite probar el flujo de Match y Chat inmediatamente
+    // Registrar like en base de datos si Supabase está activo
+    const client = getSupabaseClient();
+    if (client) {
+      try {
+        client
+          .from('likes')
+          .insert({
+            from_user_id: fromUserId,
+            to_user_id: targetProfile.userId,
+            event_id: eventId,
+          })
+          .then();
+      } catch {}
+    }
+
+    // Match instantáneo entre asistentes para habilitar la conversación directa
+    const isMatch = true;
 
     if (isMatch) {
+      const pairKey = [fromUserId, targetProfile.userId].sort().join('_');
+      const deterministicMatchId = `match_${pairKey}`;
+
       const matches = this.getMatches();
-      const existing = matches.find((m) => m.userBId === targetProfile.userId);
+      const existing = matches.find(
+        (m) => m.id === deterministicMatchId || m.userBId === targetProfile.userId
+      );
       if (existing) {
         return { isMatch: true, newMatch: existing };
       }
 
       const newMatch: MatchPair = {
-        id: `match_${Date.now()}`,
+        id: deterministicMatchId,
         userAId: fromUserId,
         userBId: targetProfile.userId,
         eventId,
@@ -194,12 +213,67 @@ export const matchService = {
     }
   },
 
-  sendMessage(matchId: string, senderId: string, receiverId: string, text: string): ChatMessage {
+  async fetchMessages(matchId: string): Promise<ChatMessage[]> {
+    const localMsgs = this.getMessages(matchId);
+    const client = getSupabaseClient();
+    if (client) {
+      try {
+        const { data, error } = await client
+          .from('chat_messages')
+          .select('*')
+          .eq('match_id', matchId)
+          .order('created_at', { ascending: true });
+
+        if (!error && Array.isArray(data)) {
+          const remoteMsgs: ChatMessage[] = data.map((row: any) => ({
+            id: String(row.id),
+            matchId: row.match_id,
+            senderId: row.sender_id,
+            receiverId: row.receiver_id,
+            text: row.text,
+            createdAt: row.created_at,
+            read: Boolean(row.read),
+          }));
+
+          // Mezclar sin duplicados
+          const map = new Map<string, ChatMessage>();
+          remoteMsgs.forEach((m) => map.set(m.id, m));
+          localMsgs.forEach((m) => {
+            if (!map.has(m.id)) {
+              map.set(m.id, m);
+            }
+          });
+
+          const merged = Array.from(map.values()).sort(
+            (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
+          );
+
+          // Actualizar caché local
+          const stored = localStorage.getItem(MESSAGES_STORAGE_KEY);
+          const all: Record<string, ChatMessage[]> = stored ? JSON.parse(stored) : {};
+          all[matchId] = merged;
+          localStorage.setItem(MESSAGES_STORAGE_KEY, JSON.stringify(all));
+
+          return merged;
+        }
+      } catch (e) {
+        console.warn('Error fetching messages from Supabase:', e);
+      }
+    }
+    return localMsgs;
+  },
+
+  async sendMessage(
+    matchId: string,
+    senderId: string,
+    receiverId: string,
+    text: string
+  ): Promise<ChatMessage> {
     const stored = localStorage.getItem(MESSAGES_STORAGE_KEY);
     const all: Record<string, ChatMessage[]> = stored ? JSON.parse(stored) : INITIAL_MESSAGES;
 
     const newMsg: ChatMessage = {
-      id: `msg_${Date.now()}`,
+      id: `msg_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
       matchId,
       senderId,
       receiverId,
@@ -218,7 +292,7 @@ export const matchService = {
       if (m.id === matchId) {
         return {
           ...m,
-          lastMessageSnippet: text,
+          lastMessageSnippet: text.trim(),
           lastMessageAt: 'Ahora',
         };
       }
@@ -226,7 +300,80 @@ export const matchService = {
     });
     this.saveMatches(updatedMatches);
 
+    // Enviar a Supabase para sincronización real entre dispositivos
+    const client = getSupabaseClient();
+    if (client) {
+      try {
+        await client.from('chat_messages').insert({
+          id: newMsg.id,
+          match_id: matchId,
+          sender_id: senderId,
+          receiver_id: receiverId,
+          text: text.trim(),
+          created_at: newMsg.createdAt,
+          read: false,
+        });
+      } catch (e) {
+        console.warn('Error inserting message to Supabase:', e);
+      }
+    }
+
     return newMsg;
+  },
+
+  subscribeToMessages(
+    matchId: string,
+    onNewMessage: (msg: ChatMessage) => void
+  ): () => void {
+    const client = getSupabaseClient();
+    let channel: any = null;
+
+    if (client) {
+      try {
+        channel = client
+          .channel(`chat_room_${matchId}`)
+          .on(
+            'postgres_changes',
+            {
+              event: 'INSERT',
+              schema: 'public',
+              table: 'chat_messages',
+              filter: `match_id=eq.${matchId}`,
+            },
+            (payload) => {
+              if (payload.new) {
+                const row = payload.new;
+                const newMsg: ChatMessage = {
+                  id: String(row.id),
+                  matchId: row.match_id,
+                  senderId: row.sender_id,
+                  receiverId: row.receiver_id,
+                  text: row.text,
+                  createdAt: row.created_at,
+                  read: Boolean(row.read),
+                };
+                onNewMessage(newMsg);
+              }
+            }
+          )
+          .subscribe();
+      } catch (e) {
+        console.warn('Realtime subscription error:', e);
+      }
+    }
+
+    // Polling de respaldo cada 2.5s para sincronizar en vivo si Realtime no está activo
+    const interval = setInterval(async () => {
+      const fresh = await this.fetchMessages(matchId);
+      fresh.forEach((m) => onNewMessage(m));
+    }, 2500);
+
+    return () => {
+      if (channel && client) {
+        client.removeChannel(channel).then();
+      }
+      clearInterval(interval);
+    };
   },
 
   blockUser(matchId: string): void {

@@ -385,6 +385,47 @@ export const authService = {
     notifyAuthChange();
   },
 
+  async deleteUser(userId: string, userEmail?: string): Promise<{ success: boolean; message: string }> {
+    // 1. Delete from local users list
+    const all = this.getAllUsers().filter(
+      (u) => u.id !== userId && (!userEmail || u.email?.toLowerCase() !== userEmail.toLowerCase())
+    );
+    localStorage.setItem(USERS_LIST_STORAGE_KEY, JSON.stringify(all));
+
+    // If current session is this user, log out
+    const current = this.getCurrentUser();
+    if (current && (current.id === userId || (userEmail && current.email?.toLowerCase() === userEmail.toLowerCase()))) {
+      sessionStorage.removeItem(USER_STORAGE_KEY);
+      localStorage.removeItem(USER_STORAGE_KEY);
+      notifyAuthChange();
+    }
+
+    // 2. Also remove from blocked list if present
+    try {
+      const blocked = JSON.parse(localStorage.getItem('cachengueoo_blocked_match_users') || '[]');
+      const filteredBlocked = blocked.filter(
+        (id: string) => id !== userId && (!userEmail || id !== userEmail.toLowerCase())
+      );
+      localStorage.setItem('cachengueoo_blocked_match_users', JSON.stringify(filteredBlocked));
+    } catch {}
+
+    // 3. Delete from Supabase profiles table
+    const client = getSupabaseClient();
+    if (client) {
+      try {
+        await client.from('profiles').delete().eq('id', userId);
+        if (userEmail) {
+          await client.from('profiles').delete().eq('email', userEmail);
+        }
+      } catch (e) {
+        console.warn('Error deleting user from Supabase profiles:', e);
+      }
+    }
+
+    notifyAuthChange();
+    return { success: true, message: 'Usuario eliminado permanentemente' };
+  },
+
   loginDemo(role: 'user' | 'admin' | 'valen'): UserProfile {
     sessionStorage.setItem(USER_STORAGE_KEY, JSON.stringify(DEFAULT_ADMIN_USER));
     localStorage.setItem(USER_STORAGE_KEY, JSON.stringify(DEFAULT_ADMIN_USER));

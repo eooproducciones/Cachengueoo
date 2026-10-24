@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 
 interface LogoProps {
   size?: 'sm' | 'md' | 'lg' | 'xl';
@@ -8,6 +8,8 @@ interface LogoProps {
   className?: string;
 }
 
+const DEFAULT_OFFICIAL_LOGO = '/assets/aistudio/Cachengueoo_blanco_af647c21.png';
+
 export const CachengueooLogo: React.FC<LogoProps> = ({
   size = 'md',
   variant = 'light',
@@ -15,7 +17,16 @@ export const CachengueooLogo: React.FC<LogoProps> = ({
   customLogoUrl,
   className = '',
 }) => {
-  // Dimensiones según tamaño
+  const [hasError, setHasError] = useState(false);
+  const logoSrc = customLogoUrl || DEFAULT_OFFICIAL_LOGO;
+
+  const heightClasses = {
+    sm: 'h-4 sm:h-5 max-w-[120px] sm:max-w-[140px]',
+    md: 'h-5 sm:h-6 md:h-7 max-w-[150px] sm:max-w-[180px] md:max-w-[210px]',
+    lg: 'h-7 sm:h-8 md:h-9 max-w-[190px] sm:max-w-[240px]',
+    xl: 'h-9 sm:h-12 md:h-14 max-w-[240px] sm:max-w-[320px]',
+  };
+
   const sizeClasses = {
     sm: 'text-base sm:text-lg tracking-tight',
     md: 'text-xl sm:text-2xl tracking-tighter',
@@ -23,17 +34,18 @@ export const CachengueooLogo: React.FC<LogoProps> = ({
     xl: 'text-3xl sm:text-5xl tracking-tighter',
   };
 
-  if (customLogoUrl) {
+  if (!hasError && logoSrc) {
     return (
-      <div className={`inline-flex flex-col items-start ${className}`}>
+      <div className={`inline-flex flex-col items-start select-none ${className}`}>
         <img
-          src={customLogoUrl}
+          src={logoSrc}
           alt="Cachengueoo Mendoza"
-          className="h-8 sm:h-10 w-auto object-contain"
+          onError={() => setHasError(true)}
+          className={`${heightClasses[size]} w-auto object-contain transition-all`}
           referrerPolicy="no-referrer"
         />
         {showSubtitle && (
-          <span className="text-[10px] uppercase font-bold tracking-[0.25em] text-zinc-400 mt-1">
+          <span className="text-[9px] uppercase font-bold tracking-[0.25em] text-zinc-400 mt-1">
             Mendoza · Argentina
           </span>
         )}
