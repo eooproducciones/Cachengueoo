@@ -1,20 +1,18 @@
 import React, { useState, useEffect } from 'react';
-import { X, MapPin, QrCode, Navigation, Sparkles, RefreshCw, AlertTriangle } from 'lucide-react';
+import { X, MapPin, Navigation, Sparkles, RefreshCw, AlertTriangle } from 'lucide-react';
 import { PresenceStatus } from '../../services/presenceService';
-import { VenueConfig, ValidationMode } from '../../types';
+import { VenueConfig } from '../../types';
 
 interface PresenceModalProps {
   isOpen: boolean;
   onClose: () => void;
   presence: PresenceStatus;
   venueConfig: VenueConfig;
-  validationMode: ValidationMode;
   onCheckGps: () => Promise<void>;
   isChecking: boolean;
   errorMessage: string | null;
-  onOpenQrScanner: () => void;
-  onSimulatePresence: (isInside: boolean, method?: 'GPS' | 'QR') => void;
-  onResetPresence: () => void;
+  onSimulatePresence?: (isInside: boolean, method?: 'GPS') => void;
+  onResetPresence?: () => void;
 }
 
 export const PresenceModal: React.FC<PresenceModalProps> = ({
@@ -22,16 +20,10 @@ export const PresenceModal: React.FC<PresenceModalProps> = ({
   onClose,
   presence,
   venueConfig,
-  validationMode,
   onCheckGps,
   isChecking,
   errorMessage,
-  onOpenQrScanner,
-  onSimulatePresence,
-  onResetPresence,
 }) => {
-  const [showSimControls, setShowSimControls] = useState(true);
-
   // Al abrir el modal, comprobar automáticamente por GPS
   useEffect(() => {
     if (isOpen && !presence.isInside && !isChecking) {
@@ -51,7 +43,7 @@ export const PresenceModal: React.FC<PresenceModalProps> = ({
               <MapPin className="w-5 h-5" />
             </div>
             <div>
-              <h2 className="text-base font-bold text-white font-display">Validación de Presencia</h2>
+              <h2 className="text-base font-bold text-white font-display">Validación GPS</h2>
               <p className="text-xs text-zinc-400">
                 {venueConfig.locations && venueConfig.locations.length > 1
                   ? `${venueConfig.locations.filter((l) => l.isActive).length} sedes habilitadas (Sede Central / Arena Maipú)`
@@ -95,19 +87,17 @@ export const PresenceModal: React.FC<PresenceModalProps> = ({
                 ? presence.gpsResult?.matchedLocationName
                   ? `¡Estás en ${presence.gpsResult.matchedLocationName}! 🔥`
                   : '¡Estás en Cachengueoo! 🔥'
-                : 'OUCH! No estas dentro de Cache'}
+                : 'OUCH! No estás dentro de Cache'}
             </h3>
 
             <p className="text-xs text-zinc-400 mt-1.5 max-w-xs mx-auto leading-relaxed">
               {presence.isInside
-                ? presence.methodUsed === 'QR'
-                  ? 'Presencia verificada mediante escaneo de código QR en puerta.'
-                  : `Ubicación GPS confirmada dentro del perímetro permitido${
-                      presence.gpsResult?.matchedLocationName
-                        ? ` (${presence.gpsResult.matchedLocationName})`
-                        : ''
-                    }.`
-                : 'Para participar en Cachengueoo Match y beneficios exclusivos, debés encontrarte físicamente en una de las sedes habilitadas.'}
+                ? `Ubicación GPS confirmada dentro del perímetro permitido${
+                    presence.gpsResult?.matchedLocationName
+                      ? ` (${presence.gpsResult.matchedLocationName})`
+                      : ''
+                  }.`
+                : 'Para participar en Cachengueoo Match, debés encontrarte físicamente en una de las sedes habilitadas comprobando tu GPS.'}
             </p>
 
             {/* GPS Metadata readout if available */}
@@ -120,7 +110,7 @@ export const PresenceModal: React.FC<PresenceModalProps> = ({
                   </span>
                 </div>
                 <div>
-                  <span className="text-zinc-500 block">Radio fijado</span>
+                  <span className="text-zinc-500 block">Radio permitido</span>
                   <span className="font-semibold text-zinc-200">
                     {venueConfig.radiusMeters} m
                   </span>
@@ -135,22 +125,6 @@ export const PresenceModal: React.FC<PresenceModalProps> = ({
             )}
           </div>
 
-          {/* Validation Rules Indicator */}
-          <div className="bg-zinc-900/50 border border-zinc-800/60 rounded-xl p-3.5 flex items-center justify-between text-xs">
-            <div className="space-y-0.5">
-              <span className="text-zinc-400 block font-medium">Modo de validación de hoy:</span>
-              <span className="font-semibold text-white">
-                {validationMode === 'GPS_OR_QR' && 'GPS o Código QR (Cualquiera)'}
-                {validationMode === 'GPS_ONLY' && 'Sólo Geolocalización GPS'}
-                {validationMode === 'QR_ONLY' && 'Sólo Código QR en puerta'}
-                {validationMode === 'GPS_AND_QR' && 'Doble validación: GPS + QR'}
-              </span>
-            </div>
-            <span className="px-2 py-0.5 rounded bg-zinc-800 text-[10px] font-mono text-zinc-300">
-              {validationMode}
-            </span>
-          </div>
-
           {/* Error notice if GPS failed */}
           {errorMessage && (
             <div className="bg-amber-950/30 border border-amber-600/40 rounded-xl p-3 flex items-start gap-2.5 text-xs text-amber-200">
@@ -162,26 +136,15 @@ export const PresenceModal: React.FC<PresenceModalProps> = ({
             </div>
           )}
 
-          {/* Actions: Method A vs Method B */}
-          <div className="space-y-2.5 pt-1">
+          {/* Action button */}
+          <div className="pt-1">
             <button
               onClick={onCheckGps}
               disabled={isChecking}
-              className="w-full h-12 rounded-xl bg-zinc-900 border border-zinc-700 hover:border-zinc-500 text-white font-medium text-sm flex items-center justify-center gap-2 active:scale-[0.99] transition-all cursor-pointer disabled:opacity-50"
+              className="w-full h-12 rounded-xl bg-[#F39200] hover:bg-[#E08400] text-black font-extrabold text-sm flex items-center justify-center gap-2 active:scale-[0.99] transition-all cursor-pointer shadow-lg shadow-[#F39200]/20 disabled:opacity-50"
             >
-              <Navigation className="w-4 h-4 text-[#F39200]" />
+              <Navigation className="w-4 h-4 fill-black" />
               {isChecking ? 'Verificando señal GPS...' : 'Comprobar presencia vía GPS'}
-            </button>
-
-            <button
-              onClick={() => {
-                onClose();
-                onOpenQrScanner();
-              }}
-              className="w-full h-12 rounded-xl bg-[#F39200] hover:bg-[#E08400] text-black font-bold text-sm flex items-center justify-center gap-2 active:scale-[0.99] transition-all cursor-pointer shadow-lg shadow-[#F39200]/20"
-            >
-              <QrCode className="w-4 h-4" />
-              Escanear QR de Presencia
             </button>
           </div>
         </div>

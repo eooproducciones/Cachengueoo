@@ -81,7 +81,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
             ¿LLEGASTE A <span className="text-[#F39200]">CACHENGUEOO</span>?
           </h2>
           <p className="text-xs text-zinc-400 mt-1 max-w-sm leading-relaxed">
-            Validá tu presencia mediante GPS o escaneá el QR en puerta para desbloquear{' '}
+            Validá tu presencia mediante GPS para desbloquear{' '}
             <strong className="text-white">Cachengueoo Match</strong> y conectar con gente esta noche.
           </p>
 
@@ -91,25 +91,16 @@ export const HomeView: React.FC<HomeViewProps> = ({
               className="w-full h-12 rounded-xl bg-[#F39200] hover:bg-[#E08400] text-black font-extrabold text-xs flex items-center justify-center gap-2 cursor-pointer shadow-lg shadow-[#F39200]/25 active:scale-[0.98] transition-all"
             >
               <Flame className="w-4 h-4 fill-black" />
-              ACTIVAR CACHENGUEOO MATCH
+              ACTIVAR CACHENGUEOO MATCH (GPS)
             </button>
 
-            <div className="grid grid-cols-2 gap-2">
-              <button
-                onClick={onOpenPresenceModal}
-                className="h-10 rounded-xl bg-zinc-900 border border-zinc-700 hover:border-zinc-500 text-white font-bold text-xs flex items-center justify-center gap-1.5 cursor-pointer active:scale-95 transition-all"
-              >
-                <MapPin className="w-3.5 h-3.5 text-[#F39200]" />
-                Validar por GPS
-              </button>
-              <button
-                onClick={onOpenQrScanner}
-                className="h-10 rounded-xl bg-zinc-900 border border-zinc-700 hover:border-amber-400 text-amber-300 font-bold text-xs flex items-center justify-center gap-1.5 cursor-pointer active:scale-95 transition-all"
-              >
-                <QrCode className="w-3.5 h-3.5 text-[#F39200]" />
-                Escanear QR Puerta
-              </button>
-            </div>
+            <button
+              onClick={onOpenPresenceModal}
+              className="w-full h-10 rounded-xl bg-zinc-900 border border-zinc-700 hover:border-zinc-500 text-white font-bold text-xs flex items-center justify-center gap-1.5 cursor-pointer active:scale-95 transition-all"
+            >
+              <MapPin className="w-3.5 h-3.5 text-[#F39200]" />
+              Comprobar ubicación por GPS
+            </button>
           </div>
         </div>
       )}

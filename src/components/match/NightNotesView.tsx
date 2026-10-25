@@ -10,7 +10,7 @@ import {
 } from 'lucide-react';
 import { MatchProfile, NightStory, UserProfile } from '../../types';
 import { formatTimeRemaining } from '../../utils/timeAgo';
-import { MOCK_NIGHT_STORIES } from '../../data/mockData';
+import { nightNotesService } from '../../services/nightNotesService';
 import { NightCameraModal } from './NightCameraModal';
 import { StoryViewerModal } from './StoryViewerModal';
 
@@ -33,10 +33,19 @@ export const NightNotesView: React.FC<NightNotesViewProps> = ({
   const [isNoteModalOpen, setIsNoteModalOpen] = useState(false);
   const [noteInput, setNoteInput] = useState('');
 
-  // Historias / Instantáneas de la noche
-  const [stories, setStories] = useState<NightStory[]>(MOCK_NIGHT_STORIES);
+  // Historias / Instantáneas de la noche (persistidas en Supabase y localmente)
+  const [stories, setStories] = useState<NightStory[]>(() => nightNotesService.getStoredStories());
   const [isCameraOpen, setIsCameraOpen] = useState(false);
   const [viewerStoryIndex, setViewerStoryIndex] = useState<number | null>(null);
+
+  // Sincronizar historias vigentes desde Supabase y limpiar las de noches pasadas
+  React.useEffect(() => {
+    nightNotesService.fetchStories().then((activeStories) => {
+      if (Array.isArray(activeStories)) {
+        setStories(activeStories);
+      }
+    });
+  }, []);
 
   // Estado local para corazones de las notitas de los perfiles (inicia en 0 reales)
   const [profileNotesHearts, setProfileNotesHearts] = useState<Record<string, { count: number; userLiked: boolean }>>(() => {
@@ -66,29 +75,40 @@ export const NightNotesView: React.FC<NightNotesViewProps> = ({
   // Manejador para publicar nueva notita
   const handlePublishNote = (text = noteInput) => {
     if (!text.trim()) return;
-    onUpdateMyNote(text.trim());
+    const clean = text.trim();
+    onUpdateMyNote(clean);
+    nightNotesService.publishNote(
+      currentUser.id,
+      currentUser.nickname || currentUser.fullName,
+      currentUser.avatarUrl,
+      clean
+    );
     setNoteInput('');
     setIsNoteModalOpen(false);
   };
 
-  // Manejador para eliminar notita
+  // Manejador para eliminar notita (se borra de la BD y del perfil)
   const handleDeleteNote = () => {
     onUpdateMyNote('');
+    nightNotesService.deleteNote(currentUser.id);
     setNoteInput('');
   };
 
   // Publicar nueva historia instantánea
   const handlePublishStory = (newStory: NightStory) => {
-    setStories((prev) => [newStory, ...prev]);
+    setStories((prev) => [newStory, ...prev.filter((s) => s.id !== newStory.id)]);
+    nightNotesService.publishStory(newStory);
   };
 
-  // Eliminar historia
+  // Eliminar historia de la base de datos y de la pantalla
   const handleDeleteStory = (storyId: string) => {
     setStories((prev) => prev.filter((s) => s.id !== storyId));
+    nightNotesService.deleteStory(storyId);
   };
 
   // Dejar corazón en una historia
   const handleHeartStory = (storyId: string) => {
+    nightNotesService.heartStory(storyId);
     setStories((prev) =>
       prev.map((s) => {
         if (s.id === storyId) {

@@ -263,15 +263,15 @@ export default function App() {
         // Sincronizar en Supabase para que este perfil aparezca activo a los demás usuarios por 8 horas
         const client = getSupabaseClient();
         if (client && activeUser?.id) {
-          client
-            .from('profiles')
-            .update({
-              is_verified_in_venue: true,
-              updated_at: new Date().toISOString(),
-            })
-            .eq('id', activeUser.id)
-            .then(() => {})
-            .catch(() => {});
+          Promise.resolve(
+            client
+              .from('profiles')
+              .update({
+                is_verified_in_venue: true,
+                updated_at: new Date().toISOString(),
+              })
+              .eq('id', activeUser.id)
+          ).catch(() => {});
         }
 
         showToast(
@@ -367,6 +367,7 @@ export default function App() {
             onExitAdmin={handleExitAdmin}
             onLogout={() => {
               logout();
+              resetPresence();
               setIsAdminView(false);
               setCurrentTab('inicio');
               showToast('Sesión de administrador cerrada.');
@@ -416,6 +417,7 @@ export default function App() {
                   onExitAdmin={handleExitAdmin}
                   onLogout={() => {
                     logout();
+                    resetPresence();
                     setIsAdminView(false);
                     setCurrentTab('inicio');
                     showToast('Sesión de administrador cerrada.');
@@ -434,6 +436,8 @@ export default function App() {
                   onEnterAdmin={() => setIsAdminView(true)}
                   onLogout={() => {
                     logout();
+                    resetPresence();
+                    setCurrentTab('inicio');
                     showToast('Sesión cerrada.');
                   }}
                 />
@@ -473,32 +477,15 @@ export default function App() {
         onClose={() => setIsPresenceModalOpen(false)}
         presence={presence}
         venueConfig={venueConfig}
-        validationMode={currentEvent?.validationMode || 'GPS_OR_QR'}
         onCheckGps={async () => {
           await checkGpsPresence();
           showToast('Ubicación comprobada');
         }}
         isChecking={isChecking}
         errorMessage={errorMessage}
-        onOpenQrScanner={() => {
-          setIsPresenceModalOpen(false);
-          setIsQrScannerOpen(true);
-        }}
-        onSimulatePresence={(inside, method) => {
-          simulatePresence(inside, method);
-          showToast(
-            inside
-              ? '🔥 Presencia en Cachengueoo simulada con éxito'
-              : '📍 Simulación afuera activada'
-          );
-        }}
-        onResetPresence={() => {
-          resetPresence();
-          showToast('Presencia restablecida');
-        }}
       />
 
-      {/* Modal de Escaneo de QR */}
+      {/* Modal de Escaneo de QR (solo para escaneo de entradas o tickets por el staff) */}
       <QrScannerModal
         isOpen={isQrScannerOpen}
         onClose={() => setIsQrScannerOpen(false)}
@@ -514,9 +501,6 @@ export default function App() {
         isInsideVenue={isInside}
         onCheckGps={async () => {
           await handleAutoGpsAndOpenMatch();
-        }}
-        onOpenQrScanner={() => {
-          setIsQrScannerOpen(true);
         }}
         onProceedToMatch={() => {
           const current = presenceService.getStoredPresence();
@@ -536,10 +520,6 @@ export default function App() {
         onRetryGps={() => {
           setIsOutOfRangeModalOpen(false);
           handleAutoGpsAndOpenMatch();
-        }}
-        onOpenQrScanner={() => {
-          setIsOutOfRangeModalOpen(false);
-          setIsQrScannerOpen(true);
         }}
         distanceMeters={outOfRangeDetails.distanceMeters}
         radiusMeters={outOfRangeDetails.radiusMeters}

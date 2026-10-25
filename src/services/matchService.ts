@@ -97,7 +97,7 @@ export const matchService = {
             // se considera activo en la fiesta
             const updatedAtMs = row.updated_at ? new Date(row.updated_at).getTime() : Date.now();
             const isWithin8Hours = Date.now() - updatedAtMs <= 8 * 60 * 60 * 1000;
-            const isVerified = row.is_verified_in_venue ?? isWithin8Hours;
+            const isVerified = row.is_verified_in_venue === true || isWithin8Hours;
 
             loadedProfiles.push({
               userId: row.id,

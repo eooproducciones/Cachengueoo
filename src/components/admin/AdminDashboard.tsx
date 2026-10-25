@@ -26,6 +26,7 @@ import {
   Music,
   Image as ImageIcon,
   Pencil,
+  Edit3,
   Tag,
   Percent,
   MessageCircle,
@@ -98,6 +99,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onExitAdmin, onL
 
   // New Event manual form state
   const [showNewEventModal, setShowNewEventModal] = useState(false);
+  const [editingEventId, setEditingEventId] = useState<string | null>(null);
   const [newEventTitle, setNewEventTitle] = useState('');
   const [newEventDateIso, setNewEventDateIso] = useState('');
   const [newEventDateStr, setNewEventDateStr] = useState('');
@@ -250,6 +252,26 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onExitAdmin, onL
     fetchUsers();
   }, [adminTab]);
 
+  React.useEffect(() => {
+    eventService.syncEventsFromSupabase().then(setEvents).catch(() => {});
+    benefitService.syncBenefitsFromSupabase().then(setBenefits).catch(() => {});
+
+    const handleEventsChange = () => setEvents(eventService.getEvents());
+    const handleBenefitsChange = () => setBenefits(benefitService.getBenefits());
+
+    window.addEventListener('cachengueoo_events_updated', handleEventsChange);
+    window.addEventListener('cachengueoo_benefits_updated', handleBenefitsChange);
+    window.addEventListener('storage', handleEventsChange);
+    window.addEventListener('storage', handleBenefitsChange);
+
+    return () => {
+      window.removeEventListener('cachengueoo_events_updated', handleEventsChange);
+      window.removeEventListener('cachengueoo_benefits_updated', handleBenefitsChange);
+      window.removeEventListener('storage', handleEventsChange);
+      window.removeEventListener('storage', handleBenefitsChange);
+    };
+  }, [adminTab]);
+
 
   // Handle Event Validation Mode Change
   const handleModeChange = (eventId: string, mode: ValidationMode) => {
@@ -353,7 +375,38 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onExitAdmin, onL
     setEvents(eventService.getEvents());
   };
 
-  // Crear Evento
+  const handleOpenCreateEvent = () => {
+    setEditingEventId(null);
+    setNewEventTitle('');
+    setNewEventDateIso('');
+    setNewEventDateStr('');
+    setNewEventTimeRange('23:00 — 06:00 hs');
+    setNewEventLineup('');
+    setNewEventLink('');
+    setNewEventFlyerUrl(
+      'https://images.unsplash.com/photo-1492684223066-81342ee5ff30?auto=format&fit=crop&w=1200&q=80'
+    );
+    setNewEventIsFeatured(false);
+    setShowNewEventModal(true);
+  };
+
+  const handleOpenEditEvent = (evt: ClubEvent) => {
+    setEditingEventId(evt.id);
+    setNewEventTitle(evt.title);
+    setNewEventDateIso(evt.dateIso || '');
+    setNewEventDateStr(evt.dateStr || '');
+    setNewEventTimeRange(evt.timeRange || '23:00 — 06:00 hs');
+    setNewEventLineup((evt.djs || []).join(', '));
+    setNewEventLink(evt.passlineUrl || '');
+    setNewEventFlyerUrl(
+      evt.flyerUrl ||
+        'https://images.unsplash.com/photo-1492684223066-81342ee5ff30?auto=format&fit=crop&w=1200&q=80'
+    );
+    setNewEventIsFeatured(Boolean(evt.isFeatured));
+    setShowNewEventModal(true);
+  };
+
+  // Crear o Modificar Evento
   const handleCreateEvent = (e: React.FormEvent) => {
     e.preventDefault();
     if (!newEventTitle.trim()) return;
@@ -366,27 +419,43 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onExitAdmin, onL
       .split(',')
       .map((d) => d.trim())
       .filter(Boolean);
+    const passlineFormatted = newEventLink.trim()
+      ? newEventLink.trim().startsWith('http')
+        ? newEventLink.trim()
+        : `https://${newEventLink.trim()}`
+      : 'https://www.passline.com';
 
-    eventService.createEvent({
-      title: newEventTitle.trim(),
-      subtitle: '',
-      dateStr: dateStrToUse,
-      dateIso: dateIsoToUse,
-      timeRange: timeToUse,
-      locationName: 'Cachengueoo Boliche · Mendoza',
-      description: '',
-      flyerUrl: newEventFlyerUrl,
-      isActiveTonight: false, // se activa automáticamente en eventService cuando llega el día
-      isFeatured: newEventIsFeatured,
-      validationMode: 'GPS_OR_QR',
-      djs: djsArray,
-      ticketTypes: [],
-      passlineUrl: newEventLink.trim()
-        ? newEventLink.trim().startsWith('http')
-          ? newEventLink.trim()
-          : `https://${newEventLink.trim()}`
-        : 'https://www.passline.com',
-    });
+    if (editingEventId) {
+      eventService.updateEvent(editingEventId, {
+        title: newEventTitle.trim(),
+        subtitle: '',
+        dateStr: dateStrToUse,
+        dateIso: dateIsoToUse,
+        timeRange: timeToUse,
+        flyerUrl: newEventFlyerUrl,
+        isFeatured: newEventIsFeatured,
+        djs: djsArray,
+        passlineUrl: passlineFormatted,
+      });
+      setEditingEventId(null);
+    } else {
+      eventService.createEvent({
+        title: newEventTitle.trim(),
+        subtitle: '',
+        dateStr: dateStrToUse,
+        dateIso: dateIsoToUse,
+        timeRange: timeToUse,
+        locationName: 'Cachengueoo Boliche · Mendoza',
+        description: '',
+        flyerUrl: newEventFlyerUrl,
+        isActiveTonight: false,
+        isFeatured: newEventIsFeatured,
+        validationMode: 'GPS_OR_QR',
+        djs: djsArray,
+        ticketTypes: [],
+        passlineUrl: passlineFormatted,
+      });
+    }
 
     setEvents(eventService.getEvents());
     setShowNewEventModal(false);
@@ -739,7 +808,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onExitAdmin, onL
           <div className="flex items-center justify-between">
             <h3 className="text-base font-bold text-white font-display">Gestión de Noches y Eventos</h3>
             <button
-              onClick={() => setShowNewEventModal(true)}
+              onClick={handleOpenCreateEvent}
               className="px-3.5 py-2 rounded-xl bg-[#F39200] hover:bg-[#E08400] text-black font-bold text-xs flex items-center gap-1.5 cursor-pointer shadow-md shadow-[#F39200]/20"
             >
               <Plus className="w-4 h-4" />
@@ -819,6 +888,16 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onExitAdmin, onL
                     >
                       <Star className={`w-3 h-3 ${evt.isFeatured ? 'fill-amber-400 text-amber-400' : ''}`} />
                       {evt.isFeatured ? 'Destacada' : 'Destacar'}
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => handleOpenEditEvent(evt)}
+                      className="px-2.5 py-1.5 rounded-xl bg-zinc-900 hover:bg-zinc-800 border border-zinc-700 hover:border-[#F39200] text-zinc-300 hover:text-white cursor-pointer transition-colors flex items-center gap-1 text-xs font-bold"
+                      title="Modificar evento"
+                    >
+                      <Edit3 className="w-3.5 h-3.5 text-[#F39200]" />
+                      <span>Editar</span>
                     </button>
 
                     <button
@@ -1919,7 +1998,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onExitAdmin, onL
                   Panel de Noches y Fechas
                 </span>
                 <h4 className="text-base font-bold text-white font-display mt-0.5">
-                  Cargar Evento
+                  {editingEventId ? 'Modificar Evento' : 'Cargar Evento'}
                 </h4>
               </div>
               <button
@@ -2134,7 +2213,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onExitAdmin, onL
                   className="flex-1 h-11 rounded-xl bg-[#F39200] hover:bg-[#E08400] text-black font-extrabold cursor-pointer transition-all shadow-md shadow-[#F39200]/25 flex items-center justify-center gap-1.5"
                 >
                   <Check className="w-4 h-4" />
-                  Publicar Evento
+                  {editingEventId ? 'Guardar Cambios' : 'Publicar Evento'}
                 </button>
               </div>
             </form>

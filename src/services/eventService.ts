@@ -179,10 +179,11 @@ export const eventService = {
   createEvent(newEvent: Omit<ClubEvent, 'id'>): ClubEvent {
     const events = this.getEvents();
     const isToday = isEventToday({ ...newEvent, id: '' } as ClubEvent);
+    const eventId = typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `evt_${Date.now()}`;
 
     const created: ClubEvent = {
       ...newEvent,
-      id: `evt_${Date.now()}`,
+      id: eventId,
       isActiveTonight: isToday,
     };
     this.saveEvents([created, ...events]);
@@ -190,41 +191,97 @@ export const eventService = {
     // Sincronizar creación en Supabase
     const supabase = getSupabaseClient();
     if (supabase) {
-      supabase
-        .from('events')
-        .insert({
-          title: created.title,
-          subtitle: created.subtitle || '',
-          date_str: created.dateStr,
-          date_iso: created.dateIso,
-          time_range: created.timeRange,
-          location_name: created.locationName,
-          description: created.description || '',
-          flyer_url: created.flyerUrl || null,
-          is_active_tonight: created.isActiveTonight,
-          validation_mode: created.validationMode || 'GPS_OR_QR',
-          djs: created.djs || [],
-        })
-        .then(() => {}, () => {});
+      Promise.resolve(
+        supabase
+          .from('events')
+          .insert({
+            id: created.id,
+            title: created.title,
+            subtitle: created.subtitle || '',
+            date_str: created.dateStr,
+            date_iso: created.dateIso,
+            time_range: created.timeRange,
+            location_name: created.locationName,
+            description: created.description || '',
+            flyer_url: created.flyerUrl || null,
+            is_active_tonight: created.isActiveTonight,
+            validation_mode: created.validationMode || 'GPS_OR_QR',
+            djs: created.djs || [],
+            passline_url: created.passlineUrl || 'https://www.passline.com',
+          })
+      ).catch((err) => {
+        console.warn('Error syncing created event to Supabase:', err);
+      });
     }
 
     return created;
   },
 
+  updateEvent(eventId: string, updates: Partial<ClubEvent>): ClubEvent | null {
+    const events = this.getEvents();
+    const index = events.findIndex((e) => e.id === eventId);
+    if (index === -1) return null;
+
+    const current = events[index];
+    const isToday = updates.dateIso ? isEventToday({ ...current, ...updates } as ClubEvent) : current.isActiveTonight;
+
+    const updated: ClubEvent = {
+      ...current,
+      ...updates,
+      isActiveTonight: isToday,
+    };
+    events[index] = updated;
+    this.saveEvents([...events]);
+
+    const supabase = getSupabaseClient();
+    if (supabase) {
+      const dbRecord: Record<string, any> = {};
+      if (updates.title !== undefined) dbRecord.title = updates.title;
+      if (updates.subtitle !== undefined) dbRecord.subtitle = updates.subtitle;
+      if (updates.dateStr !== undefined) dbRecord.date_str = updates.dateStr;
+      if (updates.dateIso !== undefined) dbRecord.date_iso = updates.dateIso;
+      if (updates.timeRange !== undefined) dbRecord.time_range = updates.timeRange;
+      if (updates.locationName !== undefined) dbRecord.location_name = updates.locationName;
+      if (updates.description !== undefined) dbRecord.description = updates.description;
+      if (updates.flyerUrl !== undefined) dbRecord.flyer_url = updates.flyerUrl;
+      if (updates.validationMode !== undefined) dbRecord.validation_mode = updates.validationMode;
+      if (updates.djs !== undefined) dbRecord.djs = updates.djs;
+      if (updates.passlineUrl !== undefined) dbRecord.passline_url = updates.passlineUrl;
+
+      Promise.resolve(
+        supabase.from('events').update(dbRecord).eq('id', eventId)
+      ).catch((err) => {
+        console.warn('Error updating event in Supabase:', err);
+      });
+    }
+
+    return updated;
+  },
+
   deleteEvent(eventId: string): void {
     const events = this.getEvents();
+    const toDelete = events.find((e) => e.id === eventId);
     const updated = events.filter((e) => e.id !== eventId);
     this.saveEvents(updated);
 
-    // Borrar también en Supabase si está disponible
+    // Borrar de forma estricta en Supabase
     const supabase = getSupabaseClient();
     if (supabase) {
-      supabase.from('events').delete().eq('id', eventId).then(() => {}, () => {});
+      Promise.resolve(supabase.from('events').delete().eq('id', eventId)).catch(() => {});
+      if (toDelete) {
+        Promise.resolve(
+          supabase
+            .from('events')
+            .delete()
+            .eq('title', toDelete.title)
+            .eq('date_iso', toDelete.dateIso)
+        ).catch(() => {});
+      }
     }
   },
 
   /**
-   * Sincronizar eventos con Supabase al abrir la aplicación
+   * Sincronizar eventos con Supabase al abrir la aplicación y entre pestañas
    */
   async syncEventsFromSupabase(): Promise<ClubEvent[]> {
     const supabase = getSupabaseClient();
@@ -236,9 +293,15 @@ export const eventService = {
         .select('*')
         .order('date_iso', { ascending: true });
 
-      if (!error && Array.isArray(data) && data.length > 0) {
+      if (!error && Array.isArray(data)) {
+        if (data.length === 0) {
+          // Si en la base de datos no hay eventos (fueron borrados en admin), limpiar localStorage para no revivirlos
+          this.saveEvents([]);
+          return [];
+        }
+
         const mapped: ClubEvent[] = data.map((d: any) => ({
-          id: d.id,
+          id: String(d.id),
           title: d.title,
           subtitle: d.subtitle || '',
           dateStr: d.date_str,
@@ -247,9 +310,9 @@ export const eventService = {
           locationName: d.location_name,
           description: d.description || '',
           flyerUrl: d.flyer_url || '',
-          isActiveTonight: d.is_active_tonight,
+          isActiveTonight: isEventToday({ ...d, dateIso: d.date_iso } as any),
           validationMode: d.validation_mode || 'GPS_OR_QR',
-          djs: d.djs || [],
+          djs: Array.isArray(d.djs) ? d.djs : [],
           passlineUrl: d.passline_url || 'https://www.passline.com',
           ticketTypes: [],
         }));

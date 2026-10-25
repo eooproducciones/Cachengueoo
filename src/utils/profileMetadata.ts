@@ -128,26 +128,14 @@ export function buildUserProfileFromSources(
     localUser?.email ||
     '';
 
-  // Nombre completo y sobre nombre (priorizar datos guardados por el usuario si existen)
-  const hasCustomLocalName =
-    localUser?.fullName &&
-    localUser.fullName !== email &&
-    localUser.fullName !== 'Cachenguero';
-
+  // Nombre completo y apodo: Supabase (profileRow) es la fuente de verdad prioritaria
   const fullName =
-    (hasCustomLocalName ? localUser!.fullName : null) ||
     profileRow?.full_name ||
     meta.full_name ||
     localUser?.fullName ||
     (email ? email.split('@')[0] : 'Cachenguero');
 
-  const hasCustomLocalNickname =
-    localUser?.nickname &&
-    localUser.nickname !== email &&
-    localUser.nickname !== 'Cachenguero';
-
   const nickname =
-    (hasCustomLocalNickname ? localUser!.nickname : null) ||
     profileRow?.nickname ||
     meta.nickname ||
     localUser?.nickname ||
@@ -155,30 +143,31 @@ export function buildUserProfileFromSources(
 
   // Fecha de nacimiento y edad
   const birthDate =
-    localUser?.birthDate ||
     profileRow?.birth_date ||
     meta.birth_date ||
+    localUser?.birthDate ||
     '2001-01-01';
 
-  const age = Number(localUser?.age || profileRow?.age || meta.age || 23);
+  const age = Number(profileRow?.age || meta.age || localUser?.age || 23);
 
-  // Fotos (hasta 3 fotos: priorizar fotos subidas por el usuario)
+  // Fotos (priorizar fotos reales de Supabase)
   let photos: string[] = [];
-  if (Array.isArray(localUser?.photos) && localUser!.photos.length > 0) {
-    photos = localUser!.photos;
-  } else if (Array.isArray(meta.photos) && meta.photos.length > 0) {
-    photos = meta.photos;
+  if (Array.isArray(profileRow?.photos) && profileRow.photos.length > 0) {
+    photos = profileRow.photos;
   } else if (unpacked.extraPhotos.length > 0 || profileRow?.avatar_url) {
     photos = [profileRow?.avatar_url || meta.avatar_url, ...unpacked.extraPhotos].filter(Boolean) as string[];
+  } else if (Array.isArray(meta.photos) && meta.photos.length > 0) {
+    photos = meta.photos;
+  } else if (Array.isArray(localUser?.photos) && localUser!.photos.length > 0) {
+    photos = localUser!.photos;
   }
 
-  // Avatar principal (primera foto o avatar registrado)
+  // Avatar principal
   const avatarUrl =
-    photos[0] ||
-    localUser?.avatarUrl ||
     profileRow?.avatar_url ||
     meta.avatar_url ||
-    meta.photos?.[0] ||
+    photos[0] ||
+    localUser?.avatarUrl ||
     '';
 
   if (photos.length === 0 && avatarUrl) {
@@ -187,67 +176,69 @@ export function buildUserProfileFromSources(
 
   // Género y preferencia
   const gender: UserGender =
-    localUser?.gender || profileRow?.gender || meta.gender || 'otro';
+    profileRow?.gender || meta.gender || localUser?.gender || 'hombre';
   const preference: PreferenceGender =
-    localUser?.preference || profileRow?.preference || meta.preference || 'todos';
+    profileRow?.preference || meta.preference || localUser?.preference || 'todos';
 
   // Signo zodiacal
   const zodiacSign =
-    localUser?.zodiacSign ||
+    profileRow?.zodiac_sign ||
     unpacked.zodiacSign ||
     meta.zodiac_sign ||
     meta.zodiacSign ||
-    profileRow?.zodiac_sign ||
+    localUser?.zodiacSign ||
     'Leo';
 
   // Gustos musicales
   let musicPreferences: string[] = [];
-  if (Array.isArray(localUser?.musicPreferences) && localUser!.musicPreferences.length > 0) {
-    musicPreferences = localUser!.musicPreferences;
+  if (Array.isArray(profileRow?.music_preferences) && profileRow.music_preferences.length > 0) {
+    musicPreferences = profileRow.music_preferences;
   } else if (unpacked.musicPreferences.length > 0) {
     musicPreferences = unpacked.musicPreferences;
   } else if (Array.isArray(meta.music_preferences) && meta.music_preferences.length > 0) {
     musicPreferences = meta.music_preferences;
-  } else if (Array.isArray(meta.musicPreferences) && meta.musicPreferences.length > 0) {
-    musicPreferences = meta.musicPreferences;
+  } else if (Array.isArray(localUser?.musicPreferences) && localUser!.musicPreferences.length > 0) {
+    musicPreferences = localUser!.musicPreferences;
   } else {
     musicPreferences = ['Reggaeton', 'Cumbia', 'Cuarteto'];
   }
 
   // Tragos
   let drinks: string[] = [];
-  if (Array.isArray(localUser?.drinks) && localUser!.drinks.length > 0) {
-    drinks = localUser!.drinks;
+  if (Array.isArray(profileRow?.drinks) && profileRow.drinks.length > 0) {
+    drinks = profileRow.drinks;
   } else if (unpacked.drinks.length > 0) {
     drinks = unpacked.drinks;
   } else if (Array.isArray(meta.drinks) && meta.drinks.length > 0) {
     drinks = meta.drinks;
+  } else if (Array.isArray(localUser?.drinks) && localUser!.drinks.length > 0) {
+    drinks = localUser!.drinks;
   } else {
     drinks = ['Fernet', 'Skyy'];
   }
 
   const drinkFavorite =
-    localUser?.drinkFavorite ||
     profileRow?.drink_favorite ||
     meta.drink_favorite ||
+    localUser?.drinkFavorite ||
     drinks.join(' & ') ||
     'Fernet & Skyy';
 
   // Instagram
   const instagram =
-    localUser?.instagram ||
     profileRow?.instagram ||
     meta.instagram ||
+    localUser?.instagram ||
     undefined;
 
   // Bio
   const bio =
-    localUser?.bio !== undefined && localUser?.bio !== ''
-      ? localUser.bio
-      : profileRow?.bio !== undefined && profileRow?.bio !== ''
+    profileRow?.bio !== undefined && profileRow?.bio !== null && profileRow?.bio !== ''
       ? profileRow.bio
-      : meta.bio !== undefined && meta.bio !== ''
+      : meta.bio !== undefined && meta.bio !== null && meta.bio !== ''
       ? meta.bio
+      : localUser?.bio !== undefined && localUser?.bio !== ''
+      ? localUser.bio
       : '¡Listo para romper la pista en Cachengueoo!';
 
   // Intereses consolidados

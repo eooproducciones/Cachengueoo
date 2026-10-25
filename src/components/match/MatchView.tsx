@@ -116,11 +116,14 @@ export const MatchView: React.FC<MatchViewProps> = ({
   }, [currentUser]);
 
   useEffect(() => {
-    // 1. Cargar perfiles para explorar en la pista
+    // 1. Cargar perfiles para explorar en la pista respetando la preferencia del usuario
     matchService.fetchAvailableProfiles(currentUser?.id).then((realProfiles) => {
-      if (realProfiles && realProfiles.length > 0) {
-        setProfiles(realProfiles);
-      }
+      const filtered = (realProfiles || []).filter((p) => {
+        if (currentUser?.preference === 'hombres') return p.gender === 'hombre' || !p.gender;
+        if (currentUser?.preference === 'mujeres') return p.gender === 'mujer' || !p.gender;
+        return true;
+      });
+      setProfiles(filtered);
     });
 
     // 2. Cargar personas que dieron corazón (Conectá) y Matches mutuos
@@ -136,7 +139,7 @@ export const MatchView: React.FC<MatchViewProps> = ({
         })
         .finally(() => setLoadingConecta(false));
     }
-  }, [matchSubTab, currentUser?.id]);
+  }, [matchSubTab, currentUser?.id, currentUser?.preference]);
 
   // Al pasar a otro perfil, reiniciar a la primera foto y replegar la notita
   useEffect(() => {

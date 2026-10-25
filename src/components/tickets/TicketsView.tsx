@@ -21,8 +21,23 @@ interface TicketsViewProps {
 
 export const TicketsView: React.FC<TicketsViewProps> = ({ currentUser }) => {
   const [activeTab, setActiveTab] = useState<'events' | 'my-tickets'>('events');
+  const [rawEvents, setRawEvents] = useState<ClubEvent[]>(() => eventService.getEvents());
+
+  React.useEffect(() => {
+    const handleEventsChange = () => setRawEvents(eventService.getEvents());
+    window.addEventListener('cachengueoo_events_updated', handleEventsChange);
+    window.addEventListener('storage', handleEventsChange);
+
+    eventService.syncEventsFromSupabase().then(setRawEvents).catch(() => {});
+
+    return () => {
+      window.removeEventListener('cachengueoo_events_updated', handleEventsChange);
+      window.removeEventListener('storage', handleEventsChange);
+    };
+  }, []);
+
   // Ordenar eventos estrictamente del más próximo al más lejano (fecha más cercana primero)
-  const events = eventService.getEvents().sort((a, b) => {
+  const events = [...rawEvents].sort((a, b) => {
     const aIsToday = a.isActiveTonight || isEventToday(a);
     const bIsToday = b.isActiveTonight || isEventToday(b);
 

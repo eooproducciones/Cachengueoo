@@ -5,7 +5,6 @@ export interface OutOfRangeModalProps {
   isOpen: boolean;
   onClose: () => void;
   onRetryGps: () => void;
-  onOpenQrScanner?: () => void;
   distanceMeters?: number;
   radiusMeters?: number;
   closestLocationName?: string;
@@ -17,7 +16,6 @@ export const OutOfRangeModal: React.FC<OutOfRangeModalProps> = ({
   isOpen,
   onClose,
   onRetryGps,
-  onOpenQrScanner,
   distanceMeters,
   radiusMeters = 150,
   closestLocationName = 'Cachengueoo Boliche',
@@ -67,7 +65,7 @@ export const OutOfRangeModal: React.FC<OutOfRangeModalProps> = ({
           </h2>
           <p className="text-xs text-zinc-300 max-w-sm mx-auto leading-relaxed">
             {customMessage ||
-              'Cachengueoo Match es exclusivo para quienes están viviendo la noche en el boliche. Para ingresar tenés que encontrarte dentro del perímetro permitido.'}
+              'Cachengueoo Match es exclusivo para quienes están viviendo la noche en el boliche. Para ingresar tenés que encontrarte dentro del perímetro permitido mediante GPS.'}
           </p>
         </div>
 
@@ -120,20 +118,6 @@ export const OutOfRangeModal: React.FC<OutOfRangeModalProps> = ({
               </>
             )}
           </button>
-
-          {onOpenQrScanner && (
-            <button
-              type="button"
-              onClick={() => {
-                onClose();
-                onOpenQrScanner();
-              }}
-              className="w-full h-11 rounded-xl bg-zinc-900 hover:bg-zinc-800 border border-zinc-700 hover:border-zinc-500 text-white font-bold text-xs flex items-center justify-center gap-2 cursor-pointer transition-colors"
-            >
-              <QrCode className="w-4 h-4 text-[#F39200]" />
-              <span>Escanear QR de Presencia (en puerta o barra)</span>
-            </button>
-          )}
 
           <button
             type="button"

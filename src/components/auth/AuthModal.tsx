@@ -22,7 +22,6 @@ import {
   Upload,
   Trash2,
   MapPin,
-  QrCode,
   Music,
   Flame,
   Check,
@@ -57,7 +56,6 @@ interface AuthModalProps {
   initialMode?: 'login' | 'register' | 'choice' | 'verify';
   isInsideVenue?: boolean;
   onCheckGps?: () => Promise<void>;
-  onOpenQrScanner?: () => void;
   onProceedToMatch?: () => void;
 }
 
@@ -68,7 +66,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   initialMode = 'choice',
   isInsideVenue = false,
   onCheckGps,
-  onOpenQrScanner,
   onProceedToMatch,
 }) => {
   const [currentView, setCurrentView] = useState<AuthModalView>('choice');
@@ -311,12 +308,8 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       setRegisteredUser(userToUse);
       onAuthSuccess(userToUse);
 
-      // Si ya está dentro del boliche, puede pasar directo; si no, vamos a verificación en Cache
-      if (isInsideVenue) {
-        setCurrentView('register_success');
-      } else {
-        setCurrentView('verify_venue');
-      }
+      // La creación y edición del Cache ID es 100% independiente de estar en la fiesta
+      setCurrentView('register_success');
     } catch (err: unknown) {
       setErrorMessage(err instanceof Error ? err.message : 'Error al crear tu Cache ID');
     } finally {
@@ -335,16 +328,8 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       if (result.success && result.user) {
         onAuthSuccess(result.user);
         setRegisteredUser(result.user);
-
-        // Si es cuenta de administrador, pasa directo al panel admin
-        if (result.user.isAdmin || result.user.role === 'admin') {
-          onClose();
-          return;
-        }
-
-        // Si es cuenta de usuario:
-        // "recién ahí tiene que salir la opción de 'Verifiquemos que estás en Cache' (verificamos por gps o por qr)"
-        setCurrentView('verify_venue');
+        onClose();
+        return;
       } else {
         setErrorMessage(result.message || 'Credenciales incorrectas');
       }
@@ -1349,13 +1334,12 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                 VERIFIQUEMOS QUE ESTÁS EN CACHE
               </h3>
               <p className="text-xs text-zinc-300 max-w-sm mx-auto leading-relaxed">
-                Para activar <strong className="text-white">Cachengueoo Match</strong> corroboramos que estés físicamente dentro del boliche mediante GPS o escaneando el QR oficial.
+                Para activar <strong className="text-white">Cachengueoo Match</strong> corroboramos que estés físicamente dentro del boliche mediante GPS.
               </p>
             </div>
 
-            {/* Dos métodos de verificación requeridos: GPS o QR */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2 text-left">
-              {/* Opción 1: Verificar por GPS */}
+            {/* Validación EXCLUSIVA mediante GPS */}
+            <div className="pt-2">
               <button
                 type="button"
                 onClick={async () => {
@@ -1364,49 +1348,20 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                   }
                   onClose();
                 }}
-                className="p-4 rounded-2xl bg-zinc-900/90 hover:bg-zinc-800 border border-zinc-800 hover:border-[#F39200] cursor-pointer transition-all flex flex-col justify-between group shadow-lg"
+                className="w-full p-4 rounded-2xl bg-zinc-900/90 hover:bg-zinc-800 border border-[#F39200]/60 hover:border-[#F39200] cursor-pointer transition-all flex items-center justify-between group shadow-lg"
               >
-                <div className="flex items-center gap-2.5 mb-2">
-                  <div className="w-9 h-9 rounded-xl bg-[#F39200]/15 border border-[#F39200]/30 flex items-center justify-center text-[#F39200]">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-[#F39200]/15 border border-[#F39200]/30 flex items-center justify-center text-[#F39200] shrink-0">
                     <MapPin className="w-5 h-5" />
                   </div>
-                  <div>
+                  <div className="text-left">
                     <h4 className="text-xs font-bold text-white group-hover:text-amber-300">
-                      Verificar por GPS
+                      Validar ubicación por GPS
                     </h4>
-                    <span className="text-[10px] text-zinc-400">Geolocalización directa</span>
+                    <span className="text-[10px] text-zinc-400">Comprobá tu presencia con un toque</span>
                   </div>
                 </div>
-                <span className="text-[11px] text-zinc-500 group-hover:text-zinc-300">
-                  Comprobá tu ubicación en Cachengueoo con un toque.
-                </span>
-              </button>
-
-              {/* Opción 2: Verificar por QR */}
-              <button
-                type="button"
-                onClick={() => {
-                  onClose();
-                  if (onOpenQrScanner) {
-                    onOpenQrScanner();
-                  }
-                }}
-                className="p-4 rounded-2xl bg-zinc-900/90 hover:bg-zinc-800 border border-zinc-800 hover:border-amber-400 cursor-pointer transition-all flex flex-col justify-between group shadow-lg"
-              >
-                <div className="flex items-center gap-2.5 mb-2">
-                  <div className="w-9 h-9 rounded-xl bg-amber-400/15 border border-amber-400/30 flex items-center justify-center text-amber-400">
-                    <QrCode className="w-5 h-5" />
-                  </div>
-                  <div>
-                    <h4 className="text-xs font-bold text-white group-hover:text-amber-300">
-                      Verificar por QR
-                    </h4>
-                    <span className="text-[10px] text-zinc-400">Escaneá en barra o puerta</span>
-                  </div>
-                </div>
-                <span className="text-[11px] text-zinc-500 group-hover:text-zinc-300">
-                  Escaneá el código QR del boliche con tu cámara.
-                </span>
+                <ArrowRight className="w-4 h-4 text-zinc-500 group-hover:text-white group-hover:translate-x-1 transition-all" />
               </button>
             </div>
           </div>
@@ -1423,17 +1378,17 @@ export const AuthModal: React.FC<AuthModalProps> = ({
 
             <div className="space-y-1.5">
               <span className="text-[10px] uppercase font-bold text-emerald-400 tracking-widest block">
-                ¡CACHE ID ACTIVADO!
+                ¡CACHE ID CREADO CON ÉXITO!
               </span>
               <h3 className="text-xl sm:text-2xl font-black text-white font-display uppercase tracking-tight">
-                ¡BIENVENIDO A CACHENGUEOO, {registeredUser?.nickname || 'AMIGO'}!
+                ¡BIENVENIDO, {registeredUser?.nickname || 'AMIGO'}!
               </h3>
               <p className="text-xs text-zinc-400 max-w-sm mx-auto leading-relaxed">
-                Tu perfil de fiesta ha sido generado. Ya podés descubrir a las personas que están en la pista esta noche.
+                Tu perfil de Cache ID ya está registrado. Podés ver o editar tu perfil cuando quieras, o activar Match si estás en la fiesta.
               </p>
             </div>
 
-            <div className="pt-2">
+            <div className="pt-2 space-y-2">
               <button
                 type="button"
                 onClick={() => {
@@ -1443,7 +1398,14 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                 className="w-full h-12 rounded-xl bg-[#F39200] hover:bg-[#E08400] text-black font-extrabold text-xs flex items-center justify-center gap-2 cursor-pointer shadow-lg shadow-[#F39200]/25 transition-all"
               >
                 <Flame className="w-4 h-4 fill-black" />
-                <span>Entrar a Cachengueoo Match</span>
+                <span>Entrar a Cachengueoo Match (GPS)</span>
+              </button>
+              <button
+                type="button"
+                onClick={onClose}
+                className="w-full h-10 rounded-xl bg-zinc-900 hover:bg-zinc-800 border border-zinc-700 text-white font-bold text-xs flex items-center justify-center cursor-pointer transition-all"
+              >
+                Ver mi perfil
               </button>
             </div>
           </div>
