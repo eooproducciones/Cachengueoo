@@ -7,28 +7,27 @@ import {
   Plus,
   Trash2,
   CheckCircle2,
-  Crosshair,
   Sliders,
-  AlertCircle,
-  Building2,
   Edit3,
-  Save,
-  Navigation,
+  X,
+  Crosshair,
+  AlertTriangle,
 } from 'lucide-react';
 import { VenueConfig, VenueLocation } from '../../types';
 import { deleteVenueLocationFromSupabase } from '../../config/venue';
-
 
 interface VenueMapEditorProps {
   venueConfig: VenueConfig;
   onSaveConfig: (updated: VenueConfig) => void;
 }
 
+const GOOGLE_MAPS_TILES = 'https://mt1.google.com/vt/lyrs=m&x={x}&y={y}&z={z}';
+const DEFAULT_MENDOZA_LAT = -32.89084;
+const DEFAULT_MENDOZA_LNG = -68.84717;
+
 export const VenueMapEditor: React.FC<VenueMapEditorProps> = ({ venueConfig, onSaveConfig }) => {
-  // Inicializar sin locaciones por defecto (lista vacía)
+  // Inicializar locaciones desde la configuración guardada
   const [locations, setLocations] = useState<VenueLocation[]>(() => {
-    // Si viene con locaciones guardadas por el usuario, las usamos.
-    // Si son las de prueba antiguas, limpiamos para que esté vacía como pidió el usuario.
     const saved = venueConfig.locations || [];
     const isOldMock =
       saved.length === 2 &&
@@ -38,428 +37,367 @@ export const VenueMapEditor: React.FC<VenueMapEditorProps> = ({ venueConfig, onS
     return saved;
   });
 
-  const [selectedLocationId, setSelectedLocationId] = useState<string | null>(() => {
-    return locations[0]?.id || null;
-  });
+  // Modal para agregar o editar locación
+  const [showModal, setShowModal] = useState(false);
+  const [editingLocationId, setEditingLocationId] = useState<string | null>(null);
 
-  const [searchAddress, setSearchAddress] = useState('');
+  // Modal para confirmar eliminación (modelo zona de peligro como usuarios/eventos)
+  const [locationToDelete, setLocationToDelete] = useState<VenueLocation | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
+
+  // Estado del formulario dentro del popup
+  const [formName, setFormName] = useState('');
+  const [formAddress, setFormAddress] = useState('');
+  const [formRadius, setFormRadius] = useState<number>(200);
+  const [formLat, setFormLat] = useState<number>(DEFAULT_MENDOZA_LAT);
+  const [formLng, setFormLng] = useState<number>(DEFAULT_MENDOZA_LNG);
+
+  // Búsqueda de dirección
+  const [searchQuery, setSearchQuery] = useState('');
   const [isSearching, setIsSearching] = useState(false);
   const [searchFeedback, setSearchFeedback] = useState<string | null>(null);
-  const [showSavedToast, setShowSavedToast] = useState(false);
-  const [toastText, setToastText] = useState<string>(
-    'Configuración guardada. Los cambios de ubicación y radio ya están activos.'
-  );
 
+  // Feedback toast
+  const [showSavedToast, setShowSavedToast] = useState(false);
+  const [toastText, setToastText] = useState('');
+
+  // Referencias para el mapa Leaflet dentro del popup modal
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapInstanceRef = useRef<L.Map | null>(null);
-  const CARTO_API_KEY =
-    import.meta.env.VITE_CARTO_API_KEY || 'cb1_4rky_1_815346443149bf447137be7b';
+  const markerRef = useRef<L.Marker | null>(null);
+  const circleRef = useRef<L.Circle | null>(null);
 
-  const [mapLayer, setMapLayer] = useState<
-    'google_streets' | 'google_hybrid' | 'carto_voyager' | 'carto_dark'
-  >('google_streets');
-  const tileLayerRef = useRef<L.TileLayer | null>(null);
-  const markersLayerRef = useRef<L.LayerGroup | null>(null);
+  // Crear o actualizar icono personalizado
+  const getCustomPinHtml = (label: string, radius: number) => `
+    <div style="position: relative; display: flex; flex-direction: column; align-items: center; transform: translate(-50%, -100%); cursor: pointer;">
+      <div style="background: #F39200; color: #000000; font-weight: 800; font-size: 11px; padding: 4px 10px; border-radius: 9999px; white-space: nowrap; box-shadow: 0 4px 14px rgba(0,0,0,0.8); border: 2px solid #ffffff; display: flex; align-items: center; gap: 4px;">
+        <span>📍</span>
+        <span>${label || 'Punto de Evento'}</span>
+        <span style="font-size: 9px; opacity: 0.85; font-family: monospace;">(${radius}m)</span>
+      </div>
+      <div style="width: 0; height: 0; border-left: 6px solid transparent; border-right: 6px solid transparent; border-top: 8px solid #ffffff; margin-top: -1px;"></div>
+    </div>
+  `;
 
-  const [cartoKeyInput, setCartoKeyInput] = useState(
-    import.meta.env.VITE_CARTO_API_KEY || 'cb1_4rky_1_815346443149bf447137be7b'
-  );
-
-  const selectedLocation = locations.find((l) => l.id === selectedLocationId) || null;
-
-  const createTileLayer = (mode: 'google_streets' | 'google_hybrid' | 'carto_voyager' | 'carto_dark') => {
-    let url = '';
-    let attribution = '';
-    let subdomains: string | string[] = 'abc';
-    let maxZoom = 20;
-
-    switch (mode) {
-      case 'google_streets':
-        url = 'https://mt1.google.com/vt/lyrs=m&x={x}&y={y}&z={z}';
-        attribution = '&copy; Google Maps';
-        maxZoom = 21;
-        break;
-      case 'google_hybrid':
-        url = 'https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}';
-        attribution = '&copy; Google Maps Satélite';
-        maxZoom = 21;
-        break;
-      case 'carto_voyager':
-        url = `https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png?key=${cartoKeyInput}`;
-        attribution = '&copy; <a href="https://carto.com/">CARTO</a> &copy; OpenStreetMap';
-        subdomains = 'abcd';
-        break;
-      case 'carto_dark':
-        url = `https://{s}.basemaps.cartocdn.com/rastertiles/dark_all/{z}/{x}/{y}.png?key=${cartoKeyInput}`;
-        attribution = '&copy; <a href="https://carto.com/">CARTO</a> &copy; OpenStreetMap';
-        subdomains = 'abcd';
-        break;
-    }
-
-    const layer = L.tileLayer(url, {
-      attribution,
-      subdomains,
-      maxZoom,
-    });
-
-    // En caso de que CARTO falle o la key no esté activada aún, respaldar automáticamente
-    layer.on('tileerror', (e) => {
-      const tile = e.tile as HTMLImageElement;
-      if (tile && !tile.dataset.fallback) {
-        tile.dataset.fallback = 'true';
-        const coords = (e as any).coords;
-        if (coords) {
-          tile.src = `https://mt1.google.com/vt/lyrs=m&x=${coords.x}&y=${coords.y}&z=${coords.z}`;
-        }
+  // Inicializar o ajustar mapa cuando el popup modal se abre
+  useEffect(() => {
+    if (!showModal) {
+      if (mapInstanceRef.current) {
+        mapInstanceRef.current.remove();
+        mapInstanceRef.current = null;
+        markerRef.current = null;
+        circleRef.current = null;
       }
-    });
-
-    return layer;
-  };
-
-  // Actualizar capa de mosaicos cuando cambia la selección de mapa
-  useEffect(() => {
-    if (!mapInstanceRef.current) return;
-    if (tileLayerRef.current) {
-      tileLayerRef.current.remove();
-    }
-    const newTileLayer = createTileLayer(mapLayer).addTo(mapInstanceRef.current);
-    tileLayerRef.current = newTileLayer;
-    mapInstanceRef.current.invalidateSize();
-  }, [mapLayer, cartoKeyInput]);
-
-  // Inicializar mapa de Leaflet
-  useEffect(() => {
-    if (!mapContainerRef.current) return;
-
-    if (!mapInstanceRef.current) {
-      // Coordenadas iniciales de Mendoza
-      const defaultLat = selectedLocation ? selectedLocation.latitude : -32.89084;
-      const defaultLng = selectedLocation ? selectedLocation.longitude : -68.84717;
-
-      const map = L.map(mapContainerRef.current, {
-        center: [defaultLat, defaultLng],
-        zoom: 13,
-        zoomControl: true,
-      });
-
-      const tileLayer = createTileLayer(mapLayer).addTo(map);
-      tileLayerRef.current = tileLayer;
-
-      const markersGroup = L.layerGroup().addTo(map);
-      markersLayerRef.current = markersGroup;
-      mapInstanceRef.current = map;
-
-      // Asegurar que Leaflet calcule el tamaño del contenedor tras montarse
-      setTimeout(() => map.invalidateSize(), 50);
-      setTimeout(() => map.invalidateSize(), 200);
-      setTimeout(() => map.invalidateSize(), 600);
-      setTimeout(() => map.invalidateSize(), 200);
-      setTimeout(() => map.invalidateSize(), 600);
-
-      // Click en el mapa para fijar o mover la locación seleccionada
-      map.on('click', (e: L.LeafletMouseEvent) => {
-        const { lat, lng } = e.latlng;
-        setLocations((prev) => {
-          if (prev.length === 0) {
-            // Si no hay ninguna, crear una automáticamente al hacer click
-            const newId = `loc_${Date.now()}`;
-            setSelectedLocationId(newId);
-            return [
-              {
-                id: newId,
-                name: 'Nueva Locación',
-                address: `Lat: ${lat.toFixed(4)}, Lon: ${lng.toFixed(4)}`,
-                city: 'Mendoza',
-                province: 'Mendoza',
-                country: 'Argentina',
-                latitude: parseFloat(lat.toFixed(6)),
-                longitude: parseFloat(lng.toFixed(6)),
-                radiusMeters: 200,
-                isActive: true,
-              },
-            ];
-          }
-
-          // Si hay una seleccionada, moverla al punto clickeado
-          return prev.map((loc) => {
-            if (loc.id === selectedLocationId) {
-              return {
-                ...loc,
-                latitude: parseFloat(lat.toFixed(6)),
-                longitude: parseFloat(lng.toFixed(6)),
-              };
-            }
-            return loc;
-          });
-        });
-      });
+      return;
     }
 
-    return () => {
+    const timer = setTimeout(() => {
+      if (!mapContainerRef.current) return;
+
+      // Si el mapa ya existe, destruirlo para regenerar limpio
       if (mapInstanceRef.current) {
         mapInstanceRef.current.remove();
         mapInstanceRef.current = null;
       }
-    };
-  }, []);
 
-  // Actualizar marcadores y círculos en el mapa
-  useEffect(() => {
-    const map = mapInstanceRef.current;
-    const layerGroup = markersLayerRef.current;
-    if (!map || !layerGroup) return;
-
-    layerGroup.clearLayers();
-
-    locations.forEach((loc) => {
-      const isSelected = loc.id === selectedLocationId;
-
-      // Círculo que delimita el rango permitido
-      const circle = L.circle([loc.latitude, loc.longitude], {
-        radius: loc.radiusMeters,
-        color: loc.isActive ? (isSelected ? '#F39200' : '#EA580C') : '#71717a',
-        fillColor: loc.isActive ? '#F39200' : '#3f3f46',
-        fillOpacity: loc.isActive ? (isSelected ? 0.3 : 0.15) : 0.08,
-        weight: isSelected ? 3 : 1.5,
-      }).addTo(layerGroup);
-
-      circle.on('click', () => {
-        setSelectedLocationId(loc.id);
+      const map = L.map(mapContainerRef.current, {
+        center: [formLat, formLng],
+        zoom: 15,
+        zoomControl: true,
       });
 
-      // Pin en el mapa con nombre y radio
+      // Solo Google Maps estándar
+      L.tileLayer(GOOGLE_MAPS_TILES, {
+        attribution: '&copy; Google Maps',
+        maxZoom: 21,
+      }).addTo(map);
+
+      // Círculo de cobertura
+      const circle = L.circle([formLat, formLng], {
+        radius: formRadius,
+        color: '#F39200',
+        fillColor: '#F39200',
+        fillOpacity: 0.22,
+        weight: 2.5,
+      }).addTo(map);
+      circleRef.current = circle;
+
+      // Pin interactivo
       const customIcon = L.divIcon({
         className: 'custom-venue-pin',
-        html: `
-          <div style="position: relative; display: flex; flex-direction: column; align-items: center; transform: translate(-50%, -100%); cursor: pointer;">
-            <div style="background: ${
-              loc.isActive ? (isSelected ? '#F39200' : '#18181b') : '#27272a'
-            }; color: ${
-          loc.isActive ? (isSelected ? '#000000' : '#f4f4f5') : '#a1a1aa'
-        }; font-weight: 800; font-size: 11px; padding: 4px 10px; border-radius: 9999px; white-space: nowrap; box-shadow: 0 4px 14px rgba(0,0,0,0.8); border: 2px solid ${
-          isSelected ? '#ffffff' : loc.isActive ? '#F39200' : '#52525b'
-        }; display: flex; items-center; gap: 4px;">
-              <span>📍</span>
-              <span>${loc.name}</span>
-              <span style="font-size: 9px; opacity: 0.85; font-family: monospace;">(${
-                loc.radiusMeters
-              }m)</span>
-            </div>
-            <div style="width: 0; height: 0; border-left: 6px solid transparent; border-right: 6px solid transparent; border-top: 8px solid ${
-              isSelected ? '#ffffff' : loc.isActive ? '#F39200' : '#52525b'
-            }; margin-top: -1px;"></div>
-          </div>
-        `,
+        html: getCustomPinHtml(formName, formRadius),
         iconSize: [0, 0],
         iconAnchor: [0, 0],
       });
 
-      const marker = L.marker([loc.latitude, loc.longitude], {
+      const marker = L.marker([formLat, formLng], {
         icon: customIcon,
-        draggable: isSelected,
-      }).addTo(layerGroup);
+        draggable: true,
+      }).addTo(map);
+      markerRef.current = marker;
 
-      marker.on('click', () => {
-        setSelectedLocationId(loc.id);
-      });
-
+      // Evento arrastrar pin
       marker.on('dragend', (e) => {
-        const markerTarget = e.target as L.Marker;
-        const newPos = markerTarget.getLatLng();
-        setLocations((prev) =>
-          prev.map((item) =>
-            item.id === loc.id
-              ? {
-                  ...item,
-                  latitude: parseFloat(newPos.lat.toFixed(6)),
-                  longitude: parseFloat(newPos.lng.toFixed(6)),
-                }
-              : item
-          )
-        );
+        const target = e.target as L.Marker;
+        const pos = target.getLatLng();
+        const nextLat = parseFloat(pos.lat.toFixed(6));
+        const nextLng = parseFloat(pos.lng.toFixed(6));
+        setFormLat(nextLat);
+        setFormLng(nextLng);
+        circle.setLatLng([nextLat, nextLng]);
       });
-    });
-  }, [locations, selectedLocationId]);
 
-  // Persistir la configuración de locaciones en storage central y emitir evento en vivo
-  const persistLocations = (newLocs: VenueLocation[], toastMsg?: string) => {
-    const primary = newLocs[0];
-    const updated: VenueConfig = {
-      ...venueConfig,
-      name: primary ? primary.name : 'CACHENGUEOO',
-      city: primary ? primary.city : 'Mendoza',
-      province: primary ? primary.province : 'Mendoza',
-      latitude: primary ? primary.latitude : -32.89084,
-      longitude: primary ? primary.longitude : -68.84717,
-      radiusMeters: primary ? primary.radiusMeters : 180,
-      locations: newLocs,
+      // Evento click en cualquier punto del mapa
+      map.on('click', (e: L.LeafletMouseEvent) => {
+        const nextLat = parseFloat(e.latlng.lat.toFixed(6));
+        const nextLng = parseFloat(e.latlng.lng.toFixed(6));
+        setFormLat(nextLat);
+        setFormLng(nextLng);
+        marker.setLatLng([nextLat, nextLng]);
+        circle.setLatLng([nextLat, nextLng]);
+      });
+
+      mapInstanceRef.current = map;
+
+      // Forzar ajuste de dimensiones
+      setTimeout(() => map.invalidateSize(), 100);
+      setTimeout(() => map.invalidateSize(), 300);
+    }, 120);
+
+    return () => {
+      clearTimeout(timer);
     };
+  }, [showModal]);
 
-    onSaveConfig(updated);
-    setToastText(
-      toastMsg ||
-        '✓ Locación guardada. Las personas dentro de este radio podrán habilitar Cachengueoo Match automáticamente por GPS.'
-    );
-    setShowSavedToast(true);
-    setTimeout(() => setShowSavedToast(false), 4500);
-  };
-
-  // Agregar una nueva locación limpia y seleccionarla
-  const handleAddLocation = () => {
-    const center = mapInstanceRef.current?.getCenter() || { lat: -32.89084, lng: -68.84717 };
-    const newId = `loc_${Date.now()}`;
-    const newLoc: VenueLocation = {
-      id: newId,
-      name: `Sede #${locations.length + 1}`,
-      address: '',
-      city: 'Mendoza',
-      province: 'Mendoza',
-      country: 'Argentina',
-      latitude: parseFloat(center.lat.toFixed(6)),
-      longitude: parseFloat(center.lng.toFixed(6)),
-      radiusMeters: 200,
-      isActive: true,
-    };
-
-    const nextList = [...locations, newLoc];
-    setLocations(nextList);
-    setSelectedLocationId(newId);
-
-    if (mapInstanceRef.current) {
-      mapInstanceRef.current.flyTo([newLoc.latitude, newLoc.longitude], 16);
+  // Actualizar círculo y pin cuando cambia el radio o el nombre en el formulario
+  useEffect(() => {
+    if (circleRef.current) {
+      circleRef.current.setRadius(formRadius);
     }
-  };
-
-  // Guardar y activar la locación seleccionada inmediatamente
-  const handleSaveSelectedLocation = () => {
-    if (!selectedLocation) return;
-    persistLocations(
-      locations,
-      `✓ Locación "${selectedLocation.name}" guardada y seleccionada para validación GPS (${selectedLocation.radiusMeters}m de cobertura).`
-    );
-  };
-
-  // Eliminar locación
-  const handleDeleteLocation = (id: string) => {
-    const target = locations.find((l) => l.id === id);
-    const filtered = locations.filter((l) => l.id !== id);
-    setLocations(filtered);
-    if (selectedLocationId === id) {
-      setSelectedLocationId(filtered[0]?.id || null);
+    if (markerRef.current) {
+      const customIcon = L.divIcon({
+        className: 'custom-venue-pin',
+        html: getCustomPinHtml(formName, formRadius),
+        iconSize: [0, 0],
+        iconAnchor: [0, 0],
+      });
+      markerRef.current.setIcon(customIcon);
     }
-    deleteVenueLocationFromSupabase(id).catch(() => {});
-    persistLocations(
-      filtered,
-      `Locación "${target?.name || 'seleccionada'}" eliminada de las sedes activas.`
-    );
-  };
+  }, [formRadius, formName]);
 
+  // Abrir modal para crear nueva locación
+  const handleOpenCreateModal = () => {
+    setEditingLocationId(null);
+    setFormName('');
+    setFormAddress('');
+    setFormRadius(200);
+    setSearchQuery('');
+    setSearchFeedback(null);
 
-  // Seleccionar locación para editarla en el mapa y formulario
-  const handleEditLocation = (loc: VenueLocation) => {
-    setSelectedLocationId(loc.id);
-    if (mapInstanceRef.current) {
-      mapInstanceRef.current.flyTo([loc.latitude, loc.longitude], 16);
+    // Centrar en la primera locación existente o en Mendoza
+    if (locations.length > 0) {
+      setFormLat(locations[0].latitude);
+      setFormLng(locations[0].longitude);
+    } else {
+      setFormLat(DEFAULT_MENDOZA_LAT);
+      setFormLng(DEFAULT_MENDOZA_LNG);
     }
+
+    setShowModal(true);
   };
 
-  // Buscar dirección puntual
+  // Abrir modal para editar locación existente
+  const handleOpenEditModal = (loc: VenueLocation) => {
+    setEditingLocationId(loc.id);
+    setFormName(loc.name);
+    setFormAddress(loc.address || '');
+    setFormRadius(loc.radiusMeters || 200);
+    setFormLat(loc.latitude);
+    setFormLng(loc.longitude);
+    setSearchQuery(loc.address || '');
+    setSearchFeedback(null);
+    setShowModal(true);
+  };
+
+  // Buscar dirección en Mendoza vía OpenStreetMap geocoding
   const handleSearchAddress = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!searchAddress.trim()) return;
+    if (!searchQuery.trim()) return;
 
     setIsSearching(true);
     setSearchFeedback(null);
 
     try {
-      const q = encodeURIComponent(`${searchAddress.trim()}, Mendoza, Argentina`);
+      const query = encodeURIComponent(`${searchQuery.trim()}, Mendoza, Argentina`);
       const res = await fetch(
-        `https://nominatim.openstreetmap.org/search?format=json&q=${q}&limit=1`
+        `https://nominatim.openstreetmap.org/search?format=json&q=${query}&limit=1`
       );
       const data = await res.json();
 
       if (data && data.length > 0) {
-        const result = data[0];
-        const lat = parseFloat(parseFloat(result.lat).toFixed(6));
-        const lon = parseFloat(parseFloat(result.lon).toFixed(6));
+        const item = data[0];
+        const lat = parseFloat(parseFloat(item.lat).toFixed(6));
+        const lng = parseFloat(parseFloat(item.lon).toFixed(6));
 
-        if (selectedLocation) {
-          // Asignar a la locación actual
-          setLocations((prev) =>
-            prev.map((l) =>
-              l.id === selectedLocation.id
-                ? {
-                    ...l,
-                    address: searchAddress.trim(),
-                    latitude: lat,
-                    longitude: lon,
-                  }
-                : l
-            )
-          );
-        } else {
-          // Crear una nueva con esa dirección
-          const newId = `loc_${Date.now()}`;
-          const newLoc: VenueLocation = {
-            id: newId,
-            name: searchAddress.trim().split(',')[0] || 'Nueva Locación',
-            address: searchAddress.trim(),
-            city: 'Mendoza',
-            province: 'Mendoza',
-            country: 'Argentina',
-            latitude: lat,
-            longitude: lon,
-            radiusMeters: 200,
-            isActive: true,
-          };
-          setLocations((prev) => [...prev, newLoc]);
-          setSelectedLocationId(newId);
+        setFormLat(lat);
+        setFormLng(lng);
+
+        if (!formAddress.trim()) {
+          setFormAddress(searchQuery.trim());
+        }
+        if (!formName.trim()) {
+          setFormName(searchQuery.trim().split(',')[0]);
         }
 
         if (mapInstanceRef.current) {
-          mapInstanceRef.current.flyTo([lat, lon], 16);
+          mapInstanceRef.current.flyTo([lat, lng], 16);
         }
-        setSearchFeedback(`Ubicación encontrada y fijada en el mapa.`);
+        if (markerRef.current) {
+          markerRef.current.setLatLng([lat, lng]);
+        }
+        if (circleRef.current) {
+          circleRef.current.setLatLng([lat, lng]);
+        }
+
+        setSearchFeedback('✓ Dirección encontrada y ubicada en Google Maps.');
       } else {
         setSearchFeedback('No se encontró la dirección exacta. Podés tocar directamente en el mapa.');
       }
     } catch {
-      setSearchFeedback('Error al buscar. Hacé click directamente en el mapa para marcar el punto.');
+      setSearchFeedback('Error al buscar dirección. Podés marcar el punto directamente en el mapa.');
     } finally {
       setIsSearching(false);
     }
   };
 
-  // Guardar todas las locaciones
-  const handleSaveAll = () => {
-    persistLocations(locations, '✓ Todas las locaciones guardadas y activas para Cachengueoo Match.');
+  // Guardar locación (crear o editar)
+  const handleSaveLocation = (e: React.FormEvent) => {
+    e.preventDefault();
+    const cleanName = formName.trim();
+    if (!cleanName) return;
+
+    let nextList: VenueLocation[];
+    let toastMessage = '';
+
+    if (editingLocationId) {
+      nextList = locations.map((loc) =>
+        loc.id === editingLocationId
+          ? {
+              ...loc,
+              name: cleanName,
+              address: formAddress.trim(),
+              latitude: formLat,
+              longitude: formLng,
+              radiusMeters: formRadius,
+            }
+          : loc
+      );
+      toastMessage = `✓ Locación "${cleanName}" actualizada y sincronizada en la base de datos.`;
+    } else {
+      const newId = `loc_${Date.now()}`;
+      const newLoc: VenueLocation = {
+        id: newId,
+        name: cleanName,
+        address: formAddress.trim(),
+        city: 'Mendoza',
+        province: 'Mendoza',
+        country: 'Argentina',
+        latitude: formLat,
+        longitude: formLng,
+        radiusMeters: formRadius,
+        isActive: true,
+      };
+      nextList = [...locations, newLoc];
+      toastMessage = `✓ Locación de evento "${cleanName}" agregada y guardada en la base de datos.`;
+    }
+
+    setLocations(nextList);
+    setShowModal(false);
+    setEditingLocationId(null);
+
+    // Persistir en venueConfig y sincronizar automáticamente con Supabase
+    const primary = nextList[0];
+    const updated: VenueConfig = {
+      ...venueConfig,
+      name: primary ? primary.name : venueConfig.name,
+      city: primary ? primary.city : 'Mendoza',
+      province: primary ? primary.province : 'Mendoza',
+      latitude: primary ? primary.latitude : formLat,
+      longitude: primary ? primary.longitude : formLng,
+      radiusMeters: primary ? primary.radiusMeters : formRadius,
+      locations: nextList,
+    };
+
+    onSaveConfig(updated);
+    setToastText(toastMessage);
+    setShowSavedToast(true);
+    setTimeout(() => setShowSavedToast(false), 4500);
+  };
+
+  // Confirmar eliminación de locación
+  const handleConfirmDeleteLocation = async () => {
+    if (!locationToDelete) return;
+    const targetId = locationToDelete.id;
+    const targetName = locationToDelete.name;
+
+    setIsDeleting(true);
+    try {
+      const filtered = locations.filter((l) => l.id !== targetId);
+      setLocations(filtered);
+      setLocationToDelete(null);
+
+      // Eliminar de Supabase
+      await deleteVenueLocationFromSupabase(targetId);
+
+      // Persistir configuración actualizada
+      const primary = filtered[0];
+      const updated: VenueConfig = {
+        ...venueConfig,
+        name: primary ? primary.name : 'CACHENGUEOO',
+        city: primary ? primary.city : 'Mendoza',
+        province: primary ? primary.province : 'Mendoza',
+        latitude: primary ? primary.latitude : DEFAULT_MENDOZA_LAT,
+        longitude: primary ? primary.longitude : DEFAULT_MENDOZA_LNG,
+        radiusMeters: primary ? primary.radiusMeters : 180,
+        locations: filtered,
+      };
+
+      onSaveConfig(updated);
+      setToastText(`✓ Locación "${targetName}" eliminada de la base de datos y de las sedes activas.`);
+      setShowSavedToast(true);
+      setTimeout(() => setShowSavedToast(false), 4500);
+    } catch (err) {
+      console.error('Error al eliminar locación:', err);
+    } finally {
+      setIsDeleting(false);
+    }
   };
 
   return (
-    <div className="space-y-5">
-      {/* Cabecera minimalista y botón para agregar */}
-      <div className="p-5 rounded-3xl bg-[#121217] border border-zinc-800 shadow-xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+    <div className="space-y-4">
+      {/* Cabecera simétrica con el mismo estilo que Gestión de Noches y Eventos */}
+      <div className="flex items-center justify-between">
         <div>
-          <h3 className="text-lg font-black text-white font-display uppercase tracking-tight flex items-center gap-2">
-            <MapPin className="w-5 h-5 text-[#F39200]" />
-            Configuración Geográfica
+          <h3 className="text-base font-bold text-white font-display flex items-center gap-2">
+            <MapPin className="w-4 h-4 text-[#F39200]" />
+            Locaciones de Eventos
           </h3>
           <p className="text-xs text-zinc-400 mt-0.5">
-            Marcá los puntos en el mapa y el radio de cobertura para que las personas puedan habilitar Match automáticamente por GPS.
+            Configuración geográfica y perímetros GPS para habilitar Cachengueoo Match.
           </p>
         </div>
 
         <button
           type="button"
-          onClick={handleAddLocation}
-          className="h-10 px-4 rounded-xl bg-[#F39200] hover:bg-[#E08400] text-black font-extrabold text-xs flex items-center gap-2 cursor-pointer transition-all active:scale-95 shadow-md shadow-[#F39200]/25 shrink-0"
+          onClick={handleOpenCreateModal}
+          className="px-3.5 py-2 rounded-xl bg-[#F39200] hover:bg-[#E08400] text-black font-bold text-xs flex items-center gap-1.5 cursor-pointer shadow-md shadow-[#F39200]/20 active:scale-95 transition-all"
         >
-          <Plus className="w-4 h-4 stroke-[3]" />
+          <Plus className="w-4 h-4" />
           <span>Agregar locación</span>
         </button>
       </div>
 
+      {/* Toast de confirmación */}
       {showSavedToast && (
         <div className="p-3.5 rounded-2xl bg-emerald-950/80 border border-emerald-500/50 text-emerald-300 text-xs flex items-center gap-2 animate-in fade-in">
           <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
@@ -467,233 +405,210 @@ export const VenueMapEditor: React.FC<VenueMapEditorProps> = ({ venueConfig, onS
         </div>
       )}
 
-      {/* Buscador de Dirección Simple */}
-      <form
-        onSubmit={handleSearchAddress}
-        className="p-3 rounded-2xl bg-[#121217] border border-zinc-800 flex flex-col sm:flex-row gap-2"
-      >
-        <div className="relative flex-1">
-          <Search className="w-4 h-4 text-zinc-500 absolute left-3 top-3 pointer-events-none" />
-          <input
-            type="text"
-            value={searchAddress}
-            onChange={(e) => setSearchAddress(e.target.value)}
-            placeholder="Escribí una dirección o lugar (ej. Arena Maipú, Emilio Civit 100, Mendoza)..."
-            className="w-full h-10 pl-9 pr-3 rounded-xl bg-zinc-900 border border-zinc-800 text-white text-xs focus:outline-none focus:border-[#F39200]"
-          />
-        </div>
-        <button
-          type="submit"
-          disabled={isSearching}
-          className="h-10 px-4 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-white font-bold text-xs cursor-pointer transition-colors shrink-0"
-        >
-          {isSearching ? 'Buscando...' : 'Buscar dirección'}
-        </button>
-      </form>
-
-      {searchFeedback && (
-        <p className="text-[11px] text-[#F39200] px-2 -mt-3">{searchFeedback}</p>
-      )}
-
-      {/* Mapa interactivo */}
-      <div className="bg-[#121217] border border-zinc-800 rounded-3xl p-4 shadow-xl space-y-2">
-        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 text-xs px-1">
-          <div className="flex items-center gap-2">
-            <span className="font-semibold text-zinc-300">
-              Hacé click en cualquier punto del mapa para ubicar o mover la locación
-            </span>
-            {selectedLocation && (
-              <span className="text-[11px] text-[#F39200] font-mono font-bold bg-[#F39200]/10 px-2 py-0.5 rounded-full border border-[#F39200]/20">
-                Radio: {selectedLocation.radiusMeters}m
-              </span>
-            )}
-          </div>
-
-          {/* Selector de capa de mapa */}
-          <div className="flex items-center gap-1.5 self-end sm:self-auto flex-wrap">
-            <div className="inline-flex rounded-xl bg-zinc-900 border border-zinc-800 p-0.5 shadow-inner">
-              <button
-                type="button"
-                onClick={() => setMapLayer('google_streets')}
-                className={`px-2.5 py-1 rounded-lg text-[11px] font-bold cursor-pointer transition-all ${
-                  mapLayer === 'google_streets'
-                    ? 'bg-[#F39200] text-black shadow-sm'
-                    : 'text-zinc-400 hover:text-white'
-                }`}
-              >
-                Google Maps
-              </button>
-              <button
-                type="button"
-                onClick={() => setMapLayer('google_hybrid')}
-                className={`px-2.5 py-1 rounded-lg text-[11px] font-bold cursor-pointer transition-all ${
-                  mapLayer === 'google_hybrid'
-                    ? 'bg-[#F39200] text-black shadow-sm'
-                    : 'text-zinc-400 hover:text-white'
-                }`}
-              >
-                Satélite
-              </button>
-              <button
-                type="button"
-                onClick={() => setMapLayer('carto_voyager')}
-                className={`px-2.5 py-1 rounded-lg text-[11px] font-bold cursor-pointer transition-all ${
-                  mapLayer === 'carto_voyager'
-                    ? 'bg-[#F39200] text-black shadow-sm'
-                    : 'text-zinc-400 hover:text-white'
-                }`}
-              >
-                CARTO Voyager
-              </button>
-              <button
-                type="button"
-                onClick={() => setMapLayer('carto_dark')}
-                className={`px-2.5 py-1 rounded-lg text-[11px] font-bold cursor-pointer transition-all ${
-                  mapLayer === 'carto_dark'
-                    ? 'bg-[#F39200] text-black shadow-sm'
-                    : 'text-zinc-400 hover:text-white'
-                }`}
-              >
-                CARTO Dark
-              </button>
-            </div>
-          </div>
-        </div>
-
-        {mapLayer.startsWith('carto') && (
-          <div className="p-3 rounded-2xl bg-amber-950/40 border border-amber-500/30 text-amber-200 text-xs flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
-            <div className="flex items-start gap-2">
-              <AlertCircle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
-              <p className="text-[11px] leading-relaxed">
-                <strong>Estado de clave CARTO:</strong> Si ves la marca de agua <em>"API KEY REQUIRED"</em>, significa que tu clave aún requiere confirmación por email en tu cuenta de CARTO. Mientras se activa podés usar la vista de <strong>Google Maps</strong> o <strong>Satélite</strong> 100% limpia.
-              </p>
-            </div>
-          </div>
-        )}
-
-        <div className="relative w-full h-[420px] min-h-[420px] rounded-2xl overflow-hidden border border-zinc-800 bg-[#18181b]">
-          <div
-            ref={mapContainerRef}
-            className="w-full h-full min-h-[420px] z-0"
-            style={{ height: '420px', minHeight: '420px', width: '100%' }}
-          />
-
-          {selectedLocation && (
-            <button
-              type="button"
-              onClick={() => {
-                if (mapInstanceRef.current) {
-                  mapInstanceRef.current.flyTo(
-                    [selectedLocation.latitude, selectedLocation.longitude],
-                    16
-                  );
-                }
-              }}
-              className="absolute bottom-3 right-3 z-10 p-2.5 rounded-xl bg-zinc-900/95 border border-zinc-700 text-[#F39200] hover:text-white shadow-xl cursor-pointer text-xs font-bold flex items-center gap-1.5 backdrop-blur-md"
-              title="Centrar en locación seleccionada"
-            >
-              <Crosshair className="w-4 h-4" />
-              <span>Centrar</span>
-            </button>
-          )}
-        </div>
-      </div>
-
-      {/* Si no hay locaciones agregadas */}
+      {/* Lista de locaciones agregadas (estilo tarjetas de eventos) */}
       {locations.length === 0 ? (
         <div className="p-8 rounded-3xl bg-[#121217] border border-dashed border-zinc-800 text-center space-y-3">
           <div className="w-12 h-12 rounded-2xl bg-zinc-900 border border-zinc-800 flex items-center justify-center mx-auto text-[#F39200]">
             <MapPin className="w-6 h-6" />
           </div>
-          <h4 className="text-sm font-bold text-white">No hay locaciones activas</h4>
-          <p className="text-xs text-zinc-400 max-w-sm mx-auto">
-            Hacé click en <strong>"Agregar locación"</strong> o directamente sobre el mapa para fijar
-            el primer punto y el rango que abarcará para validar presencia.
-          </p>
+          <div className="space-y-1">
+            <h4 className="text-sm font-bold text-white">No hay locaciones configuradas</h4>
+            <p className="text-xs text-zinc-400 max-w-sm mx-auto">
+              Hacé click en <strong>"Agregar locación"</strong> para fijar la primera sede en Google Maps con su nombre y radio de cobertura.
+            </p>
+          </div>
           <button
             type="button"
-            onClick={handleAddLocation}
-            className="px-4 py-2 rounded-xl bg-[#F39200] text-black font-extrabold text-xs cursor-pointer hover:bg-[#E08400] transition-colors"
+            onClick={handleOpenCreateModal}
+            className="px-4 py-2 rounded-xl bg-[#F39200] text-black font-extrabold text-xs cursor-pointer hover:bg-[#E08400] transition-colors shadow-md shadow-[#F39200]/20"
           >
-            + Agregar primera locación
+            + Agregar locación de evento
           </button>
         </div>
       ) : (
-        <div className="space-y-4">
-          {/* Formulario de la locación seleccionada */}
-          {selectedLocation && (
-            <div className="p-5 rounded-3xl bg-[#121217] border-2 border-[#F39200]/50 shadow-xl space-y-4">
-              <div className="flex items-center justify-between border-b border-zinc-800 pb-3">
-                <div className="flex items-center gap-2">
-                  <span className="w-3 h-3 rounded-full bg-[#F39200] animate-pulse" />
-                  <div>
-                    <h4 className="text-sm font-bold text-white">
-                      Configuración de punto:{' '}
-                      <span className="text-[#F39200]">{selectedLocation.name}</span>
+        <div className="space-y-3">
+          {locations.map((loc, idx) => (
+            <div
+              key={loc.id}
+              className="p-5 rounded-3xl bg-[#121217] border border-zinc-800 space-y-4 hover:border-zinc-700 transition-colors"
+            >
+              <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3">
+                <div className="space-y-1.5 flex-1 min-w-0">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="w-6 h-6 rounded-lg bg-zinc-900 border border-zinc-800 flex items-center justify-center text-xs font-mono font-bold text-[#F39200]">
+                      #{idx + 1}
+                    </span>
+                    <h4 className="text-base font-bold text-white font-display truncate">
+                      {loc.name}
                     </h4>
-                    <span className="text-[10px] text-zinc-400 font-mono">
-                      Lat: {selectedLocation.latitude.toFixed(5)}, Lon:{' '}
-                      {selectedLocation.longitude.toFixed(5)}
+                    <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-950/80 border border-emerald-500/40 text-emerald-400">
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping" />
+                      Activo GPS
+                    </span>
+                  </div>
+
+                  <p className="text-xs text-zinc-300 flex items-center gap-1.5">
+                    <MapPin className="w-3.5 h-3.5 text-[#F39200] shrink-0" />
+                    <span className="truncate">{loc.address || 'Ubicación seleccionada en el mapa'}</span>
+                  </p>
+
+                  <div className="flex flex-wrap items-center gap-2 pt-1 text-[11px]">
+                    <span className="font-mono text-[#F39200] font-bold bg-[#F39200]/10 px-2 py-0.5 rounded-md border border-[#F39200]/20">
+                      Rango: {loc.radiusMeters} metros
+                    </span>
+                    <span className="font-mono text-zinc-500 text-[10px]">
+                      Coordenadas: ({loc.latitude.toFixed(5)}, {loc.longitude.toFixed(5)})
                     </span>
                   </div>
                 </div>
 
-                <button
-                  type="button"
-                  onClick={() => handleDeleteLocation(selectedLocation.id)}
-                  className="px-3 py-1.5 rounded-xl bg-red-950/40 border border-red-500/30 text-xs text-red-400 hover:text-red-300 flex items-center gap-1.5 cursor-pointer transition-colors"
-                >
-                  <Trash2 className="w-3.5 h-3.5" />
-                  <span>Eliminar punto</span>
-                </button>
-              </div>
+                {/* Acciones simétricas: Editar y Eliminar */}
+                <div className="flex items-center gap-2 shrink-0 self-end sm:self-start">
+                  <button
+                    type="button"
+                    onClick={() => handleOpenEditModal(loc)}
+                    className="px-3 py-1.5 rounded-xl bg-zinc-900 hover:bg-zinc-800 border border-zinc-700 hover:border-[#F39200] text-zinc-300 hover:text-white cursor-pointer transition-colors flex items-center gap-1.5 text-xs font-bold"
+                    title="Editar locación"
+                  >
+                    <Edit3 className="w-3.5 h-3.5 text-[#F39200]" />
+                    <span>Editar</span>
+                  </button>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
-                <div>
-                  <label className="text-zinc-300 block mb-1 font-semibold">
-                    Nombre de la locación o evento
-                  </label>
-                  <input
-                    type="text"
-                    value={selectedLocation.name}
-                    onChange={(e) =>
-                      setLocations((prev) =>
-                        prev.map((l) =>
-                          l.id === selectedLocation.id ? { ...l, name: e.target.value } : l
-                        )
-                      )
-                    }
-                    placeholder="Ej. Cachengueoo Sede Central, Arena Maipú..."
-                    className="w-full h-10 px-3 rounded-xl bg-zinc-900 border border-zinc-800 text-white font-medium focus:outline-none focus:border-[#F39200]"
-                  />
-                </div>
-
-                <div>
-                  <label className="text-zinc-300 block mb-1 font-semibold">
-                    Dirección o punto de referencia
-                  </label>
-                  <input
-                    type="text"
-                    value={selectedLocation.address || ''}
-                    onChange={(e) =>
-                      setLocations((prev) =>
-                        prev.map((l) =>
-                          l.id === selectedLocation.id ? { ...l, address: e.target.value } : l
-                        )
-                      )
-                    }
-                    placeholder="Ej. Emilio Civit y Maza, Maipú, Mendoza"
-                    className="w-full h-10 px-3 rounded-xl bg-zinc-900 border border-zinc-800 text-white font-medium focus:outline-none focus:border-[#F39200]"
-                  />
+                  <button
+                    type="button"
+                    onClick={() => setLocationToDelete(loc)}
+                    className="p-2 rounded-xl bg-zinc-900 hover:bg-red-950/40 border border-zinc-800 hover:border-red-500/40 text-zinc-500 hover:text-red-400 cursor-pointer transition-colors"
+                    title="Eliminar locación"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
                 </div>
               </div>
+            </div>
+          ))}
+        </div>
+      )}
 
-              {/* Rango que necesita que abarque */}
-              <div className="p-4 rounded-2xl bg-zinc-900/90 border border-zinc-800 space-y-2">
+      {/* ============================================================== */}
+      {/* POPUP MODAL: AGREGAR / EDITAR LOCACIÓN (SIMILAR A AGREGAR EVENTO) */}
+      {/* ============================================================== */}
+      {showModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-md animate-in fade-in duration-200">
+          <div className="bg-[#121217] border border-zinc-800 rounded-3xl w-full max-w-lg p-6 space-y-4 max-h-[92vh] overflow-y-auto shadow-2xl">
+            {/* Header del modal */}
+            <div className="flex items-center justify-between pb-3 border-b border-zinc-800">
+              <div>
+                <span className="text-[10px] uppercase font-bold text-[#F39200] tracking-wider block">
+                  Configuración Geográfica
+                </span>
+                <h4 className="text-base font-bold text-white font-display mt-0.5">
+                  {editingLocationId ? 'Modificar Locación de Evento' : 'Agregar Locación de Evento'}
+                </h4>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowModal(false)}
+                className="w-8 h-8 rounded-full bg-zinc-900 flex items-center justify-center text-zinc-400 hover:text-white cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Formulario completo */}
+            <form onSubmit={handleSaveLocation} className="space-y-4 text-xs">
+              {/* 1. Buscador de dirección integrado */}
+              <div className="space-y-1.5">
+                <label className="text-zinc-300 font-semibold block flex items-center gap-1.5">
+                  <Search className="w-3.5 h-3.5 text-[#F39200]" />
+                  Buscar dirección o punto de referencia
+                </label>
+                <div className="flex gap-2">
+                  <div className="relative flex-1">
+                    <input
+                      type="text"
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          handleSearchAddress(e);
+                        }
+                      }}
+                      placeholder="Ej. Arena Maipú, Emilio Civit 100, Mendoza..."
+                      className="w-full h-10 px-3 rounded-xl bg-zinc-900 border border-zinc-800 text-white placeholder-zinc-500 focus:outline-none focus:border-[#F39200] text-xs"
+                    />
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleSearchAddress}
+                    disabled={isSearching}
+                    className="h-10 px-4 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-white font-bold text-xs cursor-pointer transition-colors shrink-0 flex items-center gap-1.5"
+                  >
+                    <Search className="w-3.5 h-3.5" />
+                    <span>{isSearching ? 'Buscando...' : 'Buscar'}</span>
+                  </button>
+                </div>
+                {searchFeedback && (
+                  <p className="text-[11px] text-[#F39200] pt-0.5">{searchFeedback}</p>
+                )}
+              </div>
+
+              {/* 2. Mapa interactivo Google Maps (limpio, sin carto ni satélite) */}
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between text-[11px] text-zinc-400">
+                  <span className="flex items-center gap-1 text-zinc-300 font-medium">
+                    <Crosshair className="w-3.5 h-3.5 text-[#F39200]" />
+                    Tocá o arrastrá el pin en Google Maps para ajustar la posición
+                  </span>
+                  <span className="text-[#F39200] font-mono font-bold">
+                    Radio: {formRadius}m
+                  </span>
+                </div>
+
+                <div className="relative w-full h-64 rounded-2xl overflow-hidden border border-zinc-800 bg-[#18181b]">
+                  <div
+                    ref={mapContainerRef}
+                    className="w-full h-full z-0"
+                    style={{ height: '100%', width: '100%' }}
+                  />
+                </div>
+              </div>
+
+              {/* 3. Nombre de la locación o evento */}
+              <div className="space-y-1">
+                <label className="text-zinc-300 font-semibold block">
+                  Nombre de la locación o evento *
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={formName}
+                  onChange={(e) => setFormName(e.target.value)}
+                  placeholder="Ej. Cachengueoo Sede Central, Arena Maipú..."
+                  className="w-full h-10 px-3 rounded-xl bg-zinc-900 border border-zinc-800 text-white font-medium focus:outline-none focus:border-[#F39200] text-xs"
+                />
+              </div>
+
+              {/* 4. Dirección / Punto de referencia */}
+              <div className="space-y-1">
+                <label className="text-zinc-300 font-semibold block">
+                  Dirección visible o referencia
+                </label>
+                <input
+                  type="text"
+                  value={formAddress}
+                  onChange={(e) => setFormAddress(e.target.value)}
+                  placeholder="Ej. Emilio Civit y Maza, Maipú, Mendoza"
+                  className="w-full h-10 px-3 rounded-xl bg-zinc-900 border border-zinc-800 text-white font-medium focus:outline-none focus:border-[#F39200] text-xs"
+                />
+              </div>
+
+              {/* 5. Rango / Radio del evento en metros con slider y campo numérico */}
+              <div className="p-4 rounded-2xl bg-zinc-950/80 border border-zinc-800 space-y-2.5">
                 <div className="flex items-center justify-between text-xs">
                   <label className="font-bold text-white flex items-center gap-1.5">
                     <Sliders className="w-4 h-4 text-[#F39200]" />
-                    Rango que debe abarcar (Radio en metros)
+                    Rango del evento (Radio en metros)
                   </label>
                   <div className="flex items-center gap-1.5">
                     <input
@@ -701,17 +616,9 @@ export const VenueMapEditor: React.FC<VenueMapEditorProps> = ({ venueConfig, onS
                       min="30"
                       max="3000"
                       step="10"
-                      value={selectedLocation.radiusMeters}
-                      onChange={(e) =>
-                        setLocations((prev) =>
-                          prev.map((l) =>
-                            l.id === selectedLocation.id
-                              ? { ...l, radiusMeters: parseInt(e.target.value) || 100 }
-                              : l
-                          )
-                        )
-                      }
-                      className="w-20 h-8 px-2 text-right rounded-lg bg-zinc-800 border border-zinc-700 text-[#F39200] font-black font-mono text-sm focus:outline-none focus:border-[#F39200]"
+                      value={formRadius}
+                      onChange={(e) => setFormRadius(parseInt(e.target.value) || 50)}
+                      className="w-20 h-8 px-2 text-right rounded-lg bg-zinc-900 border border-zinc-700 text-[#F39200] font-black font-mono text-sm focus:outline-none focus:border-[#F39200]"
                     />
                     <span className="text-zinc-400 font-mono text-xs">metros</span>
                   </div>
@@ -722,145 +629,100 @@ export const VenueMapEditor: React.FC<VenueMapEditorProps> = ({ venueConfig, onS
                   min="50"
                   max="2000"
                   step="10"
-                  value={selectedLocation.radiusMeters}
-                  onChange={(e) =>
-                    setLocations((prev) =>
-                      prev.map((l) =>
-                        l.id === selectedLocation.id
-                          ? { ...l, radiusMeters: parseInt(e.target.value) || 100 }
-                          : l
-                      )
-                    )
-                  }
+                  value={formRadius}
+                  onChange={(e) => setFormRadius(parseInt(e.target.value) || 50)}
                   className="w-full h-2 bg-zinc-800 rounded-lg appearance-none cursor-pointer accent-[#F39200]"
                 />
-                <div className="flex justify-between text-[11px] text-zinc-500 pt-0.5">
+
+                <div className="flex justify-between text-[10px] text-zinc-500">
                   <span>50m (Boliche chico)</span>
                   <span className="text-[#F39200] font-bold">
-                    Cobertura actual: {selectedLocation.radiusMeters} metros
+                    Cobertura GPS: {formRadius} metros
                   </span>
-                  <span>2000m (Predio masivo / Arena)</span>
+                  <span>2000m (Predio masivo)</span>
                 </div>
               </div>
 
-              {/* Botón explícito para guardar esta locación */}
-              <div className="pt-1">
+              {/* Coordenadas en formato badge */}
+              <div className="flex items-center justify-between px-1 text-[11px] text-zinc-500 font-mono">
+                <span>Lat: {formLat.toFixed(6)}</span>
+                <span>Lon: {formLng.toFixed(6)}</span>
+              </div>
+
+              {/* Botón principal de guardado */}
+              <div className="pt-2 flex gap-2">
                 <button
                   type="button"
-                  onClick={handleSaveSelectedLocation}
-                  className="w-full h-11 rounded-2xl bg-[#F39200] hover:bg-[#E08400] text-black font-black text-xs sm:text-sm flex items-center justify-center gap-2 cursor-pointer transition-all shadow-lg shadow-[#F39200]/25 active:scale-[0.99]"
+                  onClick={() => setShowModal(false)}
+                  className="flex-1 h-11 rounded-xl bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 text-zinc-300 font-bold text-xs cursor-pointer transition-colors"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={!formName.trim()}
+                  className="flex-1 h-11 rounded-xl bg-[#F39200] hover:bg-[#E08400] text-black font-black text-xs cursor-pointer transition-all shadow-lg shadow-[#F39200]/25 flex items-center justify-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   <CheckCircle2 className="w-4 h-4 stroke-[2.5]" />
-                  <span>Guardar esta locación para validación GPS</span>
+                  <span>
+                    {editingLocationId ? 'Guardar cambios de locación' : 'Agregar locación de evento'}
+                  </span>
                 </button>
               </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ============================================================== */}
+      {/* MODAL: CONFIRMAR ELIMINACIÓN DE LOCACIÓN (MODELO DE SEGURIDAD)  */}
+      {/* ============================================================== */}
+      {locationToDelete && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-md animate-in fade-in duration-200">
+          <div className="bg-[#121217] border border-red-500/40 rounded-3xl w-full max-w-sm p-6 space-y-4 shadow-2xl shadow-red-950/40">
+            <div className="w-14 h-14 rounded-2xl bg-red-950/80 border border-red-500/50 flex items-center justify-center mx-auto text-red-400">
+              <Trash2 className="w-7 h-7" />
             </div>
-          )}
 
-          {/* Lista de Puntos Seleccionados y Guardados para validación GPS */}
-          <div className="p-5 rounded-3xl bg-[#121217] border border-zinc-800 space-y-3">
-            <div className="flex items-center justify-between">
-              <div>
-                <h4 className="text-sm font-black text-white font-display flex items-center gap-2">
-                  <MapPin className="w-4 h-4 text-[#F39200]" />
-                  Puntos seleccionados para Cachengueoo Match ({locations.length})
-                </h4>
-                <p className="text-[11px] text-zinc-400 mt-0.5">
-                  Las personas dentro del rango de cualquiera de estos puntos activarán Match automáticamente.
-                </p>
-              </div>
+            <div className="text-center space-y-1">
+              <span className="text-[10px] uppercase font-bold text-red-400 tracking-wider">
+                Zona de Peligro
+              </span>
+              <h4 className="text-base font-black text-white font-display">
+                ¿Eliminar {locationToDelete.name}?
+              </h4>
+              <p className="text-xs text-zinc-400 leading-relaxed">
+                Esta acción eliminará de forma permanente esta sede de la validación GPS y de la base de datos.
+              </p>
+            </div>
 
+            <div className="p-3 rounded-2xl bg-zinc-900/80 border border-zinc-800 text-[11px] text-zinc-300 space-y-1">
+              <p className="font-semibold text-white">{locationToDelete.name}</p>
+              <p className="text-zinc-400 text-[10px]">
+                {locationToDelete.address || 'Ubicación en el mapa'} · Radio {locationToDelete.radiusMeters}m
+              </p>
+            </div>
+
+            <div className="pt-2 flex gap-2">
               <button
                 type="button"
-                onClick={handleAddLocation}
-                className="px-3 py-1.5 rounded-xl bg-zinc-900 hover:bg-zinc-800 border border-zinc-700 text-xs font-bold text-[#F39200] flex items-center gap-1.5 cursor-pointer"
+                disabled={isDeleting}
+                onClick={() => setLocationToDelete(null)}
+                className="flex-1 h-10 rounded-xl bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 text-zinc-300 font-bold text-xs cursor-pointer transition-colors"
               >
-                <Plus className="w-3.5 h-3.5" />
-                <span>Agregar otro punto</span>
+                Cancelar
+              </button>
+              <button
+                type="button"
+                disabled={isDeleting}
+                onClick={handleConfirmDeleteLocation}
+                className="flex-1 h-10 rounded-xl bg-red-600 hover:bg-red-500 text-white font-bold text-xs cursor-pointer transition-colors shadow-lg shadow-red-950/60 flex items-center justify-center gap-1.5 disabled:opacity-50"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>{isDeleting ? 'Eliminando...' : 'Sí, Eliminar'}</span>
               </button>
             </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              {locations.map((loc, idx) => {
-                const isSel = loc.id === selectedLocationId;
-                return (
-                  <div
-                    key={loc.id}
-                    className={`p-4 rounded-2xl border transition-all flex flex-col justify-between gap-3 ${
-                      isSel
-                        ? 'bg-zinc-900 border-[#F39200] shadow-md shadow-[#F39200]/10'
-                        : 'bg-zinc-950/70 border-zinc-800/80 hover:border-zinc-700'
-                    }`}
-                  >
-                    <div className="space-y-1.5">
-                      <div className="flex items-start justify-between gap-2">
-                        <div className="flex items-center gap-2">
-                          <span className="w-6 h-6 rounded-lg bg-zinc-800 border border-zinc-700 flex items-center justify-center text-xs font-mono font-bold text-[#F39200]">
-                            #{idx + 1}
-                          </span>
-                          <strong className="text-sm text-white font-bold block truncate">
-                            {loc.name}
-                          </strong>
-                        </div>
-                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-950 border border-emerald-500/40 text-emerald-400 shrink-0">
-                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping"></span>
-                          Activo GPS
-                        </span>
-                      </div>
-
-                      <p className="text-xs text-zinc-400 truncate">
-                        {loc.address || 'Ubicación seleccionada en el mapa'}
-                      </p>
-
-                      <div className="flex items-center gap-3 text-[11px] text-zinc-400 pt-1">
-                        <span className="font-mono text-[#F39200] font-bold bg-[#F39200]/10 px-2 py-0.5 rounded-md border border-[#F39200]/20">
-                          Radio: {loc.radiusMeters} metros
-                        </span>
-                        <span className="font-mono text-zinc-500 text-[10px]">
-                          ({loc.latitude.toFixed(4)}, {loc.longitude.toFixed(4)})
-                        </span>
-                      </div>
-                    </div>
-
-                    <div className="flex items-center justify-end gap-2 pt-2 border-t border-zinc-800/80">
-                      <button
-                        type="button"
-                        onClick={() => handleEditLocation(loc)}
-                        className={`px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer transition-colors ${
-                          isSel
-                            ? 'bg-[#F39200] text-black'
-                            : 'bg-zinc-900 border border-zinc-700 text-zinc-300 hover:text-white'
-                        }`}
-                      >
-                        <Edit3 className="w-3.5 h-3.5" />
-                        <span>{isSel ? 'Editando ahora' : 'Editar'}</span>
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() => handleDeleteLocation(loc.id)}
-                        className="px-3 py-1.5 rounded-xl bg-zinc-900 hover:bg-red-950/50 border border-zinc-800 hover:border-red-500/40 text-xs font-bold text-zinc-400 hover:text-red-400 flex items-center gap-1.5 cursor-pointer transition-colors"
-                        title="Eliminar esta locación"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                        <span>Eliminar</span>
-                      </button>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
           </div>
-
-          {/* Botón general para confirmar y guardar todo */}
-          <button
-            type="button"
-            onClick={handleSaveAll}
-            className="w-full h-11 rounded-2xl bg-zinc-900 hover:bg-zinc-850 border border-zinc-700 text-white font-extrabold text-xs flex items-center justify-center gap-2 cursor-pointer transition-all active:scale-[0.99]"
-          >
-            <CheckCircle2 className="w-4 h-4 text-[#F39200]" />
-            <span>Confirmar y Guardar Todos los Puntos</span>
-          </button>
         </div>
       )}
     </div>
