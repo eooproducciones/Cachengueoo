@@ -33,11 +33,11 @@ export function formatTimeAgo(isoString?: string): string {
 }
 
 /**
- * Formatea el tiempo restante para que se borre una notita o historia (duración de 1 hora)
- * Retorna "45 min", "12 min", "58 seg", etc.
+ * Formatea el tiempo restante para que se borre una notita o historia (duración de 6 horas)
+ * Retorna "5h 45m", "45 min", "12 min", "58 seg", etc.
  */
-export function formatTimeRemaining(isoStringCreatedAt?: string, durationMinutes: number = 60): string {
-  if (!isoStringCreatedAt) return '59 min';
+export function formatTimeRemaining(isoStringCreatedAt?: string, durationMinutes: number = 360): string {
+  if (!isoStringCreatedAt) return '6 h';
 
   const createdTime = new Date(isoStringCreatedAt).getTime();
   const expireTime = createdTime + durationMinutes * 60 * 1000;

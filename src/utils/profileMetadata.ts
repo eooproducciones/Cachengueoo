@@ -11,6 +11,7 @@ export function packProfileInterests(profile: {
   musicPreferences?: string[];
   zodiacSign?: string;
   photos?: string[];
+  nightNote?: { text: string; createdAt: string; hearts?: number };
 }): string[] {
   const result: string[] = [];
 
@@ -43,7 +44,15 @@ export function packProfileInterests(profile: {
     if (profile.photos[2]) result.push(`photo3:${profile.photos[2]}`);
   }
 
-  // 5. Intereses estándar
+  // 5. Notita activa de la noche (duración máxima de 6 horas)
+  if (profile.nightNote && profile.nightNote.text) {
+    const createdMs = new Date(profile.nightNote.createdAt || new Date()).getTime();
+    if (Date.now() - createdMs <= 6 * 60 * 60 * 1000) {
+      result.push(`note:${encodeURIComponent(JSON.stringify(profile.nightNote))}`);
+    }
+  }
+
+  // 6. Intereses estándar
   if (Array.isArray(profile.interests)) {
     profile.interests.forEach((item) => {
       if (
@@ -53,6 +62,7 @@ export function packProfileInterests(profile: {
         !item.startsWith('drink:') &&
         !item.startsWith('photo2:') &&
         !item.startsWith('photo3:') &&
+        !item.startsWith('note:') &&
         !result.includes(item)
       ) {
         result.push(item);
@@ -72,12 +82,14 @@ export function unpackProfileInterests(interestsList?: string[] | null): {
   drinks: string[];
   extraPhotos: string[];
   plainInterests: string[];
+  nightNote?: { text: string; createdAt: string; hearts?: number };
 } {
   const musicPreferences: string[] = [];
   const drinks: string[] = [];
   const extraPhotos: string[] = [];
   const plainInterests: string[] = [];
   let zodiacSign: string | undefined = undefined;
+  let nightNote: { text: string; createdAt: string; hearts?: number } | undefined = undefined;
 
   if (Array.isArray(interestsList)) {
     for (const item of interestsList) {
@@ -92,6 +104,17 @@ export function unpackProfileInterests(interestsList?: string[] | null): {
         extraPhotos[0] = item.slice(7).trim();
       } else if (item.startsWith('photo3:')) {
         extraPhotos[1] = item.slice(7).trim();
+      } else if (item.startsWith('note:')) {
+        try {
+          const parsed = JSON.parse(decodeURIComponent(item.slice(5)));
+          if (parsed && parsed.text) {
+            const createdMs = new Date(parsed.createdAt || new Date()).getTime();
+            // Duración exacta de 6 horas
+            if (Date.now() - createdMs <= 6 * 60 * 60 * 1000) {
+              nightNote = parsed;
+            }
+          }
+        } catch {}
       } else {
         plainInterests.push(item);
       }
@@ -104,6 +127,7 @@ export function unpackProfileInterests(interestsList?: string[] | null): {
     drinks,
     extraPhotos: extraPhotos.filter(Boolean),
     plainInterests,
+    nightNote,
   };
 }
 
@@ -268,6 +292,7 @@ export function buildUserProfileFromSources(
     zodiacSign,
     musicPreferences,
     instagram: instagram && instagram.trim().length > 0 ? instagram.trim() : undefined,
+    nightNote: unpacked.nightNote || localUser?.nightNote,
     createdAt: profileRow?.created_at || meta.created_at || localUser?.createdAt || new Date().toISOString(),
     isAdmin,
     role: isAdmin ? 'admin' : 'user',

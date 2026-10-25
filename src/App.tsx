@@ -36,7 +36,9 @@ export default function App() {
   const [isPresenceModalOpen, setIsPresenceModalOpen] = useState<boolean>(false);
   const [isQrScannerOpen, setIsQrScannerOpen] = useState<boolean>(false);
   const [isAuthModalOpen, setIsAuthModalOpen] = useState<boolean>(false);
-  const [authModalMode, setAuthModalMode] = useState<'login' | 'register' | 'choice' | 'verify'>('choice');
+  const [authModalMode, setAuthModalMode] = useState<
+    'login' | 'register' | 'choice' | 'verify' | 'register_step_1'
+  >('choice');
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
   // Modal OUCH! No estas dentro de Cache
@@ -107,6 +109,28 @@ export default function App() {
     };
     window.addEventListener('hashchange', handleHash);
     return () => window.removeEventListener('hashchange', handleHash);
+  }, []);
+
+  // Escuchar evento para abrir wizard de configuración de Cache ID (tras registro con Google o si el perfil está incompleto)
+  useEffect(() => {
+    const handleOpenWizard = () => {
+      setAuthModalMode('register_step_1');
+      setIsAuthModalOpen(true);
+    };
+
+    window.addEventListener('cachengueoo_open_cache_id_wizard', handleOpenWizard);
+
+    const flowIntent =
+      sessionStorage.getItem('cachengueoo_flow_intent') ||
+      localStorage.getItem('cachengueoo_flow_intent');
+    if (flowIntent === 'configure_cache_id') {
+      setAuthModalMode('register_step_1');
+      setIsAuthModalOpen(true);
+    }
+
+    return () => {
+      window.removeEventListener('cachengueoo_open_cache_id_wizard', handleOpenWizard);
+    };
   }, []);
 
   const handleExitAdmin = () => {

@@ -253,7 +253,7 @@ export const NightCameraModal: React.FC<NightCameraModalProps> = ({
   // Publicar la historia automáticamente sin salir de instantáneas
   const publishStoryImmediately = (mediaUrl: string, mediaType: 'image' | 'video') => {
     const now = new Date();
-    const expires = new Date(now.getTime() + 60 * 60 * 1000); // 1 hora de duración
+    const expires = new Date(now.getTime() + 6 * 60 * 60 * 1000); // 6 horas de duración máxima como solicitado
 
     const newStory: NightStory = {
       id: `story_${currentUser.id}_${Date.now()}`,

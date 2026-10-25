@@ -14,8 +14,8 @@ export interface NightNoteRecord {
   hearts: number;
 }
 
-// Duración máxima de una instantánea o notita (12 horas = toda la noche y madrugada)
-const NIGHT_MAX_AGE_MS = 12 * 60 * 60 * 1000;
+// Duración máxima de una instantánea o notita (6 horas exactas como solicitado)
+const NIGHT_MAX_AGE_MS = 6 * 60 * 60 * 1000;
 
 export const nightNotesService = {
   // ==========================================
@@ -28,7 +28,7 @@ export const nightNotesService = {
       if (stored) {
         const parsed: NightStory[] = JSON.parse(stored);
         const now = Date.now();
-        // Filtrar automáticamente las que ya expiraron o pasaron de la noche
+        // Filtrar automáticamente las que ya expiraron (duración máxima 6 horas)
         const valid = parsed.filter((s) => {
           const createdMs = new Date(s.createdAt).getTime();
           if (now - createdMs > NIGHT_MAX_AGE_MS) return false;
@@ -54,12 +54,12 @@ export const nightNotesService = {
     try {
       const cutoff = new Date(Date.now() - NIGHT_MAX_AGE_MS).toISOString();
 
-      // 1. Borrar de la base de datos historias antiguas pasada la noche
+      // 1. Borrar de la base de datos historias antiguas que superaron las 6 horas
       Promise.resolve(
         supabase.from('night_stories').delete().lt('created_at', cutoff)
       ).catch(() => {});
 
-      // 2. Traer historias vigentes
+      // 2. Traer historias vigentes de las últimas 6 horas
       const { data, error } = await supabase
         .from('night_stories')
         .select('*')
@@ -75,7 +75,7 @@ export const nightNotesService = {
           mediaUrl: d.media_url,
           mediaType: d.media_type || 'image',
           createdAt: d.created_at,
-          expiresAt: d.expires_at || new Date(new Date(d.created_at).getTime() + 60 * 60 * 1000).toISOString(),
+          expiresAt: d.expires_at || new Date(new Date(d.created_at).getTime() + NIGHT_MAX_AGE_MS).toISOString(),
           isLiveInstant: true,
           hearts: Number(d.hearts) || 0,
         }));
@@ -153,16 +153,17 @@ export const nightNotesService = {
   },
 
   // ==========================================
-  // NOTITAS DE LA NOCHE
+  // NOTITAS DE LA NOCHE (6 HORAS MÁXIMO)
   // ==========================================
 
   async fetchNotes(): Promise<NightNoteRecord[]> {
     const supabase = getSupabaseClient();
     const cutoff = new Date(Date.now() - NIGHT_MAX_AGE_MS).toISOString();
+    const notesMap = new Map<string, NightNoteRecord>();
 
     if (supabase) {
+      // 1. Obtener desde la tabla night_notes si existe
       try {
-        // Borrar de la base de datos las notitas que ya pasaron de la noche (> 12 horas)
         Promise.resolve(
           supabase.from('night_notes').delete().lt('created_at', cutoff)
         ).catch(() => {});
@@ -174,22 +175,65 @@ export const nightNotesService = {
           .order('created_at', { ascending: false });
 
         if (!error && Array.isArray(data)) {
-          return data.map((d: any) => ({
-            id: String(d.id),
-            userId: d.user_id,
-            userName: d.user_name || 'Cachenguero',
-            userAvatar: d.user_avatar || '',
-            text: d.text,
-            createdAt: d.created_at,
-            hearts: Number(d.hearts) || 0,
-          }));
+          data.forEach((d: any) => {
+            notesMap.set(d.user_id, {
+              id: String(d.id),
+              userId: d.user_id,
+              userName: d.user_name || 'Cachenguero',
+              userAvatar: d.user_avatar || '',
+              text: d.text,
+              createdAt: d.created_at,
+              hearts: Number(d.hearts) || 0,
+            });
+          });
         }
       } catch (e) {
-        console.warn('Error fetching night notes from Supabase:', e);
+        console.warn('Error fetching night_notes:', e);
+      }
+
+      // 2. Obtener también notitas activas sincronizadas en la tabla profiles
+      try {
+        const { data: profilesData } = await supabase
+          .from('profiles')
+          .select('id, full_name, nickname, avatar_url, interests');
+
+        if (Array.isArray(profilesData)) {
+          profilesData.forEach((p: any) => {
+            if (Array.isArray(p.interests)) {
+              for (const it of p.interests) {
+                if (typeof it === 'string' && it.startsWith('note:')) {
+                  try {
+                    const parsed = JSON.parse(decodeURIComponent(it.slice(5)));
+                    if (parsed && parsed.text) {
+                      const createdMs = new Date(parsed.createdAt || new Date()).getTime();
+                      if (Date.now() - createdMs <= NIGHT_MAX_AGE_MS) {
+                        if (!notesMap.has(p.id)) {
+                          notesMap.set(p.id, {
+                            id: `note_${p.id}`,
+                            userId: p.id,
+                            userName: p.nickname || p.full_name || 'Cachenguero',
+                            userAvatar: p.avatar_url || '',
+                            text: parsed.text,
+                            createdAt: parsed.createdAt,
+                            hearts: Number(parsed.hearts) || 0,
+                          });
+                        }
+                      }
+                    }
+                  } catch {}
+                }
+              }
+            }
+          });
+        }
+      } catch (e) {
+        console.warn('Error fetching profile notes:', e);
       }
     }
 
-    return [];
+    return Array.from(notesMap.values()).sort(
+      (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+    );
   },
 
   async publishNote(
@@ -199,33 +243,68 @@ export const nightNotesService = {
     text: string
   ): Promise<void> {
     const supabase = getSupabaseClient();
+    const cleanText = text.trim();
+    const nowIso = new Date().toISOString();
+
     if (supabase) {
+      // 1. Guardar en night_notes
       try {
-        // 1. Eliminar cualquier notita anterior del usuario para que solo tenga 1 activa
         await supabase.from('night_notes').delete().eq('user_id', userId);
 
-        // 2. Insertar la nueva notita
         const newRecord = {
           id: `note_${userId}`,
           user_id: userId,
           user_name: userName,
           user_avatar: userAvatar || '',
-          text: text.trim(),
+          text: cleanText,
           hearts: 0,
-          created_at: new Date().toISOString(),
+          created_at: nowIso,
         };
 
-        const { error: insertError } = await supabase.from('night_notes').insert(newRecord);
-        if (insertError) {
-          console.warn('Error inserting night note in Supabase:', insertError.message);
-        }
+        await supabase.from('night_notes').insert(newRecord);
       } catch (e) {
-        console.warn('Error saving note in Supabase:', e);
+        console.warn('Error saving note in night_notes table:', e);
       }
+
+      // 2. Sincronizar en profiles.interests para visibilidad 100% garantizada
+      try {
+        const { data: profileRow } = await supabase
+          .from('profiles')
+          .select('interests')
+          .eq('id', userId)
+          .maybeSingle();
+
+        const currentInterests: string[] = Array.isArray(profileRow?.interests)
+          ? profileRow.interests.filter((i: string) => !i.startsWith('note:'))
+          : [];
+
+        const noteEncoded = `note:${encodeURIComponent(
+          JSON.stringify({
+            text: cleanText,
+            createdAt: nowIso,
+            hearts: 0,
+          })
+        )}`;
+        currentInterests.push(noteEncoded);
+
+        await supabase
+          .from('profiles')
+          .update({
+            interests: currentInterests,
+            updated_at: nowIso,
+          })
+          .eq('id', userId);
+      } catch (e) {
+        console.warn('Error syncing note to profile in Supabase:', e);
+      }
+    }
+
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('cachengueoo_notes_updated'));
     }
   },
 
-  async heartNote(noteId: string, count: number): Promise<void> {
+  async heartNote(noteId: string, count: number, userId?: string): Promise<void> {
     const supabase = getSupabaseClient();
     if (supabase) {
       try {
@@ -233,8 +312,38 @@ export const nightNotesService = {
           .from('night_notes')
           .update({ hearts: count })
           .eq('id', noteId);
-      } catch (e) {
-        console.warn('Error updating note hearts in Supabase:', e);
+      } catch {}
+
+      // Sincronizar también en profiles si tenemos el userId
+      const targetUserId = userId || (noteId.startsWith('note_') ? noteId.replace('note_', '') : null);
+      if (targetUserId) {
+        try {
+          const { data: profileRow } = await supabase
+            .from('profiles')
+            .select('interests')
+            .eq('id', targetUserId)
+            .maybeSingle();
+
+          if (profileRow && Array.isArray(profileRow.interests)) {
+            const updatedInterests = profileRow.interests.map((it: string) => {
+              if (it.startsWith('note:')) {
+                try {
+                  const parsed = JSON.parse(decodeURIComponent(it.slice(5)));
+                  parsed.hearts = count;
+                  return `note:${encodeURIComponent(JSON.stringify(parsed))}`;
+                } catch {
+                  return it;
+                }
+              }
+              return it;
+            });
+
+            await supabase
+              .from('profiles')
+              .update({ interests: updatedInterests })
+              .eq('id', targetUserId);
+          }
+        } catch {}
       }
     }
   },
@@ -242,11 +351,38 @@ export const nightNotesService = {
   async deleteNote(userId: string): Promise<void> {
     const supabase = getSupabaseClient();
     if (supabase) {
+      // 1. Borrar de night_notes
       try {
         await supabase.from('night_notes').delete().eq('user_id', userId);
       } catch (e) {
         console.warn('Error deleting note in Supabase:', e);
       }
+
+      // 2. Borrar de profiles.interests
+      try {
+        const { data: profileRow } = await supabase
+          .from('profiles')
+          .select('interests')
+          .eq('id', userId)
+          .maybeSingle();
+
+        if (profileRow && Array.isArray(profileRow.interests)) {
+          const cleaned = profileRow.interests.filter((i: string) => !i.startsWith('note:'));
+          await supabase
+            .from('profiles')
+            .update({
+              interests: cleaned,
+              updated_at: new Date().toISOString(),
+            })
+            .eq('id', userId);
+        }
+      } catch (e) {
+        console.warn('Error deleting note from profile in Supabase:', e);
+      }
+    }
+
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('cachengueoo_notes_updated'));
     }
   },
 };

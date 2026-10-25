@@ -53,7 +53,7 @@ interface AuthModalProps {
   isOpen: boolean;
   onClose: () => void;
   onAuthSuccess: (user: UserProfile) => void;
-  initialMode?: 'login' | 'register' | 'choice' | 'verify';
+  initialMode?: 'login' | 'register' | 'choice' | 'verify' | 'register_step_1';
   isInsideVenue?: boolean;
   onCheckGps?: () => Promise<void>;
   onProceedToMatch?: () => void;
@@ -102,7 +102,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   const [regMusicPreferences, setRegMusicPreferences] = useState<string[]>([]);
   const [regDrinks, setRegDrinks] = useState<string[]>([]);
 
-  // Step 3: Fotos & Bio (inicialmente vacías; el usuario debe subir obligatoriamente su propia foto)
+  // Step 3: Fotos & Bio
   const [regPhotos, setRegPhotos] = useState<string[]>([]);
   const [regBio, setRegBio] = useState('');
 
@@ -115,7 +115,28 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       setSuccessNotice(null);
       setForgotSent(false);
 
-      if (initialMode === 'verify') {
+      const currentUser = authService.getCurrentUser();
+      const flowIntent =
+        sessionStorage.getItem('cachengueoo_flow_intent') ||
+        localStorage.getItem('cachengueoo_flow_intent');
+
+      if (initialMode === 'register_step_1' || flowIntent === 'configure_cache_id') {
+        setCurrentView('register_step_1');
+        setAuthProvider('gmail');
+        if (currentUser) {
+          if (currentUser.email) setRegEmail(currentUser.email);
+          if (currentUser.fullName) setRegFullName(currentUser.fullName);
+          if (currentUser.nickname) setRegNickname(currentUser.nickname);
+          if (currentUser.birthDate && currentUser.birthDate !== '2001-01-01') {
+            setRegBirthDate(currentUser.birthDate);
+          }
+          if (currentUser.gender) setRegGender(currentUser.gender);
+          if (currentUser.instagram) setRegInstagram(currentUser.instagram);
+          if (currentUser.avatarUrl && regPhotos.length === 0) {
+            setRegPhotos([currentUser.avatarUrl]);
+          }
+        }
+      } else if (initialMode === 'verify') {
         setCurrentView('verify_venue');
       } else if (initialMode === 'login') {
         setCurrentView('login');
@@ -126,6 +147,20 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       }
     }
   }, [isOpen, initialMode]);
+
+  // Sincronizar datos si el usuario de Supabase/Google llega con el modal ya abierto en el wizard
+  useEffect(() => {
+    if (isOpen && currentView === 'register_step_1') {
+      const u = authService.getCurrentUser();
+      if (u) {
+        if (u.email && !regEmail) setRegEmail(u.email);
+        if (u.fullName && !regFullName) setRegFullName(u.fullName);
+        if (u.nickname && !regNickname) setRegNickname(u.nickname);
+        if (u.birthDate && u.birthDate !== '2001-01-01' && !regBirthDate) setRegBirthDate(u.birthDate);
+        if (u.avatarUrl && regPhotos.length === 0) setRegPhotos([u.avatarUrl]);
+      }
+    }
+  }, [isOpen, currentView, regEmail, regFullName, regNickname, regBirthDate, regPhotos.length]);
 
   if (!isOpen) return null;
 
@@ -201,6 +236,9 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     setIsSubmitting(true);
     setErrorMessage(null);
     try {
+      // Registrar la intención de configurar el Cache ID al retornar
+      sessionStorage.setItem('cachengueoo_flow_intent', 'configure_cache_id');
+      localStorage.setItem('cachengueoo_flow_intent', 'configure_cache_id');
       const res = await authService.signInWithGoogle();
       if (!res.success) {
         setErrorMessage(res.message || 'Error al conectar con Google.');
@@ -243,14 +281,17 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       return;
     }
 
-    if (regPassword.length < 4) {
-      setErrorMessage('La contraseña debe tener al menos 4 caracteres.');
-      return;
-    }
+    // Los usuarios autenticados con Google no requieren contraseña manual
+    if (authProvider !== 'gmail') {
+      if (regPassword.length < 4) {
+        setErrorMessage('La contraseña debe tener al menos 4 caracteres.');
+        return;
+      }
 
-    if (!passwordsMatch) {
-      setErrorMessage('Las contraseñas no coinciden. Por favor corroboralas.');
-      return;
+      if (!passwordsMatch) {
+        setErrorMessage('Las contraseñas no coinciden. Por favor corroboralas.');
+        return;
+      }
     }
 
     setCurrentView('register_step_2');
@@ -293,8 +334,11 @@ export const AuthModal: React.FC<AuthModalProps> = ({
 
     try {
       const chosenDrinks = regDrinks.length > 0 ? regDrinks : ['Fernet', 'Skyy'];
+      const currentUser = authService.getCurrentUser();
+      const currentId = currentUser?.id || `usr_cache_${Date.now()}`;
+
       const newCacheIdUser: UserProfile = {
-        id: `usr_cache_${Date.now()}`,
+        id: currentId,
         email: regEmail.trim(),
         fullName: regFullName.trim(),
         nickname: regNickname.trim(),
@@ -315,14 +359,27 @@ export const AuthModal: React.FC<AuthModalProps> = ({
             ? regInstagram.trim()
             : `@${regInstagram.trim()}`
           : undefined,
-        createdAt: new Date().toISOString(),
+        createdAt: currentUser?.createdAt || new Date().toISOString(),
         authProvider,
       };
+
+      if (authProvider === 'gmail') {
+        const updatedUser = await authService.updateProfile(newCacheIdUser);
+        const userToUse = updatedUser || newCacheIdUser;
+        setRegisteredUser(userToUse);
+        onAuthSuccess(userToUse);
+        sessionStorage.removeItem('cachengueoo_flow_intent');
+        localStorage.removeItem('cachengueoo_flow_intent');
+        setCurrentView('register_success');
+        return;
+      }
 
       const regResult = await authService.registerUser(newCacheIdUser, regPassword);
       const userToUse = regResult.user || newCacheIdUser;
       setRegisteredUser(userToUse);
       onAuthSuccess(userToUse);
+      sessionStorage.removeItem('cachengueoo_flow_intent');
+      localStorage.removeItem('cachengueoo_flow_intent');
 
       // La creación y edición del Cache ID es 100% independiente de estar en la fiesta
       setCurrentView('register_success');
@@ -698,96 +755,118 @@ export const AuthModal: React.FC<AuthModalProps> = ({
               {/* Mail */}
               <div>
                 <label className="text-zinc-300 block mb-1 font-bold">
-                  Mail <span className="text-red-400">*</span>
+                  Mail {authProvider === 'gmail' ? '(Vinculado a Google)' : <span className="text-red-400">*</span>}
                 </label>
                 <div className="relative">
                   <Mail className="w-4 h-4 text-zinc-500 absolute left-3 top-3 pointer-events-none" />
                   <input
                     type="email"
                     required
+                    readOnly={authProvider === 'gmail'}
                     placeholder=""
                     value={regEmail}
                     onChange={(e) => setRegEmail(e.target.value)}
-                    className="w-full h-10 pl-9 pr-3 rounded-xl bg-zinc-900 border border-zinc-800 text-white font-medium focus:outline-none focus:border-[#F39200]"
+                    className={`w-full h-10 pl-9 pr-3 rounded-xl border text-white font-medium focus:outline-none ${
+                      authProvider === 'gmail'
+                        ? 'bg-zinc-900/60 border-zinc-800 text-zinc-300 cursor-not-allowed'
+                        : 'bg-zinc-900 border-zinc-800 focus:border-[#F39200]'
+                    }`}
                   />
                 </div>
               </div>
 
-              {/* Contraseña & Repetir Contraseña */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                {/* Contraseña */}
-                <div>
-                  <label className="text-zinc-300 block mb-1 font-bold">
-                    Contraseña <span className="text-red-400">*</span>
-                  </label>
-                  <div className="relative">
-                    <Lock className="w-4 h-4 text-zinc-500 absolute left-3 top-3 pointer-events-none" />
-                    <input
-                      type={showPassword ? 'text' : 'password'}
-                      required
-                      placeholder=""
-                      value={regPassword}
-                      onChange={(e) => setRegPassword(e.target.value)}
-                      className="w-full h-10 pl-9 pr-9 rounded-xl bg-zinc-900 border border-zinc-800 text-white font-medium focus:outline-none focus:border-[#F39200]"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setShowPassword(!showPassword)}
-                      className="absolute right-3 top-3 text-zinc-500 hover:text-zinc-300"
-                    >
-                      {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                    </button>
+              {/* Contraseña & Repetir Contraseña (Omitido para Google) */}
+              {authProvider === 'gmail' ? (
+                <div className="p-3.5 rounded-2xl bg-zinc-900/80 border border-emerald-500/30 flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className="w-8 h-8 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center">
+                      <ShieldCheck className="w-4 h-4 text-emerald-400" />
+                    </div>
+                    <div>
+                      <p className="text-xs font-bold text-white">Acceso verificado con Google</p>
+                      <p className="text-[11px] text-zinc-400">Tu cuenta está protegida con tu sesión de Gmail</p>
+                    </div>
                   </div>
+                  <span className="text-[10px] font-bold text-emerald-400 bg-emerald-500/10 px-2 py-1 rounded-lg border border-emerald-500/20">
+                    Verificado
+                  </span>
                 </div>
-
-                {/* Repetir Contraseña con Check de corroboración */}
-                <div>
-                  <div className="flex items-center justify-between mb-1">
-                    <label className="text-zinc-300 font-bold">
-                      Repetir contraseña <span className="text-red-400">*</span>
+              ) : (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  {/* Contraseña */}
+                  <div>
+                    <label className="text-zinc-300 block mb-1 font-bold">
+                      Contraseña <span className="text-red-400">*</span>
                     </label>
-                    {regRepeatPassword.length > 0 && (
-                      <span
-                        className={`text-[10px] font-bold flex items-center gap-0.5 ${
-                          passwordsMatch ? 'text-emerald-400' : 'text-red-400'
-                        }`}
+                    <div className="relative">
+                      <Lock className="w-4 h-4 text-zinc-500 absolute left-3 top-3 pointer-events-none" />
+                      <input
+                        type={showPassword ? 'text' : 'password'}
+                        required
+                        placeholder=""
+                        value={regPassword}
+                        onChange={(e) => setRegPassword(e.target.value)}
+                        className="w-full h-10 pl-9 pr-9 rounded-xl bg-zinc-900 border border-zinc-800 text-white font-medium focus:outline-none focus:border-[#F39200]"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowPassword(!showPassword)}
+                        className="absolute right-3 top-3 text-zinc-500 hover:text-zinc-300"
                       >
-                        {passwordsMatch ? (
-                          <>
-                            <Check className="w-3 h-3 stroke-[3]" /> Coinciden
-                          </>
-                        ) : (
-                          'No coinciden'
-                        )}
-                      </span>
-                    )}
+                        {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                      </button>
+                    </div>
                   </div>
-                  <div className="relative">
-                    <Lock className="w-4 h-4 text-zinc-500 absolute left-3 top-3 pointer-events-none" />
-                    <input
-                      type={showRepeatPassword ? 'text' : 'password'}
-                      required
-                      placeholder=""
-                      value={regRepeatPassword}
-                      onChange={(e) => setRegRepeatPassword(e.target.value)}
-                      className={`w-full h-10 pl-9 pr-9 rounded-xl bg-zinc-900 border text-white font-medium focus:outline-none ${
-                        regRepeatPassword.length > 0
-                          ? passwordsMatch
-                            ? 'border-emerald-500/60 focus:border-emerald-500 ring-1 ring-emerald-500/20'
-                            : 'border-red-500/60 focus:border-red-500'
-                          : 'border-zinc-800 focus:border-[#F39200]'
-                      }`}
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setShowRepeatPassword(!showRepeatPassword)}
-                      className="absolute right-3 top-3 text-zinc-500 hover:text-zinc-300"
-                    >
-                      {showRepeatPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                    </button>
+
+                  {/* Repetir Contraseña con Check de corroboración */}
+                  <div>
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="text-zinc-300 font-bold">
+                        Repetir contraseña <span className="text-red-400">*</span>
+                      </label>
+                      {regRepeatPassword.length > 0 && (
+                        <span
+                          className={`text-[10px] font-bold flex items-center gap-0.5 ${
+                            passwordsMatch ? 'text-emerald-400' : 'text-red-400'
+                          }`}
+                        >
+                          {passwordsMatch ? (
+                            <>
+                              <Check className="w-3 h-3 stroke-[3]" /> Coinciden
+                            </>
+                          ) : (
+                            'No coinciden'
+                          )}
+                        </span>
+                      )}
+                    </div>
+                    <div className="relative">
+                      <Lock className="w-4 h-4 text-zinc-500 absolute left-3 top-3 pointer-events-none" />
+                      <input
+                        type={showRepeatPassword ? 'text' : 'password'}
+                        required
+                        placeholder=""
+                        value={regRepeatPassword}
+                        onChange={(e) => setRegRepeatPassword(e.target.value)}
+                        className={`w-full h-10 pl-9 pr-9 rounded-xl bg-zinc-900 border text-white font-medium focus:outline-none ${
+                          regRepeatPassword.length > 0
+                            ? passwordsMatch
+                              ? 'border-emerald-500/60 focus:border-emerald-500 ring-1 ring-emerald-500/20'
+                              : 'border-red-500/60 focus:border-red-500'
+                            : 'border-zinc-800 focus:border-[#F39200]'
+                        }`}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowRepeatPassword(!showRepeatPassword)}
+                        className="absolute right-3 top-3 text-zinc-500 hover:text-zinc-300"
+                      >
+                        {showRepeatPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                      </button>
+                    </div>
                   </div>
                 </div>
-              </div>
+              )}
             </div>
 
             {/* Botón Siguiente Paso */}

@@ -119,6 +119,7 @@ export const matchService = {
               lastPresenceCheck: row.updated_at || new Date().toISOString(),
               instagram: row.instagram || undefined,
               gender: row.gender || undefined,
+              nightNote: unpacked.nightNote,
             });
           });
         }
@@ -182,6 +183,7 @@ export const matchService = {
               lastPresenceCheck: new Date().toISOString(),
               instagram: u.instagram,
               gender: u.gender,
+              nightNote: u.nightNote,
             });
           }
         }

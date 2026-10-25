@@ -64,6 +64,22 @@ export function useAuth() {
           localStorage.setItem('cachengueoo_current_user', JSON.stringify(mergedUser));
           sessionStorage.setItem('cachengueoo_current_user', JSON.stringify(mergedUser));
           notifyAuthChange();
+
+          // Si el usuario ingresó por Google o su Cache ID está pendiente de configuración, abrir el wizard en el Paso 1
+          if (!mergedUser.isAdmin && !mergedUser.email?.toLowerCase().includes('admin')) {
+            const flowIntent =
+              sessionStorage.getItem('cachengueoo_flow_intent') ||
+              localStorage.getItem('cachengueoo_flow_intent');
+            const isCacheIdIncomplete =
+              !mergedUser.bio ||
+              mergedUser.birthDate === '2001-01-01' ||
+              !mergedUser.drinks ||
+              mergedUser.drinks.length === 0;
+
+            if (flowIntent === 'configure_cache_id' || isCacheIdIncomplete) {
+              window.dispatchEvent(new CustomEvent('cachengueoo_open_cache_id_wizard'));
+            }
+          }
         } catch (err) {
           console.warn('Error fetching or creating Supabase profile in useAuth:', err);
         }
