@@ -10,6 +10,9 @@ const DISMISSED_STORAGE_KEY = 'cachengueoo_dismissed_profiles';
 
 const INITIAL_MESSAGES: Record<string, ChatMessage[]> = {};
 
+export const isValidUuid = (id?: string | null): boolean =>
+  typeof id === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
+
 export const matchService = {
   getDismissedProfileIds(currentUserId?: string): string[] {
     try {
@@ -246,7 +249,7 @@ export const matchService = {
     fromUserId: string,
     targetProfile: MatchProfile,
     action: 'like' | 'pass' | 'superlike',
-    eventId: string
+    eventId?: string
   ): Promise<{ isMatch: boolean; newMatch?: MatchPair }> {
     this.addDismissedProfileId(targetProfile.userId, fromUserId);
 
@@ -255,26 +258,31 @@ export const matchService = {
       return { isMatch: false };
     }
 
+    const safeEventId = eventId && isValidUuid(eventId) ? eventId : null;
+
     // 1. Guardar el like en caché local
     const likes: LikeAction[] = JSON.parse(localStorage.getItem(LIKES_STORAGE_KEY) || '[]');
     likes.push({
       id: `like_${Date.now()}`,
       fromUserId,
       toUserId: targetProfile.userId,
-      eventId,
+      eventId: safeEventId || 'evt_tonight',
       createdAt: new Date().toISOString(),
     });
     localStorage.setItem(LIKES_STORAGE_KEY, JSON.stringify(likes));
 
-    // 2. Registrar like en base de datos Supabase
+    // 2. Registrar like en base de datos Supabase (con UUIDs válidos)
     const client = getSupabaseClient();
-    if (client) {
+    if (client && isValidUuid(fromUserId) && isValidUuid(targetProfile.userId)) {
       try {
-        await client.from('likes').insert({
+        const { error: insertErr } = await client.from('likes').insert({
           from_user_id: fromUserId,
           to_user_id: targetProfile.userId,
-          event_id: eventId,
+          event_id: safeEventId,
         });
+        if (insertErr && !insertErr.message.includes('duplicate')) {
+          console.warn('Advertencia al insertar like en Supabase:', insertErr.message);
+        }
       } catch (e) {
         console.warn('Error al insertar like en Supabase:', e);
       }
@@ -283,19 +291,21 @@ export const matchService = {
     // 3. Verificar si el otro usuario ya le había dado corazón a fromUserId (COINCIDENCIA RECÍPROCA)
     let hasReciprocalLike = false;
 
-    if (client) {
+    if (client && isValidUuid(fromUserId) && isValidUuid(targetProfile.userId)) {
       try {
-        const { data } = await client
+        const { data, error } = await client
           .from('likes')
           .select('id')
           .eq('from_user_id', targetProfile.userId)
           .eq('to_user_id', fromUserId)
           .limit(1);
 
-        if (data && data.length > 0) {
+        if (!error && data && data.length > 0) {
           hasReciprocalLike = true;
         }
-      } catch {}
+      } catch (e) {
+        console.warn('Error verificando like recíproco en Supabase:', e);
+      }
     }
 
     if (!hasReciprocalLike) {
@@ -307,21 +317,55 @@ export const matchService = {
     // 4. ÚNICAMENTE SI AMBOS SE DIERON CORAZÓN MUTUAMENTE SE GENERA EL MATCH
     if (hasReciprocalLike) {
       const pairKey = [fromUserId, targetProfile.userId].sort().join('_');
-      const deterministicMatchId = `match_${pairKey}`;
+      let finalMatchId = `match_${pairKey}`;
+
+      if (client && isValidUuid(fromUserId) && isValidUuid(targetProfile.userId)) {
+        try {
+          // Verificar si el match ya fue registrado previamente en Supabase
+          const { data: existingDbMatch } = await client
+            .from('matches')
+            .select('id')
+            .or(`and(user_a_id.eq.${fromUserId},user_b_id.eq.${targetProfile.userId}),and(user_a_id.eq.${targetProfile.userId},user_b_id.eq.${fromUserId})`)
+            .maybeSingle();
+
+          if (existingDbMatch?.id) {
+            finalMatchId = existingDbMatch.id;
+          } else {
+            const { data: newDbMatch, error: matchErr } = await client
+              .from('matches')
+              .insert({
+                user_a_id: fromUserId,
+                user_b_id: targetProfile.userId,
+                event_id: safeEventId,
+              })
+              .select('id')
+              .maybeSingle();
+
+            if (!matchErr && newDbMatch?.id) {
+              finalMatchId = newDbMatch.id;
+            }
+          }
+        } catch (e) {
+          console.warn('Error al sincronizar match en Supabase:', e);
+        }
+      }
 
       const matches = this.getMatches();
       const existing = matches.find(
-        (m) => m.id === deterministicMatchId || m.userBId === targetProfile.userId
+        (m) =>
+          m.id === finalMatchId ||
+          (m.userAId === fromUserId && m.userBId === targetProfile.userId) ||
+          (m.userAId === targetProfile.userId && m.userBId === fromUserId)
       );
       if (existing) {
         return { isMatch: true, newMatch: existing };
       }
 
       const newMatch: MatchPair = {
-        id: deterministicMatchId,
+        id: finalMatchId,
         userAId: fromUserId,
         userBId: targetProfile.userId,
-        eventId,
+        eventId: safeEventId || 'evt_tonight',
         eventTitle: 'CACHENGUEOO NIGHT',
         matchedAt: new Date().toISOString(),
         lastMessageSnippet: '¡Hicieron Match!',
@@ -329,20 +373,8 @@ export const matchService = {
         partnerProfile: targetProfile,
       };
 
-      const updatedMatches = [newMatch, ...matches];
+      const updatedMatches = [newMatch, ...matches.filter((m) => m.id !== finalMatchId)];
       this.saveMatches(updatedMatches);
-
-      if (client) {
-        try {
-          await client.from('matches').insert({
-            id: deterministicMatchId,
-            user_a_id: fromUserId,
-            user_b_id: targetProfile.userId,
-            event_id: eventId,
-            last_message: '¡Hicieron Match!',
-          });
-        } catch {}
-      }
 
       return { isMatch: true, newMatch };
     }
@@ -474,7 +506,7 @@ export const matchService = {
           .from('matches')
           .select('*')
           .or(`user_a_id.eq.${currentUserId},user_b_id.eq.${currentUserId}`)
-          .order('created_at', { ascending: false });
+          .order('matched_at', { ascending: false });
 
         if (!error && Array.isArray(data) && data.length > 0) {
           const partnerIds = data.map((m: any) =>
@@ -520,8 +552,8 @@ export const matchService = {
               userBId: m.user_b_id,
               eventId: m.event_id || 'evt_01',
               eventTitle: 'CACHENGUEOO NIGHT',
-              matchedAt: m.created_at || new Date().toISOString(),
-              lastMessageSnippet: m.last_message || '¡Hicieron Match!',
+              matchedAt: m.matched_at || m.created_at || new Date().toISOString(),
+              lastMessageSnippet: '¡Hicieron Match!',
               lastMessageAt: 'Recién',
               partnerProfile,
             };

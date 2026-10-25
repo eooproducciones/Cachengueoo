@@ -24,6 +24,7 @@ import {
 import confetti from 'canvas-confetti';
 import { MatchPair, MatchProfile, UserProfile } from '../../types';
 import { matchService } from '../../services/matchService';
+import { eventService } from '../../services/eventService';
 import { DrinkPlusIcon } from '../common/DrinkPlusIcon';
 import { NightNotesView } from './NightNotesView';
 import { formatTimeAgo, formatTimeRemaining } from '../../utils/timeAgo';
@@ -127,18 +128,38 @@ export const MatchView: React.FC<MatchViewProps> = ({
     });
 
     // 2. Cargar personas que dieron corazón (Conectá) y Matches mutuos
+    let pollInterval: ReturnType<typeof setInterval> | null = null;
     if (currentUser?.id) {
       setLoadingConecta(true);
-      Promise.all([
-        matchService.fetchIncomingLikes(currentUser.id),
-        matchService.fetchUserMatches(currentUser.id),
-      ])
-        .then(([incoming, userMatches]) => {
-          setConectaProfiles(incoming);
-          setMatches(userMatches);
-        })
-        .finally(() => setLoadingConecta(false));
+      const refreshConectaAndMatches = () => {
+        Promise.all([
+          matchService.fetchIncomingLikes(currentUser.id),
+          matchService.fetchUserMatches(currentUser.id),
+        ])
+          .then(([incoming, userMatches]) => {
+            setConectaProfiles((prev) => {
+              const prevIds = prev.map((p) => p.userId).sort().join(',');
+              const nextIds = (incoming || []).map((p) => p.userId).sort().join(',');
+              return prevIds === nextIds ? prev : incoming;
+            });
+            setMatches((prev) => {
+              const prevIds = prev.map((m) => m.id).sort().join(',');
+              const nextIds = (userMatches || []).map((m) => m.id).sort().join(',');
+              return prevIds === nextIds ? prev : userMatches;
+            });
+          })
+          .catch((err) => console.warn('Error refrescando likes y matches:', err))
+          .finally(() => setLoadingConecta(false));
+      };
+
+      refreshConectaAndMatches();
+      // Sondeo reactivo cada 4 segundos para detectar likes dados por otros usuarios en tiempo real
+      pollInterval = setInterval(refreshConectaAndMatches, 4000);
     }
+
+    return () => {
+      if (pollInterval) clearInterval(pollInterval);
+    };
   }, [matchSubTab, currentUser?.id, currentUser?.preference]);
 
   // Al pasar a otro perfil, reiniciar a la primera foto y replegar la notita
@@ -190,11 +211,12 @@ export const MatchView: React.FC<MatchViewProps> = ({
 
     setSwipeDirection(action === 'pass' ? 'left' : 'right');
 
+    const activeEvt = eventService.getActiveTonightEvent();
     const result = await matchService.registerSwipe(
       currentUser.id,
       currentProfile,
       action,
-      'evt_tonight_01'
+      activeEvt?.id
     );
 
     setTimeout(() => {
@@ -236,11 +258,12 @@ export const MatchView: React.FC<MatchViewProps> = ({
 
   // Acciones desde el apartado Conectá
   const handleLikeFromConecta = async (target: MatchProfile) => {
+    const activeEvt = eventService.getActiveTonightEvent();
     const result = await matchService.registerSwipe(
       currentUser.id,
       target,
       'like',
-      'evt_tonight_01'
+      activeEvt?.id
     );
     setConectaProfiles((prev) => prev.filter((p) => p.userId !== target.userId));
     setInspectingConectaProfile(null);
