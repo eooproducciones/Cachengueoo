@@ -8,30 +8,81 @@ export function useAuth() {
   const [user, setUser] = useState<UserProfile | null>(() => authService.getCurrentUser());
 
   useEffect(() => {
-    // Sincronizar automáticamente el perfil real desde Supabase si hay sesión
+    // Sincronizar automáticamente el perfil real desde Supabase si hay sesión o si vuelve de Google OAuth
     const client = getSupabaseClient();
+    let authSubscription: { unsubscribe: () => void } | null = null;
+
     if (client) {
-      client.auth.getUser().then(({ data }) => {
-        if (data?.user) {
-          client
+      const handleUserSession = async (authUser: any) => {
+        if (!authUser) return;
+        try {
+          let { data: profileData } = await client
             .from('profiles')
             .select('*')
-            .eq('id', data.user.id)
-            .maybeSingle()
-            .then(
-              ({ data: profileData }) => {
-                const currentLocal = authService.getCurrentUser();
-                const mergedUser = buildUserProfileFromSources(data.user, profileData, currentLocal);
-                setUser(mergedUser);
-                localStorage.setItem('cachengueoo_current_user', JSON.stringify(mergedUser));
-                sessionStorage.setItem('cachengueoo_current_user', JSON.stringify(mergedUser));
-              },
-              (err: unknown) => {
-                console.warn('Error fetching Supabase profile in useAuth:', err);
-              }
-            );
+            .eq('id', authUser.id)
+            .maybeSingle();
+
+          // Si el usuario ingresó por Google y aún no tiene fila en profiles, crearla automáticamente
+          if (!profileData && authUser.email) {
+            const googleName =
+              authUser.user_metadata?.full_name ||
+              authUser.user_metadata?.name ||
+              authUser.email.split('@')[0];
+            const googleAvatar =
+              authUser.user_metadata?.avatar_url ||
+              authUser.user_metadata?.picture ||
+              '';
+
+            const newProfileRecord = {
+              id: authUser.id,
+              email: authUser.email,
+              full_name: googleName,
+              nickname: googleName.split(' ')[0] || googleName,
+              avatar_url: googleAvatar,
+              gender: 'hombre',
+              preference: 'todos',
+              birth_date: '2001-01-01',
+              age: 23,
+              bio: '',
+              drink_favorite: 'Fernet con Coca',
+              instagram: '',
+              interests: [],
+              updated_at: new Date().toISOString(),
+            };
+
+            try {
+              await client.from('profiles').upsert(newProfileRecord, { onConflict: 'id' });
+            } catch {
+              // Ignore initial profile creation error
+            }
+            profileData = newProfileRecord;
+          }
+
+          const currentLocal = authService.getCurrentUser();
+          const mergedUser = buildUserProfileFromSources(authUser, profileData, currentLocal);
+          setUser(mergedUser);
+          localStorage.setItem('cachengueoo_current_user', JSON.stringify(mergedUser));
+          sessionStorage.setItem('cachengueoo_current_user', JSON.stringify(mergedUser));
+          notifyAuthChange();
+        } catch (err) {
+          console.warn('Error fetching or creating Supabase profile in useAuth:', err);
+        }
+      };
+
+      // 1. Verificar sesión existente al cargar
+      client.auth.getUser().then(({ data }) => {
+        if (data?.user) {
+          handleUserSession(data.user);
         }
       });
+
+      // 2. Escuchar cambios de autenticación (ej. cuando vuelve del redirect de Google)
+      const { data: subData } = client.auth.onAuthStateChange((_event, session) => {
+        if (session?.user) {
+          handleUserSession(session.user);
+        }
+      });
+      authSubscription = subData.subscription;
     }
 
     const handleAuthChange = () => {
@@ -41,6 +92,9 @@ export function useAuth() {
     window.addEventListener('cachengueoo_auth_change', handleAuthChange);
     window.addEventListener('storage', handleAuthChange);
     return () => {
+      if (authSubscription) {
+        authSubscription.unsubscribe();
+      }
       window.removeEventListener('cachengueoo_auth_change', handleAuthChange);
       window.removeEventListener('storage', handleAuthChange);
     };

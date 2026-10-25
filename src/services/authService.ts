@@ -362,6 +362,35 @@ export const authService = {
     return { success: true, user: localUser };
   },
 
+  async signInWithGoogle(): Promise<{ success: boolean; message?: string }> {
+    const client = getSupabaseClient();
+    if (!client) {
+      return { success: false, message: 'No hay conexión activa con la base de datos de Supabase.' };
+    }
+    try {
+      const redirectUrl = typeof window !== 'undefined' ? window.location.origin : '';
+      const { error } = await client.auth.signInWithOAuth({
+        provider: 'google',
+        options: {
+          redirectTo: redirectUrl,
+          queryParams: {
+            access_type: 'offline',
+            prompt: 'select_account',
+          },
+        },
+      });
+      if (error) {
+        return { success: false, message: error.message };
+      }
+      return { success: true };
+    } catch (err: unknown) {
+      return {
+        success: false,
+        message: err instanceof Error ? err.message : 'Error al conectar con Google',
+      };
+    }
+  },
+
   async requestPasswordReset(email: string): Promise<{ success: boolean; message: string }> {
     const client = getSupabaseClient();
     if (client) {
