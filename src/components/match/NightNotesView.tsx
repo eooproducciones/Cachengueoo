@@ -38,60 +38,93 @@ export const NightNotesView: React.FC<NightNotesViewProps> = ({
   const [isCameraOpen, setIsCameraOpen] = useState(false);
   const [viewerStoryIndex, setViewerStoryIndex] = useState<number | null>(null);
 
-  // Sincronizar historias vigentes desde Supabase y limpiar las de noches pasadas
+  // Notitas de la noche sincronizadas directamente con la tabla night_notes de Supabase
+  const [liveNotes, setLiveNotes] = useState<import('../../services/nightNotesService').NightNoteRecord[]>([]);
+
+  // Sincronizar historias e historias vigentes desde Supabase
   React.useEffect(() => {
     nightNotesService.fetchStories().then((activeStories) => {
       if (Array.isArray(activeStories)) {
         setStories(activeStories);
       }
     });
+
+    const loadNotes = () => {
+      nightNotesService.fetchNotes().then((notes) => {
+        if (Array.isArray(notes)) {
+          setLiveNotes(notes);
+        }
+      });
+    };
+
+    loadNotes();
+    const interval = setInterval(loadNotes, 4000);
+    return () => clearInterval(interval);
   }, []);
 
-  // Estado local para corazones de las notitas de los perfiles (inicia en 0 reales)
-  const [profileNotesHearts, setProfileNotesHearts] = useState<Record<string, { count: number; userLiked: boolean }>>(() => {
-    const initial: Record<string, { count: number; userLiked: boolean }> = {};
-    profiles.forEach((p) => {
-      if (p.nightNote) {
-        initial[p.userId] = {
-          count: p.nightNote.hearts || 0,
-          userLiked: false,
-        };
-      }
-    });
-    return initial;
+  // Estado local para seguimiento de qué notitas les dio like este dispositivo
+  const [likedNoteIds, setLikedNoteIds] = useState<Set<string>>(() => {
+    try {
+      const saved = localStorage.getItem(`cachengueoo_liked_notes_${currentUser.id}`);
+      return saved ? new Set(JSON.parse(saved)) : new Set();
+    } catch {
+      return new Set();
+    }
   });
 
-  // Corazones reales acumulados hoy (comienza en 0, sin valores ficticios)
-  const [myCollectedHearts, setMyCollectedHearts] = useState<number>(() => {
-    try {
-      const stored = localStorage.getItem(`cachengueoo_user_hearts_${currentUser.id}`);
-      if (stored !== null) return Number(stored) || 0;
-    } catch (e) {
-      console.error(e);
-    }
-    return currentUser.nightNote?.hearts || 0;
-  });
+  // Notita activa del usuario actual
+  const myActiveNote = liveNotes.find((n) => n.userId === currentUser.id) || (
+    currentUser.nightNote ? {
+      id: `note_${currentUser.id}`,
+      userId: currentUser.id,
+      userName: currentUser.nickname || currentUser.fullName,
+      userAvatar: currentUser.avatarUrl,
+      text: currentUser.nightNote.text,
+      createdAt: currentUser.nightNote.createdAt,
+      hearts: currentUser.nightNote.hearts || 0,
+    } : null
+  );
+
+  // Corazones reales acumulados hoy: suma de corazones en mi notita + corazones en mis instantáneas
+  const myNoteHearts = myActiveNote ? (myActiveNote.hearts || 0) : 0;
+  const myStoriesHearts = stories
+    .filter((s) => s.userId === currentUser.id)
+    .reduce((sum, s) => sum + (s.hearts || 0), 0);
+  const myCollectedHearts = myNoteHearts + myStoriesHearts;
 
   // Manejador para publicar nueva notita
-  const handlePublishNote = (text = noteInput) => {
+  const handlePublishNote = async (text = noteInput) => {
     if (!text.trim()) return;
     const clean = text.trim();
+    const newRecord = {
+      id: `note_${currentUser.id}`,
+      userId: currentUser.id,
+      userName: currentUser.nickname || currentUser.fullName,
+      userAvatar: currentUser.avatarUrl,
+      text: clean,
+      createdAt: new Date().toISOString(),
+      hearts: 0,
+    };
+
+    setLiveNotes((prev) => [newRecord, ...prev.filter((n) => n.userId !== currentUser.id)]);
     onUpdateMyNote(clean);
-    nightNotesService.publishNote(
+    setNoteInput('');
+    setIsNoteModalOpen(false);
+
+    await nightNotesService.publishNote(
       currentUser.id,
       currentUser.nickname || currentUser.fullName,
       currentUser.avatarUrl,
       clean
     );
-    setNoteInput('');
-    setIsNoteModalOpen(false);
   };
 
   // Manejador para eliminar notita (se borra de la BD y del perfil)
-  const handleDeleteNote = () => {
+  const handleDeleteNote = async () => {
+    setLiveNotes((prev) => prev.filter((n) => n.userId !== currentUser.id));
     onUpdateMyNote('');
-    nightNotesService.deleteNote(currentUser.id);
     setNoteInput('');
+    await nightNotesService.deleteNote(currentUser.id);
   };
 
   // Publicar nueva historia instantánea
@@ -113,17 +146,6 @@ export const NightNotesView: React.FC<NightNotesViewProps> = ({
       prev.map((s) => {
         if (s.id === storyId) {
           const newHearts = (s.hearts || 0) + 1;
-          if (s.userId === currentUser.id) {
-            setMyCollectedHearts((c) => {
-              const next = c + 1;
-              try {
-                localStorage.setItem(`cachengueoo_user_hearts_${currentUser.id}`, String(next));
-              } catch (e) {
-                console.error(e);
-              }
-              return next;
-            });
-          }
           return { ...s, hearts: newHearts };
         }
         return s;
@@ -131,44 +153,32 @@ export const NightNotesView: React.FC<NightNotesViewProps> = ({
     );
   };
 
-  // Dejar corazón en la notita de otra persona
-  const handleHeartNote = (userId: string, e: React.MouseEvent) => {
-    e.stopPropagation(); // No disparar clic del box hacia el perfil
-    setProfileNotesHearts((prev) => {
-      const current = prev[userId] || { count: 0, userLiked: false };
-      const nextLiked = !current.userLiked;
-      const nextCount = nextLiked ? current.count + 1 : Math.max(0, current.count - 1);
-      
-      // Si el corazón es para el usuario actual
-      if (userId === currentUser.id) {
-        setMyCollectedHearts(nextCount);
-        try {
-          localStorage.setItem(`cachengueoo_user_hearts_${currentUser.id}`, String(nextCount));
-        } catch (err) {
-          console.error(err);
-        }
-      } else {
-        try {
-          const otherCurrent = Number(localStorage.getItem(`cachengueoo_user_hearts_${userId}`)) || 0;
-          const otherNext = nextLiked ? otherCurrent + 1 : Math.max(0, otherCurrent - 1);
-          localStorage.setItem(`cachengueoo_user_hearts_${userId}`, String(otherNext));
-        } catch (err) {
-          console.error(err);
-        }
-      }
+  // Dejar corazón en la notita de otra persona o en la propia
+  const handleHeartNote = async (noteItem: typeof liveNotes[0], e: React.MouseEvent) => {
+    e.stopPropagation();
+    const isLiked = likedNoteIds.has(noteItem.id);
+    const nextCount = isLiked ? Math.max(0, (noteItem.hearts || 0) - 1) : (noteItem.hearts || 0) + 1;
 
-      return {
-        ...prev,
-        [userId]: { count: nextCount, userLiked: nextLiked },
-      };
-    });
+    const nextLikedSet = new Set(likedNoteIds);
+    if (isLiked) {
+      nextLikedSet.delete(noteItem.id);
+    } else {
+      nextLikedSet.add(noteItem.id);
+    }
+    setLikedNoteIds(nextLikedSet);
+    try {
+      localStorage.setItem(`cachengueoo_liked_notes_${currentUser.id}`, JSON.stringify(Array.from(nextLikedSet)));
+    } catch {}
+
+    setLiveNotes((prev) =>
+      prev.map((n) => (n.id === noteItem.id ? { ...n, hearts: nextCount } : n))
+    );
+
+    await nightNotesService.heartNote(noteItem.id, nextCount);
   };
 
   // Historia activa del usuario actual
   const myActiveStory = stories.find((s) => s.userId === currentUser.id);
-
-  // Perfiles que tienen notita activa
-  const profilesWithNotes = profiles.filter((p) => Boolean(p.nightNote));
 
   // Calcular minutos restantes de una historia
   const getStoryMinutesRemaining = (expiresAt: string) => {
@@ -188,15 +198,15 @@ export const NightNotesView: React.FC<NightNotesViewProps> = ({
             {/* Burbuja de pensamiento de Instagram */}
             <div
               onClick={() => {
-                setNoteInput(currentUser.nightNote?.text || '');
+                setNoteInput(myActiveNote ? myActiveNote.text : '');
                 setIsNoteModalOpen(true);
               }}
               className="mb-1 cursor-pointer group active:scale-95 transition-transform"
-              title={currentUser.nightNote ? 'Ver tu notita' : 'Escribir tu notita'}
+              title={myActiveNote ? 'Ver tu notita' : 'Escribir tu notita'}
             >
               <div className="relative px-3 py-1.5 rounded-2xl bg-zinc-800/95 border border-zinc-700/80 text-center shadow-lg group-hover:border-[#F39200] transition-colors max-w-[96px]">
                 <p className="text-[11px] font-bold text-zinc-100 truncate">
-                  {currentUser.nightNote ? currentUser.nightNote.text : 'Tu notita'}
+                  {myActiveNote ? myActiveNote.text : 'Tu notita'}
                 </p>
                 {/* Rabito de la nube de pensamiento */}
                 <div className="absolute -bottom-1 left-1/2 -translate-x-1/2 w-2 h-2 rounded-full bg-zinc-800 border-r border-b border-zinc-700/80"></div>
@@ -307,7 +317,7 @@ export const NightNotesView: React.FC<NightNotesViewProps> = ({
           - Permite dejar un corazón en la notita
       */}
       <div className="flex-1 min-h-0 overflow-y-auto p-3.5 space-y-2.5">
-        {profilesWithNotes.length === 0 ? (
+        {liveNotes.length === 0 ? (
           <div className="py-12 px-4 text-center space-y-3">
             <MessageSquareQuote className="w-10 h-10 text-zinc-600 mx-auto" />
             <h4 className="text-sm font-bold text-white font-display">Todavía no hay notitas en la fiesta</h4>
@@ -316,68 +326,72 @@ export const NightNotesView: React.FC<NightNotesViewProps> = ({
             </p>
           </div>
         ) : (
-          profilesWithNotes.map((profile) => {
-            const note = profile.nightNote;
-          if (!note) return null;
+          liveNotes.map((note) => {
+            const matchedProfile = profiles.find((p) => p.userId === note.userId);
+            const isLiked = likedNoteIds.has(note.id);
+            const heartsCount = note.hearts || 0;
+            const timeLeft = formatTimeRemaining(note.createdAt);
 
-          const heartsInfo = profileNotesHearts[profile.userId] || {
-            count: note.hearts || 4,
-            userLiked: false,
-          };
-          const timeLeft = formatTimeRemaining(note.createdAt);
+            return (
+              <div
+                key={note.id}
+                onClick={() => {
+                  if (matchedProfile) {
+                    onSelectProfileForMatch(matchedProfile);
+                  }
+                }}
+                className={`p-3.5 rounded-2xl bg-[#121217] border border-zinc-800 hover:border-[#F39200]/60 active:scale-[0.99] transition-all shadow-md group ${
+                  matchedProfile ? 'cursor-pointer' : ''
+                }`}
+              >
+                {/* Encabezado: Nombre, Edad, Tiempo restante para borrarse y Botón Corazón */}
+                <div className="flex items-center justify-between mb-2">
+                  <div className="flex items-baseline gap-2">
+                    <h4 className="text-sm font-black text-white group-hover:text-[#F39200] font-display transition-colors">
+                      {note.userName}
+                    </h4>
+                    {matchedProfile && (
+                      <span className="text-xs text-zinc-400 font-light">{matchedProfile.age} años</span>
+                    )}
+                  </div>
 
-          return (
-            <div
-              key={profile.userId}
-              onClick={() => onSelectProfileForMatch(profile)}
-              className="p-3.5 rounded-2xl bg-[#121217] border border-zinc-800 hover:border-[#F39200]/60 active:scale-[0.99] cursor-pointer transition-all shadow-md group"
-            >
-              {/* Encabezado: Nombre, Edad, Tiempo restante para borrarse y Botón Corazón */}
-              <div className="flex items-center justify-between mb-2">
-                <div className="flex items-baseline gap-2">
-                  <h4 className="text-sm font-black text-white group-hover:text-[#F39200] font-display transition-colors">
-                    {profile.nickname || profile.fullName}
-                  </h4>
-                  <span className="text-xs text-zinc-400 font-light">{profile.age} años</span>
-                </div>
+                  <div className="flex items-center gap-2">
+                    {/* Tiempo exacto que le queda a la nota */}
+                    <span className="text-[10px] text-[#F39200] font-bold flex items-center gap-1 bg-[#F39200]/10 px-2 py-0.5 rounded-full border border-[#F39200]/25">
+                      <Clock className="w-3 h-3" />
+                      <span>Se borra en {timeLeft}</span>
+                    </span>
 
-                <div className="flex items-center gap-2">
-                  {/* Tiempo exacto que le queda a la nota */}
-                  <span className="text-[10px] text-[#F39200] font-bold flex items-center gap-1 bg-[#F39200]/10 px-2 py-0.5 rounded-full border border-[#F39200]/25">
-                    <Clock className="w-3 h-3" />
-                    <span>Se borra en {timeLeft}</span>
-                  </span>
-
-                  {/* Botón de Corazón en la notita */}
-                  <button
-                    type="button"
-                    onClick={(e) => handleHeartNote(profile.userId, e)}
-                    className={`flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-black transition-all cursor-pointer ${
-                      heartsInfo.userLiked
-                        ? 'bg-rose-500/20 text-rose-400 border border-rose-500/50 scale-105'
-                        : 'bg-zinc-800/80 text-zinc-400 hover:text-rose-400 hover:bg-zinc-800'
-                    }`}
-                    title="Dejar corazón en esta notita"
-                  >
-                    <Heart
-                      className={`w-3.5 h-3.5 ${
-                        heartsInfo.userLiked ? 'fill-rose-500 text-rose-500' : ''
+                    {/* Botón de Corazón en la notita */}
+                    <button
+                      type="button"
+                      onClick={(e) => handleHeartNote(note, e)}
+                      className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-black transition-all cursor-pointer ${
+                        isLiked
+                          ? 'bg-rose-500/20 text-rose-400 border border-rose-500/50 scale-105'
+                          : 'bg-zinc-800/80 text-zinc-400 hover:text-rose-400 hover:bg-zinc-800'
                       }`}
-                    />
-                    <span>{heartsInfo.count}</span>
-                  </button>
+                      title="Dejar corazón en esta notita"
+                    >
+                      <Heart
+                        className={`w-3.5 h-3.5 ${
+                          isLiked ? 'fill-rose-500 text-rose-500' : ''
+                        }`}
+                      />
+                      <span>{heartsCount}</span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* Box de la Notita (limpio, sin foto) */}
+                <div className="p-3 rounded-xl bg-zinc-900/90 border border-zinc-800/80 group-hover:border-zinc-700 transition-colors">
+                  <p className="text-xs sm:text-[13px] text-zinc-100 font-medium leading-relaxed">
+                    “{note.text}”
+                  </p>
                 </div>
               </div>
-
-              {/* Box de la Notita (limpio, sin foto) */}
-              <div className="p-3 rounded-xl bg-zinc-900/90 border border-zinc-800/80 group-hover:border-zinc-700 transition-colors">
-                <p className="text-xs sm:text-[13px] text-zinc-100 font-medium leading-relaxed">
-                  “{note.text}”
-                </p>
-              </div>
-            </div>
-          );
-        })
+            );
+          })
         )}
       </div>
 
@@ -392,7 +406,7 @@ export const NightNotesView: React.FC<NightNotesViewProps> = ({
               <div className="flex items-center gap-2">
                 <MessageSquareQuote className="w-4 h-4 text-[#F39200]" />
                 <h3 className="text-sm font-bold text-white font-display">
-                  {currentUser.nightNote ? 'Tu Notita Actual' : 'Nueva Notita'}
+                  {myActiveNote ? 'Tu Notita Actual' : 'Nueva Notita'}
                 </h3>
               </div>
               <button
@@ -404,7 +418,7 @@ export const NightNotesView: React.FC<NightNotesViewProps> = ({
               </button>
             </div>
 
-            {currentUser.nightNote ? (
+            {myActiveNote ? (
               /* Ya tiene notita activa: solo se puede ELIMINAR, sin edición */
               <div className="space-y-4">
                 <div className="p-3 rounded-2xl bg-zinc-900 border border-[#F39200]/60 space-y-1.5">
@@ -413,11 +427,11 @@ export const NightNotesView: React.FC<NightNotesViewProps> = ({
                       Activa en la fiesta
                     </span>
                     <span className="text-[10px] text-zinc-400">
-                      Se borra en {formatTimeRemaining(currentUser.nightNote.createdAt)}
+                      Se borra en {formatTimeRemaining(myActiveNote.createdAt)}
                     </span>
                   </div>
                   <p className="text-sm text-white font-semibold">
-                    “{currentUser.nightNote.text}”
+                    “{myActiveNote.text}”
                   </p>
                 </div>
 

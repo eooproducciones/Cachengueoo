@@ -162,7 +162,7 @@ export const nightNotesService = {
 
     if (supabase) {
       try {
-        // Borrar de la base de datos las notitas que ya pasaron de la noche
+        // Borrar de la base de datos las notitas que ya pasaron de la noche (> 12 horas)
         Promise.resolve(
           supabase.from('night_notes').delete().lt('created_at', cutoff)
         ).catch(() => {});
@@ -178,7 +178,7 @@ export const nightNotesService = {
             id: String(d.id),
             userId: d.user_id,
             userName: d.user_name || 'Cachenguero',
-            userAvatar: d.user_avatar,
+            userAvatar: d.user_avatar || '',
             text: d.text,
             createdAt: d.created_at,
             hearts: Number(d.hearts) || 0,
@@ -201,20 +201,40 @@ export const nightNotesService = {
     const supabase = getSupabaseClient();
     if (supabase) {
       try {
-        await supabase.from('night_notes').upsert(
-          {
-            id: `note_${userId}`,
-            user_id: userId,
-            user_name: userName,
-            user_avatar: userAvatar,
-            text: text.trim(),
-            created_at: new Date().toISOString(),
-            hearts: 0,
-          },
-          { onConflict: 'user_id' }
-        );
+        // 1. Eliminar cualquier notita anterior del usuario para que solo tenga 1 activa
+        await supabase.from('night_notes').delete().eq('user_id', userId);
+
+        // 2. Insertar la nueva notita
+        const newRecord = {
+          id: `note_${userId}`,
+          user_id: userId,
+          user_name: userName,
+          user_avatar: userAvatar || '',
+          text: text.trim(),
+          hearts: 0,
+          created_at: new Date().toISOString(),
+        };
+
+        const { error: insertError } = await supabase.from('night_notes').insert(newRecord);
+        if (insertError) {
+          console.warn('Error inserting night note in Supabase:', insertError.message);
+        }
       } catch (e) {
         console.warn('Error saving note in Supabase:', e);
+      }
+    }
+  },
+
+  async heartNote(noteId: string, count: number): Promise<void> {
+    const supabase = getSupabaseClient();
+    if (supabase) {
+      try {
+        await supabase
+          .from('night_notes')
+          .update({ hearts: count })
+          .eq('id', noteId);
+      } catch (e) {
+        console.warn('Error updating note hearts in Supabase:', e);
       }
     }
   },

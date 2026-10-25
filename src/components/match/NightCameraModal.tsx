@@ -19,6 +19,7 @@ interface NightCameraModalProps {
 // Mapear cache en memoria del stream de medios para no re-solicitar permisos ni disparar avisos
 let persistentStream: MediaStream | null = null;
 let persistentFacingMode: 'user' | 'environment' = 'user';
+let persistentAudioTrack: MediaStreamTrack | null = null;
 
 export const NightCameraModal: React.FC<NightCameraModalProps> = ({
   currentUser,
@@ -65,6 +66,25 @@ export const NightCameraModal: React.FC<NightCameraModalProps> = ({
   const recordingStartTimeRef = useRef<number | null>(null);
   const animFrameRef = useRef<number | null>(null);
 
+  // Limpiar completamente tracks de cámara y micrófono cuando el modal se cierra
+  useEffect(() => {
+    if (!isOpen) {
+      if (persistentStream) {
+        persistentStream.getTracks().forEach((track) => track.stop());
+        persistentStream = null;
+      }
+      if (persistentAudioTrack) {
+        persistentAudioTrack.stop();
+        persistentAudioTrack = null;
+      }
+      if (mediaStreamRef.current) {
+        mediaStreamRef.current.getTracks().forEach((track) => track.stop());
+        mediaStreamRef.current = null;
+      }
+      setStreamActive(false);
+    }
+  }, [isOpen]);
+
   // Iniciar cámara web real cuando se abre el modal
   useEffect(() => {
     if (!isOpen) {
@@ -98,28 +118,20 @@ export const NightCameraModal: React.FC<NightCameraModalProps> = ({
           }
         }
 
-        // Si el facingMode cambió o no hay stream previo, limpiar el anterior
+        // Si el facingMode cambió o se reinicia, detener ÚNICAMENTE las pistas de video previas.
+        // NUNCA detener persistentAudioTrack para evitar que el navegador vuelva a solicitar
+        // micrófono o muestre la notificación recurrente "acceso a cámara y micrófono permitidos".
         if (persistentStream) {
-          persistentStream.getTracks().forEach((track) => track.stop());
-          persistentStream = null;
+          persistentStream.getVideoTracks().forEach((track) => track.stop());
         }
         if (mediaStreamRef.current) {
-          mediaStreamRef.current.getTracks().forEach((track) => track.stop());
-          mediaStreamRef.current = null;
+          mediaStreamRef.current.getVideoTracks().forEach((track) => track.stop());
         }
 
         let stream: MediaStream | null = null;
 
-        // Intentar obtener el stream con video y audio
-        try {
-          stream = await navigator.mediaDevices.getUserMedia({
-            video: {
-              facingMode: { ideal: facingMode },
-            },
-            audio: true,
-          });
-        } catch {
-          // Si el audio no está disponible o fue cancelado, solicitar únicamente video
+        // Si ya contamos con un track de audio activo, solicitar ÚNICAMENTE video (audio: false)
+        if (persistentAudioTrack && persistentAudioTrack.readyState === 'live') {
           try {
             stream = await navigator.mediaDevices.getUserMedia({
               video: {
@@ -127,16 +139,49 @@ export const NightCameraModal: React.FC<NightCameraModalProps> = ({
               },
               audio: false,
             });
+            stream.addTrack(persistentAudioTrack);
           } catch {
             stream = await navigator.mediaDevices.getUserMedia({
               video: true,
               audio: false,
             });
+            if (persistentAudioTrack && persistentAudioTrack.readyState === 'live') {
+              stream.addTrack(persistentAudioTrack);
+            }
+          }
+        } else {
+          // Apertura inicial: solicitar video y audio una sola vez
+          try {
+            stream = await navigator.mediaDevices.getUserMedia({
+              video: {
+                facingMode: { ideal: facingMode },
+              },
+              audio: true,
+            });
+            const audioTrack = stream.getAudioTracks()[0];
+            if (audioTrack) {
+              persistentAudioTrack = audioTrack;
+            }
+          } catch {
+            // Si el audio no está disponible o fue cancelado, solicitar únicamente video
+            try {
+              stream = await navigator.mediaDevices.getUserMedia({
+                video: {
+                  facingMode: { ideal: facingMode },
+                },
+                audio: false,
+              });
+            } catch {
+              stream = await navigator.mediaDevices.getUserMedia({
+                video: true,
+                audio: false,
+              });
+            }
           }
         }
 
         if (!isMounted) {
-          stream?.getTracks().forEach((t) => t.stop());
+          stream?.getVideoTracks().forEach((t) => t.stop());
           return;
         }
 
@@ -476,8 +521,79 @@ export const NightCameraModal: React.FC<NightCameraModalProps> = ({
     e.target.value = '';
   };
 
-  const toggleFacingMode = () => {
-    setFacingMode((prev) => (prev === 'user' ? 'environment' : 'user'));
+  const toggleFacingMode = async () => {
+    const nextMode: 'user' | 'environment' = facingMode === 'user' ? 'environment' : 'user';
+
+    // 1. Intentar cambiar con applyConstraints si el track de video lo soporta (cambio instantáneo sin re-pedir stream)
+    const currentVideoTrack = mediaStreamRef.current?.getVideoTracks()[0];
+    if (currentVideoTrack && typeof currentVideoTrack.applyConstraints === 'function') {
+      try {
+        await currentVideoTrack.applyConstraints({
+          facingMode: { ideal: nextMode },
+        });
+        const activeSettings = currentVideoTrack.getSettings ? currentVideoTrack.getSettings() : null;
+        if (activeSettings && activeSettings.facingMode === nextMode) {
+          persistentFacingMode = nextMode;
+          setFacingMode(nextMode);
+          return;
+        }
+      } catch {
+        // Fallback al reemplazo suave de pista de video
+      }
+    }
+
+    // 2. Reemplazo de pista de video: solicitar ÚNICAMENTE video (audio: false) para no disparar nunca
+    // la notificación recurrente "acceso a cámara y micrófono permitidos" del navegador
+    try {
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        setFacingMode(nextMode);
+        return;
+      }
+
+      const newVideoStream = await navigator.mediaDevices.getUserMedia({
+        video: {
+          facingMode: { ideal: nextMode },
+        },
+        audio: false, // CRÍTICO: audio en false para no volver a evaluar permisos de micrófono
+      });
+
+      const newVideoTrack = newVideoStream.getVideoTracks()[0];
+      if (newVideoTrack) {
+        // Detener ÚNICAMENTE la pista de video vieja
+        if (currentVideoTrack) {
+          currentVideoTrack.stop();
+        }
+
+        const activeStream = mediaStreamRef.current || new MediaStream();
+        activeStream.getVideoTracks().forEach((t) => {
+          activeStream.removeTrack(t);
+          if (t !== newVideoTrack) t.stop();
+        });
+        activeStream.addTrack(newVideoTrack);
+
+        // Mantener la pista de audio ya concedida si existe y sigue viva
+        if (persistentAudioTrack && persistentAudioTrack.readyState === 'live') {
+          if (!activeStream.getAudioTracks().includes(persistentAudioTrack)) {
+            activeStream.addTrack(persistentAudioTrack);
+          }
+        }
+
+        mediaStreamRef.current = activeStream;
+        persistentStream = activeStream;
+        persistentFacingMode = nextMode;
+        setFacingMode(nextMode);
+
+        if (videoRef.current) {
+          videoRef.current.srcObject = activeStream;
+          videoRef.current.play().catch(() => {});
+        }
+        setStreamActive(true);
+      }
+    } catch (err) {
+      console.warn('Fallback al alternar cámara:', err);
+      // Fallback estándar en caso de error en el dispositivo
+      setFacingMode(nextMode);
+    }
   };
 
   // Cálculo del contorno circular SVG integrado en el mismo botón:
