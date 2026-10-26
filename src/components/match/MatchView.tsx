@@ -483,23 +483,19 @@ export const MatchView: React.FC<MatchViewProps> = ({
         {/* ===================== APARTADO 1: CONECTÁ ===================== */}
         {matchSection === 'conecta' && (
           <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
-            {/* Diferencial destacado: Se interesaron en vos y te dieron me gusta */}
+            {/* Diferencial destacado: Te dieron Me Gusta */}
             <div className="shrink-0 mb-3 p-3.5 rounded-2xl bg-gradient-to-r from-amber-500/15 via-rose-500/15 to-transparent border border-[#F39200]/40 shadow-lg relative overflow-hidden">
               <div className="flex flex-wrap items-center gap-2 mb-1.5">
-                <span className="px-2 py-0.5 rounded-full bg-[#F39200] text-black font-black text-[10px] tracking-wider uppercase flex items-center gap-1 shadow-sm">
-                  <Sparkles className="w-3 h-3 fill-black" />
-                  Se interesaron en vos
-                </span>
-                <span className="text-[11px] font-extrabold text-rose-400 flex items-center gap-1">
-                  <Heart className="w-3.5 h-3.5 fill-rose-500" />
+                <span className="px-2.5 py-0.5 rounded-full bg-rose-600 text-white font-black text-[10.5px] tracking-wider uppercase flex items-center gap-1.5 shadow-sm">
+                  <Heart className="w-3.5 h-3.5 fill-white" />
                   Te dieron Me Gusta
                 </span>
               </div>
               <h2 className="text-base font-black text-white font-display uppercase tracking-tight">
-                ¡Se fijaron en vos en la pista!
+                Se fijaron en vos
               </h2>
               <p className="text-[11px] text-zinc-300 leading-relaxed mt-0.5">
-                Estas personas vieron tu perfil en Cachengueoo y te dieron corazón ❤️. Mirá quiénes son, qué trago toman y si te gustan, tocalas para conectar. ¡Si les devolvés el Me Gusta hacen <strong>Match instantáneo</strong> para hablar ya mismo!
+                Si les devolvés el Me gusta hacen <strong>Match Instantáneo</strong> para hablar ya mismo.
               </p>
             </div>
 
@@ -534,10 +530,10 @@ export const MatchView: React.FC<MatchViewProps> = ({
                       key={item.userId}
                       className="rounded-2xl bg-[#121217] border border-zinc-800/90 overflow-hidden flex flex-col justify-between shadow-lg hover:border-[#F39200]/50 transition-all group relative"
                     >
-                      {/* Badge flotante destacando que le gustó tu perfil */}
-                      <div className="absolute top-2 left-2 z-10 flex items-center gap-1 px-2 py-0.5 rounded-full bg-rose-600/95 text-white font-black text-[9.5px] shadow-lg border border-rose-400/40 backdrop-blur-sm animate-pulse">
+                      {/* Badge flotante destacando que le interesa tu perfil */}
+                      <div className="absolute top-2 left-2 z-10 flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-rose-600/95 text-white font-black text-[10px] shadow-lg border border-rose-400/40 backdrop-blur-sm">
                         <Heart className="w-2.5 h-2.5 fill-white" />
-                        <span>¡Le gustaste!</span>
+                        <span>Le interesás</span>
                       </div>
 
                       <div className="relative aspect-[3/4] w-full bg-zinc-900 overflow-hidden">
@@ -547,16 +543,26 @@ export const MatchView: React.FC<MatchViewProps> = ({
                           className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
                           referrerPolicy="no-referrer"
                         />
-                        <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/20 to-transparent pointer-events-none" />
-                        <div className="absolute bottom-2 inset-x-2 pointer-events-none">
+                        <div className="absolute inset-0 bg-gradient-to-t from-black/95 via-black/30 to-transparent pointer-events-none" />
+                        <div className="absolute bottom-2 inset-x-2 pointer-events-none space-y-0.5">
                           <h4 className="text-sm font-black text-white font-display truncate drop-shadow">
                             {item.nickname}, {item.age}
                           </h4>
-                          {item.drinkFavorite && (
-                            <span className="text-[10px] text-amber-300 truncate block font-medium">
-                              🍸 {item.drinkFavorite}
-                            </span>
-                          )}
+                          {/* Signo y Gusto Musical en lugar del trago */}
+                          <div className="flex flex-wrap items-center gap-1 text-[9.5px]">
+                            {item.zodiacSign && (
+                              <span className="px-1.5 py-0.2 rounded-full bg-black/60 backdrop-blur-sm border border-amber-400/40 text-amber-300 font-bold flex items-center gap-0.5">
+                                <Sparkles className="w-2.5 h-2.5 text-amber-400" />
+                                {item.zodiacSign}
+                              </span>
+                            )}
+                            {item.musicPreferences && item.musicPreferences.length > 0 ? (
+                              <span className="px-1.5 py-0.2 rounded-full bg-black/60 backdrop-blur-sm border border-white/20 text-zinc-200 font-medium truncate max-w-[120px] flex items-center gap-0.5">
+                                <Music className="w-2.5 h-2.5 text-zinc-300 shrink-0" />
+                                <span className="truncate">{item.musicPreferences.join(', ')}</span>
+                              </span>
+                            ) : null}
+                          </div>
                         </div>
                       </div>
 
@@ -589,14 +595,14 @@ export const MatchView: React.FC<MatchViewProps> = ({
               <div className="flex items-center gap-1.5 mb-1">
                 <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping"></span>
                 <span className="text-[10px] font-black uppercase text-[#F39200] tracking-wider">
-                  Conexiones Mutuas en Cachengueoo
+                  Conexiones en Cachengueoo
                 </span>
               </div>
               <h2 className="text-base font-black text-white font-display uppercase tracking-tight">
                 Mis Match
               </h2>
               <p className="text-[11px] text-zinc-300 leading-relaxed mt-0.5">
-                ¡Ambos se gustaron! Hablen un ratito, tomen algo juntos o invítense un trago en la barra.
+                Hablen un ratito, tomen algo, pásenla lindo. Generen vínculos en Cachengueoo.
               </p>
             </div>
 
@@ -760,14 +766,14 @@ export const MatchView: React.FC<MatchViewProps> = ({
 
                 {/* Información y botones de interacción */}
                 <div className="relative z-20 p-4 pb-4 flex flex-col justify-end space-y-3 pointer-events-auto">
-                  {/* Banner destacado: Se interesaron en vos */}
+                  {/* Banner destacado: Te dieron Me Gusta */}
                   <div className="p-2.5 rounded-2xl bg-gradient-to-r from-rose-950/90 to-amber-950/85 border border-rose-500/50 text-center shadow-lg">
                     <p className="text-xs font-black text-rose-200 flex items-center justify-center gap-1.5">
                       <Heart className="w-3.5 h-3.5 fill-rose-500 text-rose-500 animate-pulse" />
-                      ¡{inspectingConectaProfile.nickname} se interesó en vos y te dio Me Gusta!
+                      ¡{inspectingConectaProfile.nickname} te dio Me Gusta!
                     </p>
                     <p className="text-[10px] text-zinc-300 mt-0.5">
-                      Tocá el botón verde abajo para hacer <strong>Match mutuo</strong> y empezar a chatear.
+                      Si le devolvés el Me gusta hacen <strong>Match Instantáneo</strong> para hablar ya mismo.
                     </p>
                   </div>
 
@@ -795,17 +801,44 @@ export const MatchView: React.FC<MatchViewProps> = ({
                     )}
                   </div>
 
-                  {/* Datos rápidos del perfil */}
-                  <div className="flex flex-wrap gap-1.5 text-[11px]">
-                    {inspectingConectaProfile.drinkFavorite && (
-                      <span className="px-2.5 py-1 rounded-lg bg-black/70 backdrop-blur-md border border-white/10 text-white font-medium flex items-center gap-1">
-                        🍸 {inspectingConectaProfile.drinkFavorite}
-                      </span>
-                    )}
+                  {/* Datos rápidos del perfil: Signo, Trago y Música que le gusta (idéntico a la pista de Match) */}
+                  <div className="flex flex-wrap items-center gap-1.5 text-xs text-zinc-200">
+                    {/* Signo */}
                     {inspectingConectaProfile.zodiacSign && (
-                      <span className="px-2.5 py-1 rounded-lg bg-black/70 backdrop-blur-md border border-white/10 text-amber-300 font-medium flex items-center gap-1">
-                        ✨ {inspectingConectaProfile.zodiacSign}
-                      </span>
+                      <div className="px-2 py-0.5 rounded-full bg-black/60 backdrop-blur-md border border-amber-400/40 flex items-center gap-1 text-amber-300 text-[10.5px] font-bold shadow-sm">
+                        <Sparkles className="w-3 h-3 text-amber-400" />
+                        <span>{inspectingConectaProfile.zodiacSign}</span>
+                      </div>
+                    )}
+
+                    {/* ¿Qué tomás? */}
+                    {inspectingConectaProfile.drinkFavorite && (
+                      <div className="px-2 py-0.5 rounded-full bg-black/60 backdrop-blur-md border border-[#F39200]/40 flex items-center gap-1 text-[#F39200] text-[10.5px] font-bold shadow-sm">
+                        <GlassWater className="w-3 h-3 text-[#F39200]" />
+                        <span>{inspectingConectaProfile.drinkFavorite}</span>
+                      </div>
+                    )}
+
+                    {/* ¿Qué música te gusta? */}
+                    {inspectingConectaProfile.musicPreferences && inspectingConectaProfile.musicPreferences.length > 0 ? (
+                      inspectingConectaProfile.musicPreferences.slice(0, 2).map((item, idx) => (
+                        <span
+                          key={idx}
+                          className="px-2 py-0.5 rounded-full bg-black/60 backdrop-blur-md border border-white/10 text-[10.5px] font-medium text-zinc-300 flex items-center gap-1"
+                        >
+                          <Music className="w-2.5 h-2.5 text-zinc-400" />
+                          <span>{item}</span>
+                        </span>
+                      ))
+                    ) : (
+                      inspectingConectaProfile.interests.slice(0, 2).map((item, idx) => (
+                        <span
+                          key={idx}
+                          className="px-2 py-0.5 rounded-full bg-black/60 backdrop-blur-md border border-white/10 text-[10.5px] font-medium text-zinc-300"
+                        >
+                          {item}
+                        </span>
+                      ))
                     )}
                   </div>
 
@@ -912,7 +945,7 @@ export const MatchView: React.FC<MatchViewProps> = ({
 
               <div className="space-y-1 text-center">
                 <p className="text-sm font-extrabold text-white font-display">
-                  Vos y {celebrationMatch.partnerProfile.nickname} se gustaron
+                  ¡Conectaste con {celebrationMatch.partnerProfile.nickname}!
                 </p>
                 {celebrationMatch.partnerProfile.drinkFavorite ? (
                   <p className="text-[11px] text-zinc-300">

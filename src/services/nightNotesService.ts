@@ -1,5 +1,16 @@
 import { NightStory } from '../types';
 import { getSupabaseClient } from './supabaseClient';
+import { db } from './firebaseClient';
+import {
+  collection,
+  doc,
+  setDoc,
+  deleteDoc,
+  getDocs,
+  updateDoc,
+  query,
+  orderBy,
+} from 'firebase/firestore';
 
 const STORIES_STORAGE_KEY = 'cachengueoo_night_stories';
 const USER_HEARTS_PREFIX = 'cachengueoo_user_hearts_';
@@ -48,44 +59,86 @@ export const nightNotesService = {
 
   async fetchStories(): Promise<NightStory[]> {
     const localStories = this.getStoredStories();
+    const cutoffMs = Date.now() - NIGHT_MAX_AGE_MS;
+    const cutoff = new Date(cutoffMs).toISOString();
+    const remoteStories: NightStory[] = [];
+    const seenIds = new Set<string>();
+
     const supabase = getSupabaseClient();
-    if (!supabase) return localStories;
+    if (supabase) {
+      try {
+        // 1. Borrar de la base de datos historias antiguas que superaron las 6 horas
+        Promise.resolve(
+          supabase.from('night_stories').delete().lt('created_at', cutoff)
+        ).catch(() => {});
 
-    try {
-      const cutoff = new Date(Date.now() - NIGHT_MAX_AGE_MS).toISOString();
+        // 2. Traer historias vigentes de las últimas 6 horas desde Supabase
+        const { data, error } = await supabase
+          .from('night_stories')
+          .select('*')
+          .gte('created_at', cutoff)
+          .order('created_at', { ascending: false });
 
-      // 1. Borrar de la base de datos historias antiguas que superaron las 6 horas
-      Promise.resolve(
-        supabase.from('night_stories').delete().lt('created_at', cutoff)
-      ).catch(() => {});
-
-      // 2. Traer historias vigentes de las últimas 6 horas
-      const { data, error } = await supabase
-        .from('night_stories')
-        .select('*')
-        .gte('created_at', cutoff)
-        .order('created_at', { ascending: false });
-
-      if (!error && Array.isArray(data)) {
-        const remoteStories: NightStory[] = data.map((d: any) => ({
-          id: String(d.id),
-          userId: d.user_id,
-          userName: d.user_name || 'Cachenguero',
-          userAvatar: d.user_avatar || '',
-          mediaUrl: d.media_url,
-          mediaType: d.media_type || 'image',
-          createdAt: d.created_at,
-          expiresAt: d.expires_at || new Date(new Date(d.created_at).getTime() + NIGHT_MAX_AGE_MS).toISOString(),
-          isLiveInstant: true,
-          hearts: Number(d.hearts) || 0,
-        }));
-
-        // Guardar en cache local
-        localStorage.setItem(STORIES_STORAGE_KEY, JSON.stringify(remoteStories));
-        return remoteStories;
+        if (!error && Array.isArray(data)) {
+          data.forEach((d: any) => {
+            seenIds.add(String(d.id));
+            remoteStories.push({
+              id: String(d.id),
+              userId: d.user_id,
+              userName: d.user_name || 'Cachenguero',
+              userAvatar: d.user_avatar || '',
+              mediaUrl: d.media_url,
+              mediaType: d.media_type || 'image',
+              createdAt: d.created_at,
+              expiresAt: d.expires_at || new Date(new Date(d.created_at).getTime() + NIGHT_MAX_AGE_MS).toISOString(),
+              isLiveInstant: true,
+              hearts: Number(d.hearts) || 0,
+            });
+          });
+        }
+      } catch (e) {
+        console.warn('Error fetching night stories from Supabase:', e);
       }
+    }
+
+    // 3. Traer historias vigentes desde Firebase Firestore (garantiza entrega multiplataforma)
+    try {
+      const qStories = query(collection(db, 'night_stories'), orderBy('createdAt', 'desc'));
+      const snap = await getDocs(qStories);
+      snap.forEach((d) => {
+        const s = d.data() as any;
+        const createdMs = new Date(s.createdAt || s.created_at || new Date()).getTime();
+        if (Date.now() - createdMs <= NIGHT_MAX_AGE_MS) {
+          if (!seenIds.has(d.id)) {
+            seenIds.add(d.id);
+            remoteStories.push({
+              id: d.id,
+              userId: s.userId || s.user_id,
+              userName: s.userName || s.user_name || 'Cachenguero',
+              userAvatar: s.userAvatar || s.user_avatar || '',
+              mediaUrl: s.mediaUrl || s.media_url,
+              mediaType: s.mediaType || s.media_type || 'image',
+              createdAt: s.createdAt || s.created_at,
+              expiresAt: s.expiresAt || s.expires_at || new Date(createdMs + NIGHT_MAX_AGE_MS).toISOString(),
+              isLiveInstant: true,
+              hearts: Number(s.hearts) || 0,
+            });
+          }
+        } else {
+          // Limpiar automáticamente expiradas de Firestore
+          deleteDoc(doc(db, 'night_stories', d.id)).catch(() => {});
+        }
+      });
     } catch (e) {
-      console.warn('Error fetching night stories from Supabase:', e);
+      console.warn('Error fetching night stories from Firestore:', e);
+    }
+
+    if (remoteStories.length > 0) {
+      remoteStories.sort(
+        (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+      );
+      localStorage.setItem(STORIES_STORAGE_KEY, JSON.stringify(remoteStories));
+      return remoteStories;
     }
 
     return localStories;
@@ -96,6 +149,24 @@ export const nightNotesService = {
     const updated = [story, ...list.filter((s) => s.id !== story.id)];
     localStorage.setItem(STORIES_STORAGE_KEY, JSON.stringify(updated));
 
+    // 1. Guardar en Firestore
+    try {
+      await setDoc(doc(db, 'night_stories', story.id), {
+        id: story.id,
+        userId: story.userId,
+        userName: story.userName,
+        userAvatar: story.userAvatar,
+        mediaUrl: story.mediaUrl,
+        mediaType: story.mediaType,
+        createdAt: story.createdAt,
+        expiresAt: story.expiresAt,
+        hearts: story.hearts || 0,
+      });
+    } catch (e) {
+      console.warn('Error inserting story in Firestore:', e);
+    }
+
+    // 2. Guardar en Supabase
     const supabase = getSupabaseClient();
     if (supabase) {
       try {
@@ -121,6 +192,14 @@ export const nightNotesService = {
     const updated = list.filter((s) => s.id !== storyId);
     localStorage.setItem(STORIES_STORAGE_KEY, JSON.stringify(updated));
 
+    // 1. Borrar de Firestore
+    try {
+      await deleteDoc(doc(db, 'night_stories', storyId));
+    } catch (e) {
+      console.warn('Error deleting story in Firestore:', e);
+    }
+
+    // 2. Borrar de Supabase
     const supabase = getSupabaseClient();
     if (supabase) {
       try {
@@ -135,11 +214,19 @@ export const nightNotesService = {
     const list = this.getStoredStories();
     const updated = list.map((s) => (s.id === storyId ? { ...s, hearts: (s.hearts || 0) + 1 } : s));
     localStorage.setItem(STORIES_STORAGE_KEY, JSON.stringify(updated));
+    const story = updated.find((s) => s.id === storyId);
 
+    // 1. Actualizar en Firestore
+    try {
+      if (story) {
+        await updateDoc(doc(db, 'night_stories', storyId), { hearts: story.hearts || 0 });
+      }
+    } catch (e) {}
+
+    // 2. Actualizar en Supabase
     const supabase = getSupabaseClient();
     if (supabase) {
       try {
-        const story = updated.find((s) => s.id === storyId);
         if (story) {
           await supabase
             .from('night_stories')
@@ -231,6 +318,33 @@ export const nightNotesService = {
       }
     }
 
+    // 3. Obtener notitas activas desde Firebase Firestore (garantiza entrega multiplataforma universal)
+    try {
+      const qNotes = query(collection(db, 'night_notes'));
+      const snap = await getDocs(qNotes);
+      snap.forEach((d) => {
+        const data = d.data();
+        if (data && data.text) {
+          const createdMs = new Date(data.createdAt || data.created_at || new Date()).getTime();
+          if (Date.now() - createdMs <= NIGHT_MAX_AGE_MS) {
+            notesMap.set(data.userId, {
+              id: d.id,
+              userId: data.userId,
+              userName: data.userName || 'Cachenguero',
+              userAvatar: data.userAvatar || '',
+              text: data.text,
+              createdAt: data.createdAt || data.created_at || new Date().toISOString(),
+              hearts: Number(data.hearts) || 0,
+            });
+          } else {
+            deleteDoc(doc(db, 'night_notes', d.id)).catch(() => {});
+          }
+        }
+      });
+    } catch (e) {
+      console.warn('Error fetching Firestore night notes:', e);
+    }
+
     return Array.from(notesMap.values()).sort(
       (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
     );
@@ -242,12 +356,27 @@ export const nightNotesService = {
     userAvatar: string,
     text: string
   ): Promise<void> {
-    const supabase = getSupabaseClient();
     const cleanText = text.trim();
     const nowIso = new Date().toISOString();
 
+    // 1. Guardar en Firebase Firestore (visibilidad en tiempo real para todos)
+    try {
+      await setDoc(doc(db, 'night_notes', `note_${userId}`), {
+        id: `note_${userId}`,
+        userId,
+        userName,
+        userAvatar: userAvatar || '',
+        text: cleanText,
+        hearts: 0,
+        createdAt: nowIso,
+      });
+    } catch (e) {
+      console.warn('Error saving note in Firestore:', e);
+    }
+
+    const supabase = getSupabaseClient();
     if (supabase) {
-      // 1. Guardar en night_notes
+      // 2. Guardar en night_notes en Supabase
       try {
         await supabase.from('night_notes').delete().eq('user_id', userId);
 
@@ -266,7 +395,7 @@ export const nightNotesService = {
         console.warn('Error saving note in night_notes table:', e);
       }
 
-      // 2. Sincronizar en profiles.interests para visibilidad 100% garantizada
+      // 3. Sincronizar en profiles.interests para visibilidad 100% garantizada
       try {
         const { data: profileRow } = await supabase
           .from('profiles')
@@ -305,6 +434,13 @@ export const nightNotesService = {
   },
 
   async heartNote(noteId: string, count: number, userId?: string): Promise<void> {
+    // 1. Actualizar en Firestore
+    try {
+      const fsNoteId = noteId.startsWith('note_') ? noteId : `note_${noteId}`;
+      await updateDoc(doc(db, 'night_notes', fsNoteId), { hearts: count });
+    } catch (e) {}
+
+    // 2. Actualizar en Supabase
     const supabase = getSupabaseClient();
     if (supabase) {
       try {
@@ -349,16 +485,23 @@ export const nightNotesService = {
   },
 
   async deleteNote(userId: string): Promise<void> {
+    // 1. Borrar de Firestore
+    try {
+      await deleteDoc(doc(db, 'night_notes', `note_${userId}`));
+    } catch (e) {
+      console.warn('Error deleting note in Firestore:', e);
+    }
+
+    // 2. Borrar de Supabase
     const supabase = getSupabaseClient();
     if (supabase) {
-      // 1. Borrar de night_notes
       try {
         await supabase.from('night_notes').delete().eq('user_id', userId);
       } catch (e) {
         console.warn('Error deleting note in Supabase:', e);
       }
 
-      // 2. Borrar de profiles.interests
+      // Borrar de profiles.interests
       try {
         const { data: profileRow } = await supabase
           .from('profiles')

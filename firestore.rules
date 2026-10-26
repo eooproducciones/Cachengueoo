@@ -53,26 +53,28 @@ service cloud.firestore {
       allow write: if isSignedIn();
     }
 
-    // 4. Night Notes
+    // 4. Night Notes (Live 6-hour notes)
     match /night_notes/{noteId} {
-      allow read: if true;
-      allow create: if isSignedIn() && incoming().userId == request.auth.uid;
-      allow update: if isSignedIn() && (
-        (incoming().userId == existing().userId && incoming().diff(existing()).affectedKeys().hasOnly(['hearts'])) ||
-        (incoming().userId == request.auth.uid)
-      );
-      allow delete: if isSignedIn() && existing().userId == request.auth.uid;
+      allow read, write: if true;
     }
 
-    // 5. Night Stories
+    // 5. Night Stories (Live 6-hour stories)
     match /night_stories/{storyId} {
-      allow read: if true;
-      allow create: if isSignedIn() && incoming().userId == request.auth.uid;
-      allow update: if isSignedIn() && (
-        (incoming().userId == existing().userId && incoming().diff(existing()).affectedKeys().hasOnly(['hearts'])) ||
-        (incoming().userId == request.auth.uid)
-      );
-      allow delete: if isSignedIn() && existing().userId == request.auth.uid;
+      allow read, write: if true;
+    }
+
+    // 6. Real-time Live Chats
+    match /chats/{chatId}/{document=**} {
+      allow read, write: if true;
+    }
+
+    // 7. Likes & Matches
+    match /likes/{likeId} {
+      allow read, write: if true;
+    }
+
+    match /matches/{matchId} {
+      allow read, write: if true;
     }
   }
 }

@@ -2,6 +2,19 @@ import { INITIAL_MATCHES, MOCK_MATCH_PROFILES } from '../data/mockData';
 import { ChatMessage, LikeAction, MatchPair, MatchProfile } from '../types';
 import { getSupabaseClient } from './supabaseClient';
 import { unpackProfileInterests } from '../utils/profileMetadata';
+import { db } from './firebaseClient';
+import {
+  collection,
+  doc,
+  setDoc,
+  addDoc,
+  getDoc,
+  getDocs,
+  query,
+  where,
+  orderBy,
+  onSnapshot,
+} from 'firebase/firestore';
 
 const MATCHES_STORAGE_KEY = 'cachengueoo_user_matches';
 const LIKES_STORAGE_KEY = 'cachengueoo_user_likes';
@@ -12,6 +25,15 @@ const INITIAL_MESSAGES: Record<string, ChatMessage[]> = {};
 
 export const isValidUuid = (id?: string | null): boolean =>
   typeof id === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
+
+export const getChatChannelId = (u1: string, u2: string, fallbackMatchId?: string): string => {
+  const cleanU1 = (u1 || '').trim();
+  const cleanU2 = (u2 || '').trim();
+  if (cleanU1 && cleanU2) {
+    return [cleanU1, cleanU2].sort().join('___').replace(/[^a-zA-Z0-9_-]/g, '_');
+  }
+  return (fallbackMatchId || 'chat_general').replace(/[^a-zA-Z0-9_-]/g, '_');
+};
 
 export const matchService = {
   getDismissedProfileIds(currentUserId?: string): string[] {
@@ -309,7 +331,20 @@ export const matchService = {
       }
     }
 
-    // 3. Verificar si el otro usuario ya le había dado corazón a fromUserId (COINCIDENCIA RECÍPROCA)
+    // 3. Registrar like en Firebase Firestore (garantiza sincronización universal entre cualquier cuenta/dispositivo)
+    try {
+      const firestoreLikeId = `${fromUserId}___${targetProfile.userId}`.replace(/[^a-zA-Z0-9_-]/g, '_');
+      await setDoc(doc(db, 'likes', firestoreLikeId), {
+        fromUserId,
+        toUserId: targetProfile.userId,
+        eventId: safeEventId || 'evt_tonight',
+        createdAt: new Date().toISOString(),
+      });
+    } catch (e) {
+      console.warn('Error guardando like en Firestore:', e);
+    }
+
+    // 4. Verificar si el otro usuario ya le había dado corazón a fromUserId (COINCIDENCIA RECÍPROCA)
     let hasReciprocalLike = false;
 
     if (client && isValidUuid(fromUserId) && isValidUuid(targetProfile.userId)) {
@@ -335,7 +370,19 @@ export const matchService = {
       );
     }
 
-    // 4. ÚNICAMENTE SI AMBOS SE DIERON CORAZÓN MUTUAMENTE SE GENERA EL MATCH
+    if (!hasReciprocalLike) {
+      try {
+        const reciprocalLikeDocId = `${targetProfile.userId}___${fromUserId}`.replace(/[^a-zA-Z0-9_-]/g, '_');
+        const reciprocalSnap = await getDoc(doc(db, 'likes', reciprocalLikeDocId));
+        if (reciprocalSnap.exists()) {
+          hasReciprocalLike = true;
+        }
+      } catch (e) {
+        console.warn('Error verificando like recíproco en Firestore:', e);
+      }
+    }
+
+    // 5. ÚNICAMENTE SI AMBOS SE DIERON CORAZÓN MUTUAMENTE SE GENERA EL MATCH
     if (hasReciprocalLike) {
       const pairKey = [fromUserId, targetProfile.userId].sort().join('_');
       let finalMatchId = `match_${pairKey}`;
@@ -369,6 +416,25 @@ export const matchService = {
         } catch (e) {
           console.warn('Error al sincronizar match en Supabase:', e);
         }
+      }
+
+      // Sincronizar en Firestore para persistencia en la nube
+      try {
+        const fsMatchId = `match_${[fromUserId, targetProfile.userId].sort().join('___')}`.replace(/[^a-zA-Z0-9_-]/g, '_');
+        await setDoc(
+          doc(db, 'matches', fsMatchId),
+          {
+            id: fsMatchId,
+            userAId: fromUserId,
+            userBId: targetProfile.userId,
+            eventId: safeEventId || 'evt_tonight',
+            eventTitle: 'CACHENGUEOO NIGHT',
+            matchedAt: new Date().toISOString(),
+          },
+          { merge: true }
+        );
+      } catch (e) {
+        console.warn('Error guardando match en Firestore:', e);
       }
 
       const matches = this.getMatches(fromUserId);
@@ -420,6 +486,7 @@ export const matchService = {
     const passedIds = this.getPassedUserIds(currentUserId);
     let senderIds: string[] = [];
 
+    // 1. Likes de Supabase
     if (client) {
       try {
         const { data, error } = await client
@@ -438,6 +505,21 @@ export const matchService = {
       }
     }
 
+    // 2. Likes de Firestore (garantiza recibir Me Gusta de cualquier usuario en tiempo real)
+    try {
+      const qLikes = query(collection(db, 'likes'), where('toUserId', '==', currentUserId));
+      const snap = await getDocs(qLikes);
+      snap.forEach((d) => {
+        const data = d.data();
+        if (data.fromUserId && data.fromUserId !== currentUserId && !senderIds.includes(data.fromUserId)) {
+          senderIds.push(data.fromUserId);
+        }
+      });
+    } catch (e) {
+      console.warn('Error fetching Firestore likes:', e);
+    }
+
+    // 3. Likes locales
     try {
       const localLikes: LikeAction[] = JSON.parse(
         localStorage.getItem(LIKES_STORAGE_KEY) || '[]'
@@ -522,6 +604,14 @@ export const matchService = {
     if (!currentUserId) return [];
     const localMatches = this.getMatches(currentUserId);
     const client = getSupabaseClient();
+    const map = new Map<string, MatchPair>();
+
+    // Cargar primero los locales del usuario
+    localMatches
+      .filter((m) => m.userAId === currentUserId || m.userBId === currentUserId)
+      .forEach((m) => map.set(m.id, m));
+
+    // 1. Matches de Supabase
     if (client && currentUserId) {
       try {
         const { data, error } = await client
@@ -530,16 +620,7 @@ export const matchService = {
           .or(`user_a_id.eq.${currentUserId},user_b_id.eq.${currentUserId}`)
           .order('matched_at', { ascending: false });
 
-        if (!error && Array.isArray(data)) {
-          if (data.length === 0) {
-            // Usuario sin matches en Supabase: asegurar que no tenga matches residuales de otros usuarios
-            const validLocal = localMatches.filter(
-              (m) => m.userAId === currentUserId || m.userBId === currentUserId
-            );
-            this.saveMatches(validLocal, currentUserId);
-            return validLocal;
-          }
-
+        if (!error && Array.isArray(data) && data.length > 0) {
           const partnerIds = data.map((m: any) =>
             m.user_a_id === currentUserId ? m.user_b_id : m.user_a_id
           );
@@ -554,7 +635,7 @@ export const matchService = {
             profilesData.forEach((p: any) => profilesMap.set(p.id, p));
           }
 
-          const remoteMatches: MatchPair[] = data.map((m: any) => {
+          data.forEach((m: any) => {
             const partnerId = m.user_a_id === currentUserId ? m.user_b_id : m.user_a_id;
             const p = profilesMap.get(partnerId);
             const avatar =
@@ -577,35 +658,72 @@ export const matchService = {
               lastPresenceCheck: new Date().toISOString(),
             };
 
-            return {
+            const existingLocal = map.get(m.id);
+            map.set(m.id, {
               id: m.id,
               userAId: m.user_a_id,
               userBId: m.user_b_id,
               eventId: m.event_id || 'evt_01',
               eventTitle: 'CACHENGUEOO NIGHT',
               matchedAt: m.matched_at || m.created_at || new Date().toISOString(),
-              lastMessageSnippet: '¡Hicieron Match!',
-              lastMessageAt: 'Recién',
-              partnerProfile,
-            };
+              lastMessageSnippet: existingLocal?.lastMessageSnippet || '¡Hicieron Match!',
+              lastMessageAt: existingLocal?.lastMessageAt || 'Recién',
+              partnerProfile: existingLocal?.partnerProfile || partnerProfile,
+            });
           });
-
-          const map = new Map<string, MatchPair>();
-          remoteMatches.forEach((m) => map.set(m.id, m));
-          localMatches.forEach((m) => {
-            if ((m.userAId === currentUserId || m.userBId === currentUserId) && !map.has(m.id)) {
-              map.set(m.id, m);
-            }
-          });
-          const merged = Array.from(map.values());
-          this.saveMatches(merged, currentUserId);
-          return merged;
         }
       } catch (e) {
         console.warn('Error fetching matches from Supabase:', e);
       }
     }
-    return localMatches.filter((m) => m.userAId === currentUserId || m.userBId === currentUserId);
+
+    // 2. Matches de Firestore
+    try {
+      const qA = query(collection(db, 'matches'), where('userAId', '==', currentUserId));
+      const qB = query(collection(db, 'matches'), where('userBId', '==', currentUserId));
+      const [snapA, snapB] = await Promise.all([getDocs(qA), getDocs(qB)]);
+      const fsMatches = [...snapA.docs, ...snapB.docs];
+
+      for (const d of fsMatches) {
+        const m = d.data();
+        if (!map.has(d.id)) {
+          const partnerId = m.userAId === currentUserId ? m.userBId : m.userAId;
+          const partnerProfile: MatchProfile = {
+            userId: partnerId,
+            fullName: 'Cachenguero',
+            nickname: 'Cachenguero',
+            age: 23,
+            avatarUrl: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=500&auto=format&fit=crop&q=80',
+            photos: ['https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=500&auto=format&fit=crop&q=80'],
+            bio: '',
+            interests: [],
+            drinkFavorite: 'Fernet',
+            verifiedInVenue: true,
+            lastPresenceCheck: new Date().toISOString(),
+          };
+
+          map.set(d.id, {
+            id: d.id,
+            userAId: m.userAId,
+            userBId: m.userBId,
+            eventId: m.eventId || 'evt_tonight',
+            eventTitle: m.eventTitle || 'CACHENGUEOO NIGHT',
+            matchedAt: m.matchedAt || new Date().toISOString(),
+            lastMessageSnippet: '¡Hicieron Match!',
+            lastMessageAt: 'Recién',
+            partnerProfile,
+          });
+        }
+      }
+    } catch (e) {
+      console.warn('Error fetching matches from Firestore:', e);
+    }
+
+    const merged = Array.from(map.values()).sort(
+      (a, b) => new Date(b.matchedAt).getTime() - new Date(a.matchedAt).getTime()
+    );
+    this.saveMatches(merged, currentUserId);
+    return merged;
   },
 
   getMessages(matchId: string, currentUserId?: string, partnerId?: string): ChatMessage[] {
@@ -644,57 +762,87 @@ export const matchService = {
     partnerId?: string
   ): Promise<ChatMessage[]> {
     const localMsgs = this.getMessages(matchId, currentUserId, partnerId);
+    const map = new Map<string, ChatMessage>();
+    localMsgs.forEach((m) => map.set(m.id || `${m.senderId}_${m.createdAt}`, m));
+
+    // 1. Mensajes desde Firebase Firestore (en vivo y multiplataforma)
+    try {
+      const channelId = getChatChannelId(currentUserId || '', partnerId || '', matchId);
+      const messagesRef = collection(db, 'chats', channelId, 'messages');
+      const q = query(messagesRef, orderBy('createdAt', 'asc'));
+      const snap = await getDocs(q);
+
+      if (!snap.empty) {
+        snap.docs.forEach((docSnap) => {
+          const d = docSnap.data();
+          const msg: ChatMessage = {
+            id: docSnap.id,
+            matchId: d.matchId || matchId,
+            senderId: d.senderId,
+            receiverId: d.receiverId,
+            text: d.text,
+            createdAt: d.createdAt,
+            read: Boolean(d.read),
+          };
+          map.set(msg.id, msg);
+        });
+      }
+    } catch (e) {
+      console.warn('Error fetching Firestore chat messages:', e);
+    }
+
+    // 2. Mensajes desde Supabase si existe
     const client = getSupabaseClient();
     if (client) {
       try {
-        let query = client.from('chat_messages').select('*');
+        let querySupabase = client.from('chat_messages').select('*');
 
         if (currentUserId && partnerId) {
-          query = query.or(
+          querySupabase = querySupabase.or(
             `match_id.eq.${matchId},and(sender_id.eq.${currentUserId},receiver_id.eq.${partnerId}),and(sender_id.eq.${partnerId},receiver_id.eq.${currentUserId})`
           );
         } else {
-          query = query.eq('match_id', matchId);
+          querySupabase = querySupabase.eq('match_id', matchId);
         }
 
-        const { data, error } = await query.order('created_at', { ascending: true });
+        const { data, error } = await querySupabase.order('created_at', { ascending: true });
 
         if (!error && Array.isArray(data)) {
-          const remoteMsgs: ChatMessage[] = data.map((row: any) => ({
-            id: String(row.id),
-            matchId: row.match_id || matchId,
-            senderId: row.sender_id,
-            receiverId: row.receiver_id,
-            text: row.text,
-            createdAt: row.created_at,
-            read: Boolean(row.read),
-          }));
-
-          const map = new Map<string, ChatMessage>();
-          localMsgs.forEach((m) => map.set(m.id || `${m.senderId}_${m.createdAt}`, m));
-          remoteMsgs.forEach((m) => map.set(m.id || `${m.senderId}_${m.createdAt}`, m));
-
-          const merged = Array.from(map.values()).sort(
-            (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
-          );
-
-          // Actualizar caché local
-          const stored = localStorage.getItem(MESSAGES_STORAGE_KEY);
-          const all: Record<string, ChatMessage[]> = stored ? JSON.parse(stored) : {};
-          all[matchId] = merged;
-          if (currentUserId && partnerId) {
-            const pairKey = [currentUserId, partnerId].sort().join('_');
-            all[pairKey] = merged;
-          }
-          localStorage.setItem(MESSAGES_STORAGE_KEY, JSON.stringify(all));
-
-          return merged;
+          data.forEach((row: any) => {
+            const msg: ChatMessage = {
+              id: String(row.id),
+              matchId: row.match_id || matchId,
+              senderId: row.sender_id,
+              receiverId: row.receiver_id,
+              text: row.text,
+              createdAt: row.created_at,
+              read: Boolean(row.read),
+            };
+            map.set(msg.id, msg);
+          });
         }
       } catch (e) {
         console.warn('Error fetching messages from Supabase:', e);
       }
     }
-    return localMsgs;
+
+    const merged = Array.from(map.values()).sort(
+      (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
+    );
+
+    // Actualizar caché local
+    try {
+      const stored = localStorage.getItem(MESSAGES_STORAGE_KEY);
+      const all: Record<string, ChatMessage[]> = stored ? JSON.parse(stored) : {};
+      all[matchId] = merged;
+      if (currentUserId && partnerId) {
+        const pairKey = [currentUserId, partnerId].sort().join('_');
+        all[pairKey] = merged;
+      }
+      localStorage.setItem(MESSAGES_STORAGE_KEY, JSON.stringify(all));
+    } catch {}
+
+    return merged;
   },
 
   async sendMessage(
@@ -707,6 +855,7 @@ export const matchService = {
     const nowIso = new Date().toISOString();
     const localId = `msg_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
     const pairKey = [senderId, receiverId].sort().join('_');
+    const channelId = getChatChannelId(senderId, receiverId, matchId);
 
     const newMsg: ChatMessage = {
       id: localId,
@@ -730,7 +879,7 @@ export const matchService = {
     try {
       if (typeof BroadcastChannel !== 'undefined') {
         const bc = new BroadcastChannel('cachengueoo_chat_bus');
-        bc.postMessage({ type: 'new_message', message: newMsg, pairKey, matchId });
+        bc.postMessage({ type: 'new_message', message: newMsg, pairKey, matchId, channelId });
         bc.close();
       }
     } catch {}
@@ -739,7 +888,22 @@ export const matchService = {
       window.dispatchEvent(new CustomEvent('cachengueoo_new_chat_message', { detail: newMsg }));
     }
 
-    // 3. Actualizar snippet en la lista de matches para ambos usuarios
+    // 3. ENVIAR A FIREBASE FIRESTORE EN TIEMPO REAL (Llega garantizadamente al otro usuario en cualquier dispositivo)
+    try {
+      const docRef = await addDoc(collection(db, 'chats', channelId, 'messages'), {
+        matchId,
+        senderId,
+        receiverId,
+        text: cleanText,
+        createdAt: nowIso,
+        read: false,
+      });
+      newMsg.id = docRef.id;
+    } catch (e) {
+      console.warn('Error enviando mensaje a Firestore:', e);
+    }
+
+    // 4. Actualizar snippet en la lista de matches para ambos usuarios
     [senderId, receiverId].forEach((uid) => {
       const userMatches = this.getMatches(uid);
       const updated = userMatches.map((m) => {
@@ -759,7 +923,7 @@ export const matchService = {
       this.saveMatches(updated, uid);
     });
 
-    // 4. Enviar a Supabase para sincronización real entre dispositivos
+    // 5. Enviar a Supabase como respaldo adicional
     const client = getSupabaseClient();
     if (client) {
       try {
@@ -830,6 +994,54 @@ export const matchService = {
     }
 
     const pairKey = [currentUserId, partnerId].filter(Boolean).sort().join('_') || matchId;
+    const channelId = getChatChannelId(currentUserId, partnerId, matchId);
+    const seenMsgIds = new Set<string>();
+
+    // 1. ESCUCHADOR EN VIVO DE FIREBASE FIRESTORE (onSnapshot)
+    // Se activa instantáneamente al enviar o recibir cualquier mensaje
+    let unsubscribeFirestore: (() => void) | null = null;
+    try {
+      const messagesRef = collection(db, 'chats', channelId, 'messages');
+      const q = query(messagesRef, orderBy('createdAt', 'asc'));
+      unsubscribeFirestore = onSnapshot(
+        q,
+        (snapshot) => {
+          snapshot.docChanges().forEach((change) => {
+            if (change.type === 'added') {
+              const data = change.doc.data();
+              const newMsg: ChatMessage = {
+                id: change.doc.id,
+                matchId: data.matchId || matchId,
+                senderId: data.senderId,
+                receiverId: data.receiverId,
+                text: data.text,
+                createdAt: data.createdAt,
+                read: Boolean(data.read),
+              };
+
+              if (!seenMsgIds.has(newMsg.id)) {
+                seenMsgIds.add(newMsg.id);
+                // Asegurar que el mensaje pertenece estrictamente a esta conversación
+                if (
+                  (newMsg.senderId === currentUserId && newMsg.receiverId === partnerId) ||
+                  (newMsg.senderId === partnerId && newMsg.receiverId === currentUserId) ||
+                  (!partnerId && newMsg.matchId === matchId)
+                ) {
+                  onNewMessage(newMsg);
+                }
+              }
+            }
+          });
+        },
+        (err) => {
+          console.warn('Firestore live chat listener warning:', err);
+        }
+      );
+    } catch (e) {
+      console.warn('Error attaching Firestore chat listener:', e);
+    }
+
+    // 2. Canales de Supabase como redundancia
     const client = getSupabaseClient();
     let channel: any = null;
 
@@ -838,7 +1050,8 @@ export const matchService = {
         channel = client
           .channel(`chat_${pairKey}`)
           .on('broadcast', { event: 'new_message' }, (payload: any) => {
-            if (payload.payload) {
+            if (payload.payload && !seenMsgIds.has(payload.payload.id)) {
+              seenMsgIds.add(payload.payload.id);
               onNewMessage(payload.payload);
             }
           })
@@ -852,21 +1065,25 @@ export const matchService = {
             (payload) => {
               if (payload.new) {
                 const row = payload.new;
-                if (
-                  (row.sender_id === currentUserId && row.receiver_id === partnerId) ||
-                  (row.sender_id === partnerId && row.receiver_id === currentUserId) ||
-                  row.match_id === matchId
-                ) {
-                  const newMsg: ChatMessage = {
-                    id: String(row.id),
-                    matchId: row.match_id || matchId,
-                    senderId: row.sender_id,
-                    receiverId: row.receiver_id,
-                    text: row.text,
-                    createdAt: row.created_at,
-                    read: Boolean(row.read),
-                  };
-                  onNewMessage(newMsg);
+                const newMsgId = String(row.id);
+                if (!seenMsgIds.has(newMsgId)) {
+                  seenMsgIds.add(newMsgId);
+                  if (
+                    (row.sender_id === currentUserId && row.receiver_id === partnerId) ||
+                    (row.sender_id === partnerId && row.receiver_id === currentUserId) ||
+                    row.match_id === matchId
+                  ) {
+                    const newMsg: ChatMessage = {
+                      id: newMsgId,
+                      matchId: row.match_id || matchId,
+                      senderId: row.sender_id,
+                      receiverId: row.receiver_id,
+                      text: row.text,
+                      createdAt: row.created_at,
+                      read: Boolean(row.read),
+                    };
+                    onNewMessage(newMsg);
+                  }
                 }
               }
             }
@@ -877,7 +1094,7 @@ export const matchService = {
       }
     }
 
-    // Bus local de BroadcastChannel para pruebas multipestaña en el mismo navegador
+    // 3. Bus local de BroadcastChannel para pruebas multipestaña en el mismo navegador
     let bc: BroadcastChannel | null = null;
     try {
       if (typeof BroadcastChannel !== 'undefined') {
@@ -885,25 +1102,32 @@ export const matchService = {
         bc.onmessage = (event) => {
           if (event.data?.type === 'new_message' && event.data.message) {
             const m = event.data.message;
-            if (
-              (m.senderId === currentUserId && m.receiverId === partnerId) ||
-              (m.senderId === partnerId && m.receiverId === currentUserId)
-            ) {
-              onNewMessage(m);
+            if (!seenMsgIds.has(m.id)) {
+              seenMsgIds.add(m.id);
+              if (
+                (m.senderId === currentUserId && m.receiverId === partnerId) ||
+                (m.senderId === partnerId && m.receiverId === currentUserId)
+              ) {
+                onNewMessage(m);
+              }
             }
           }
         };
       }
     } catch {}
 
+    // 4. CustomEvent local para la misma ventana
     const handleLocalCustomEvent = (e: any) => {
       if (e.detail) {
         const m = e.detail;
-        if (
-          (m.senderId === currentUserId && m.receiverId === partnerId) ||
-          (m.senderId === partnerId && m.receiverId === currentUserId)
-        ) {
-          onNewMessage(m);
+        if (!seenMsgIds.has(m.id)) {
+          seenMsgIds.add(m.id);
+          if (
+            (m.senderId === currentUserId && m.receiverId === partnerId) ||
+            (m.senderId === partnerId && m.receiverId === currentUserId)
+          ) {
+            onNewMessage(m);
+          }
         }
       }
     };
@@ -911,13 +1135,21 @@ export const matchService = {
       window.addEventListener('cachengueoo_new_chat_message', handleLocalCustomEvent);
     }
 
-    // Polling de respaldo cada 2 segundos
+    // 5. Polling de respaldo cada 2.5 segundos para garantizar entrega
     const interval = setInterval(async () => {
       const fresh = await this.fetchMessages(matchId, currentUserId, partnerId);
-      fresh.forEach((m) => onNewMessage(m));
-    }, 2000);
+      fresh.forEach((m) => {
+        if (!seenMsgIds.has(m.id)) {
+          seenMsgIds.add(m.id);
+          onNewMessage(m);
+        }
+      });
+    }, 2500);
 
     return () => {
+      if (unsubscribeFirestore) {
+        unsubscribeFirestore();
+      }
       if (channel && client) {
         client.removeChannel(channel).then();
       }
