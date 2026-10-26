@@ -79,11 +79,17 @@ export default function App() {
     eventService.syncEventsFromSupabase().then(setEvents).catch(() => {});
     benefitService.syncBenefitsFromSupabase().then(setBenefits).catch(() => {});
 
+    const handleToast = (e: any) => {
+      if (e.detail) showToast(e.detail);
+    };
+    window.addEventListener('cachengueoo_show_toast', handleToast);
+
     return () => {
       window.removeEventListener('cachengueoo_events_updated', handleEventsChange);
       window.removeEventListener('cachengueoo_benefits_updated', handleBenefitsChange);
       window.removeEventListener('storage', handleEventsChange);
       window.removeEventListener('storage', handleBenefitsChange);
+      window.removeEventListener('cachengueoo_show_toast', handleToast);
     };
   }, []);
 

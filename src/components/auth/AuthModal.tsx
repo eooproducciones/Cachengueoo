@@ -30,6 +30,7 @@ import {
 } from 'lucide-react';
 import { UserGender, PreferenceGender, UserProfile } from '../../types';
 import { authService } from '../../services/authService';
+import { getSupabaseClient } from '../../services/supabaseClient';
 import { CachengueooLogo } from '../common/CachengueooLogo';
 import {
   ZODIAC_SIGNS,
@@ -109,22 +110,42 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   // Usuario creado recientemente para la verificación
   const [registeredUser, setRegisteredUser] = useState<UserProfile | null>(null);
 
+  // Detección y prevención de cuentas duplicadas en el registro
+  const [existingAccountFound, setExistingAccountFound] = useState<UserProfile | null>(null);
+  const [existingPasswordInput, setExistingPasswordInput] = useState('');
+  const [isCheckingEmail, setIsCheckingEmail] = useState(false);
+
   useEffect(() => {
     if (isOpen) {
       setErrorMessage(null);
       setSuccessNotice(null);
       setForgotSent(false);
+      setIsSubmitting(false);
+      setExistingAccountFound(null);
+      setExistingPasswordInput('');
 
       const currentUser = authService.getCurrentUser();
       const flowIntent =
         sessionStorage.getItem('cachengueoo_flow_intent') ||
         localStorage.getItem('cachengueoo_flow_intent');
 
+      // Intentar cargar el correo de Google si la sesión ya está iniciada en Supabase
+      const client = getSupabaseClient();
+      if (client) {
+        client.auth.getUser().then(({ data }) => {
+          if (data?.user?.email) {
+            setRegEmail((prev) => (!prev || prev.includes('usuario.cache') ? data.user.email! : prev));
+          }
+        });
+      }
+
       if (initialMode === 'register_step_1' || flowIntent === 'configure_cache_id') {
         setCurrentView('register_step_1');
         setAuthProvider('gmail');
         if (currentUser) {
-          if (currentUser.email) setRegEmail(currentUser.email);
+          if (currentUser.email && !currentUser.email.includes('usuario.cache')) {
+            setRegEmail(currentUser.email);
+          }
           if (currentUser.fullName) setRegFullName(currentUser.fullName);
           if (currentUser.nickname) setRegNickname(currentUser.nickname);
           if (currentUser.birthDate && currentUser.birthDate !== '2001-01-01') {
@@ -153,7 +174,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     if (isOpen && currentView === 'register_step_1') {
       const u = authService.getCurrentUser();
       if (u) {
-        if (u.email && !regEmail) setRegEmail(u.email);
+        if (u.email && (!regEmail || regEmail.includes('usuario.cache'))) setRegEmail(u.email);
         if (u.fullName && !regFullName) setRegFullName(u.fullName);
         if (u.nickname && !regNickname) setRegNickname(u.nickname);
         if (u.birthDate && u.birthDate !== '2001-01-01' && !regBirthDate) setRegBirthDate(u.birthDate);
@@ -235,16 +256,25 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   const handleGoogleSignIn = async () => {
     setIsSubmitting(true);
     setErrorMessage(null);
+    setExistingAccountFound(null);
+
+    // Timeout de seguridad para evitar que quede cargando infinitamente si se cancela o bloquea
+    const safetyTimeout = setTimeout(() => {
+      setIsSubmitting(false);
+    }, 6000);
+
     try {
       // Registrar la intención de configurar el Cache ID al retornar
       sessionStorage.setItem('cachengueoo_flow_intent', 'configure_cache_id');
       localStorage.setItem('cachengueoo_flow_intent', 'configure_cache_id');
       const res = await authService.signInWithGoogle();
       if (!res.success) {
+        clearTimeout(safetyTimeout);
         setErrorMessage(res.message || 'Error al conectar con Google.');
         setIsSubmitting(false);
       }
     } catch (err: unknown) {
+      clearTimeout(safetyTimeout);
       setErrorMessage(err instanceof Error ? err.message : 'Error al conectar con Google');
       setIsSubmitting(false);
     }
@@ -254,24 +284,26 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   const handleSelectProvider = (provider: 'gmail' | 'instagram' | 'phone') => {
     setAuthProvider(provider);
     setErrorMessage(null);
+    setExistingAccountFound(null);
 
     if (provider === 'gmail') {
-      if (!regEmail) setRegEmail('usuario.cache@gmail.com');
-    } else if (provider === 'instagram') {
-      if (!regInstagram) setRegInstagram('@cachenguero_mza');
-    } else if (provider === 'phone') {
-      if (!regEmail) setRegEmail('2615551234@cachengueoo.com');
+      const u = authService.getCurrentUser();
+      if (u?.email && !u.email.includes('usuario.cache')) {
+        setRegEmail(u.email);
+      }
     }
 
     setCurrentView('register_step_1');
   };
 
-  // Avanzar a Step 2
-  const handleProceedToStep2 = (e: React.FormEvent) => {
+  // Avanzar a Step 2 verificando primero si el correo ya existe para evitar cuentas duplicadas
+  const handleProceedToStep2 = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMessage(null);
+    setExistingAccountFound(null);
 
-    if (!regFullName.trim() || !regNickname.trim() || !regEmail.trim()) {
+    const cleanEmail = regEmail.trim().toLowerCase();
+    if (!regFullName.trim() || !regNickname.trim() || !cleanEmail) {
       setErrorMessage('Por favor completá los campos obligatorios.');
       return;
     }
@@ -279,6 +311,21 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     if (!isAdult) {
       setErrorMessage('Debés tener 18 años o más para ingresar a Cachengueoo.');
       return;
+    }
+
+    // Verificar si el correo ya está registrado en Cachengueoo
+    setIsCheckingEmail(true);
+    try {
+      const emailCheck = await authService.checkEmailExists(cleanEmail);
+      if (emailCheck.exists && emailCheck.profile) {
+        setIsCheckingEmail(false);
+        setExistingAccountFound(emailCheck.profile);
+        return;
+      }
+    } catch {
+      // Continuar si falla la verificación de red
+    } finally {
+      setIsCheckingEmail(false);
     }
 
     // Los usuarios autenticados con Google no requieren contraseña manual
@@ -295,6 +342,29 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     }
 
     setCurrentView('register_step_2');
+  };
+
+  // Ingresar directamente a la cuenta existente detectada sin crear duplicado
+  const handleLoginExistingAccount = async () => {
+    if (!existingPasswordInput.trim()) {
+      setErrorMessage('Por favor ingresá tu contraseña.');
+      return;
+    }
+    setIsSubmitting(true);
+    setErrorMessage(null);
+    try {
+      const res = await authService.loginWithCredentials(regEmail, existingPasswordInput);
+      if (res.success && res.user) {
+        onAuthSuccess(res.user);
+        onClose();
+      } else {
+        setErrorMessage(res.message || 'Contraseña incorrecta.');
+      }
+    } catch (err: unknown) {
+      setErrorMessage(err instanceof Error ? err.message : 'Error al ingresar.');
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   // Avanzar a Step 3
@@ -436,8 +506,8 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-md animate-in fade-in duration-200">
-      <div className="bg-[#121217] border border-zinc-800 rounded-3xl w-full max-w-lg p-5 sm:p-6 space-y-4 max-h-[92vh] overflow-y-auto shadow-2xl relative">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-black/85 backdrop-blur-md animate-in fade-in duration-200 overflow-x-hidden min-w-0">
+      <div className="bg-[#121217] border border-zinc-800 rounded-3xl w-full max-w-lg p-3.5 sm:p-6 space-y-4 max-h-[92vh] overflow-y-auto overflow-x-hidden shadow-2xl relative min-w-0 box-border">
         {/* Close Button */}
         <button
           type="button"
@@ -627,7 +697,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
         {/* WIZARD STEP 1: INFORMACIÓN GENERAL                        */}
         {/* ========================================================== */}
         {currentView === 'register_step_1' && (
-          <form onSubmit={handleProceedToStep2} className="space-y-4 pt-1">
+          <form onSubmit={handleProceedToStep2} className="space-y-4 pt-1 w-full min-w-0 overflow-x-hidden box-border">
             {/* Header con indicador de paso */}
             <div className="flex items-center justify-between pb-3 border-b border-zinc-800">
               <div className="flex items-center gap-2">
@@ -657,9 +727,9 @@ export const AuthModal: React.FC<AuthModalProps> = ({
               <div className="bg-gradient-to-r from-amber-500 to-[#F39200] h-1.5 rounded-full w-1/3 transition-all duration-300" />
             </div>
 
-            <div className="space-y-3.5 text-xs">
+            <div className="space-y-3.5 text-xs min-w-0 w-full">
               {/* Nombre completo */}
-              <div>
+              <div className="min-w-0 w-full">
                 <label className="text-zinc-300 block mb-1 font-bold">
                   <span>Nombre completo <span className="text-red-400">*</span></span>
                 </label>
@@ -668,28 +738,28 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                   <input
                     type="text"
                     required
-                    placeholder=""
+                    placeholder="Ej: Sofía Martínez"
                     value={regFullName}
                     onChange={(e) => setRegFullName(e.target.value)}
-                    className="w-full h-10 pl-9 pr-3 rounded-xl bg-zinc-900 border border-zinc-800 text-white font-medium focus:outline-none focus:border-[#F39200]"
+                    className="w-full min-w-0 max-w-full h-10 pl-9 pr-3 rounded-xl bg-zinc-900 border border-zinc-800 text-white font-medium focus:outline-none focus:border-[#F39200]"
                   />
                 </div>
               </div>
 
               {/* Apodo y Fecha de Nacimiento en Grid */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 min-w-0 w-full">
                 {/* Apodo */}
-                <div>
+                <div className="min-w-0">
                   <label className="text-zinc-300 block mb-1 font-bold">
                     Apodo <span className="text-red-400">*</span>
                   </label>
                   <input
                     type="text"
                     required
-                    placeholder=""
+                    placeholder="Ej: Sofi"
                     value={regNickname}
                     onChange={(e) => setRegNickname(e.target.value)}
-                    className="w-full h-10 px-3 rounded-xl bg-zinc-900 border border-zinc-800 text-white font-medium focus:outline-none focus:border-[#F39200]"
+                    className="w-full min-w-0 max-w-full h-10 px-3 rounded-xl bg-zinc-900 border border-zinc-800 text-white font-medium focus:outline-none focus:border-[#F39200]"
                   />
                   <span className="text-[10px] text-zinc-500 mt-1 block">
                     Es el nombre con el que aparecerás en Match.
@@ -697,7 +767,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                 </div>
 
                 {/* Fecha de Nacimiento */}
-                <div>
+                <div className="min-w-0">
                   <label className="text-zinc-300 block mb-1 font-bold flex items-center justify-between">
                     <span>Fecha de nacimiento <span className="text-red-400">*</span></span>
                     {calculatedAge > 0 && (
@@ -713,38 +783,38 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                       required
                       value={regBirthDate}
                       onChange={(e) => setRegBirthDate(e.target.value)}
-                      className="w-full h-10 pl-9 pr-3 rounded-xl bg-zinc-900 border border-zinc-800 text-white font-medium focus:outline-none focus:border-[#F39200]"
+                      className="w-full min-w-0 max-w-full h-10 pl-9 pr-3 rounded-xl bg-zinc-900 border border-zinc-800 text-white font-medium focus:outline-none focus:border-[#F39200]"
                     />
                   </div>
                 </div>
               </div>
 
               {/* Instagram & Mi Género */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 min-w-0 w-full">
                 {/* Instagram */}
-                <div>
+                <div className="min-w-0">
                   <label className="text-zinc-300 block mb-1 font-bold flex items-center gap-1">
                     <Instagram className="w-3.5 h-3.5 text-pink-400" />
                     <span>Instagram</span>
                   </label>
                   <input
                     type="text"
-                    placeholder=""
+                    placeholder="@usuario"
                     value={regInstagram}
                     onChange={(e) => setRegInstagram(e.target.value)}
-                    className="w-full h-10 px-3 rounded-xl bg-zinc-900 border border-zinc-800 text-white font-medium focus:outline-none focus:border-[#F39200]"
+                    className="w-full min-w-0 max-w-full h-10 px-3 rounded-xl bg-zinc-900 border border-zinc-800 text-white font-medium focus:outline-none focus:border-[#F39200]"
                   />
                 </div>
 
                 {/* Mi Género */}
-                <div>
+                <div className="min-w-0">
                   <label className="text-zinc-300 block mb-1 font-bold">
                     Mi género <span className="text-red-400">*</span>
                   </label>
                   <select
                     value={regGender}
                     onChange={(e) => setRegGender(e.target.value as UserGender)}
-                    className="w-full h-10 px-3 rounded-xl bg-zinc-900 border border-zinc-800 text-white font-medium focus:outline-none focus:border-[#F39200]"
+                    className="w-full min-w-0 max-w-full h-10 px-3 rounded-xl bg-zinc-900 border border-zinc-800 text-white font-medium focus:outline-none focus:border-[#F39200]"
                   >
                     <option value="hombre">Hombre</option>
                     <option value="mujer">Mujer</option>
@@ -753,48 +823,59 @@ export const AuthModal: React.FC<AuthModalProps> = ({
               </div>
 
               {/* Mail */}
-              <div>
-                <label className="text-zinc-300 block mb-1 font-bold">
-                  Mail {authProvider === 'gmail' ? '(Vinculado a Google)' : <span className="text-red-400">*</span>}
-                </label>
+              <div className="min-w-0 w-full">
+                <div className="flex items-center justify-between mb-1">
+                  <label className="text-zinc-300 font-bold">
+                    Mail <span className="text-red-400">*</span>
+                  </label>
+                  {authProvider === 'gmail' && (
+                    <span className="text-[10px] text-emerald-400 font-medium flex items-center gap-1">
+                      <CheckCircle2 className="w-3 h-3 text-emerald-400" />
+                      Vinculado con Google
+                    </span>
+                  )}
+                </div>
                 <div className="relative">
                   <Mail className="w-4 h-4 text-zinc-500 absolute left-3 top-3 pointer-events-none" />
                   <input
                     type="email"
                     required
-                    readOnly={authProvider === 'gmail'}
-                    placeholder=""
+                    placeholder="tu.correo@gmail.com"
                     value={regEmail}
-                    onChange={(e) => setRegEmail(e.target.value)}
-                    className={`w-full h-10 pl-9 pr-3 rounded-xl border text-white font-medium focus:outline-none ${
-                      authProvider === 'gmail'
-                        ? 'bg-zinc-900/60 border-zinc-800 text-zinc-300 cursor-not-allowed'
-                        : 'bg-zinc-900 border-zinc-800 focus:border-[#F39200]'
-                    }`}
+                    onChange={(e) => {
+                      setRegEmail(e.target.value);
+                      if (existingAccountFound) setExistingAccountFound(null);
+                    }}
+                    className="w-full min-w-0 max-w-full h-10 pl-9 pr-3 rounded-xl bg-zinc-900 border border-zinc-800 text-white font-medium focus:outline-none focus:border-[#F39200]"
                   />
                 </div>
+                <span className="text-[10px] text-zinc-500 mt-1 block">
+                  {authProvider === 'gmail'
+                    ? 'Tu correo se cargó automáticamente desde Google. Podés modificarlo manualmente si necesitás.'
+                    : 'Ingresá tu correo electrónico principal.'}
+                </span>
               </div>
 
               {/* Contraseña & Repetir Contraseña (Omitido para Google) */}
               {authProvider === 'gmail' ? (
-                <div className="p-3.5 rounded-2xl bg-zinc-900/80 border border-emerald-500/30 flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <div className="w-8 h-8 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center">
+                <div className="p-3.5 rounded-2xl bg-zinc-900/80 border border-emerald-500/30 flex items-center justify-between min-w-0">
+                  <div className="flex items-center gap-3 min-w-0">
+                    <div className="w-8 h-8 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center shrink-0">
                       <ShieldCheck className="w-4 h-4 text-emerald-400" />
                     </div>
-                    <div>
-                      <p className="text-xs font-bold text-white">Acceso verificado con Google</p>
-                      <p className="text-[11px] text-zinc-400">Tu cuenta está protegida con tu sesión de Gmail</p>
+                    <div className="min-w-0">
+                      <p className="text-xs font-bold text-white truncate">Acceso verificado con Google</p>
+                      <p className="text-[11px] text-zinc-400 truncate">Tu cuenta está protegida con tu sesión de Google</p>
                     </div>
                   </div>
-                  <span className="text-[10px] font-bold text-emerald-400 bg-emerald-500/10 px-2 py-1 rounded-lg border border-emerald-500/20">
+                  <span className="text-[10px] font-bold text-emerald-400 bg-emerald-500/10 px-2 py-1 rounded-lg border border-emerald-500/20 shrink-0">
                     Verificado
                   </span>
                 </div>
               ) : (
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 min-w-0 w-full">
                   {/* Contraseña */}
-                  <div>
+                  <div className="min-w-0">
                     <label className="text-zinc-300 block mb-1 font-bold">
                       Contraseña <span className="text-red-400">*</span>
                     </label>
@@ -806,7 +887,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                         placeholder=""
                         value={regPassword}
                         onChange={(e) => setRegPassword(e.target.value)}
-                        className="w-full h-10 pl-9 pr-9 rounded-xl bg-zinc-900 border border-zinc-800 text-white font-medium focus:outline-none focus:border-[#F39200]"
+                        className="w-full min-w-0 max-w-full h-10 pl-9 pr-9 rounded-xl bg-zinc-900 border border-zinc-800 text-white font-medium focus:outline-none focus:border-[#F39200]"
                       />
                       <button
                         type="button"
@@ -819,7 +900,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                   </div>
 
                   {/* Repetir Contraseña con Check de corroboración */}
-                  <div>
+                  <div className="min-w-0">
                     <div className="flex items-center justify-between mb-1">
                       <label className="text-zinc-300 font-bold">
                         Repetir contraseña <span className="text-red-400">*</span>
@@ -848,7 +929,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                         placeholder=""
                         value={regRepeatPassword}
                         onChange={(e) => setRegRepeatPassword(e.target.value)}
-                        className={`w-full h-10 pl-9 pr-9 rounded-xl bg-zinc-900 border text-white font-medium focus:outline-none ${
+                        className={`w-full min-w-0 max-w-full h-10 pl-9 pr-9 rounded-xl bg-zinc-900 border text-white font-medium focus:outline-none ${
                           regRepeatPassword.length > 0
                             ? passwordsMatch
                               ? 'border-emerald-500/60 focus:border-emerald-500 ring-1 ring-emerald-500/20'
@@ -867,15 +948,86 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                   </div>
                 </div>
               )}
+
+              {/* AVISO DE CUENTA EXISTENTE DETECTADA (EVITAR DUPLICADOS) */}
+              {existingAccountFound && (
+                <div className="p-4 rounded-2xl bg-amber-500/10 border border-amber-500/40 text-xs space-y-3 animate-in fade-in">
+                  <div className="flex items-start gap-2.5">
+                    <AlertCircle className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" />
+                    <div>
+                      <h4 className="font-bold text-white text-sm">
+                        ¡Este correo ya está registrado en Cachengueoo!
+                      </h4>
+                      <p className="text-zinc-300 text-xs mt-1 leading-relaxed">
+                        Encontramos la cuenta de <strong className="text-white">{existingAccountFound.nickname || existingAccountFound.fullName}</strong> ({existingAccountFound.email}). No hace falta crear otra cuenta, podés ingresar directamente a tu perfil existente.
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="pt-2 border-t border-amber-500/20 space-y-2.5">
+                    {authProvider === 'gmail' ? (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          onAuthSuccess(existingAccountFound);
+                          onClose();
+                        }}
+                        className="w-full h-11 rounded-xl bg-[#F39200] hover:bg-[#E08400] text-black font-extrabold text-xs flex items-center justify-center gap-2 cursor-pointer transition-all shadow-md shadow-[#F39200]/25"
+                      >
+                        <LogIn className="w-4 h-4" />
+                        <span>Ingresar directamente a mi perfil existente</span>
+                      </button>
+                    ) : (
+                      <div className="space-y-2">
+                        <p className="text-[11px] text-zinc-400">
+                          Ingresá tu contraseña para acceder a tu perfil:
+                        </p>
+                        <div className="relative">
+                          <Lock className="w-4 h-4 text-zinc-500 absolute left-3 top-3 pointer-events-none" />
+                          <input
+                            type="password"
+                            placeholder="Contraseña de tu cuenta"
+                            value={existingPasswordInput}
+                            onChange={(e) => setExistingPasswordInput(e.target.value)}
+                            className="w-full min-w-0 max-w-full h-10 pl-9 pr-3 rounded-xl bg-zinc-900 border border-zinc-700 text-white font-medium focus:outline-none focus:border-[#F39200]"
+                          />
+                        </div>
+                        <div className="flex gap-2">
+                          <button
+                            type="button"
+                            disabled={isSubmitting}
+                            onClick={handleLoginExistingAccount}
+                            className="flex-1 h-10 rounded-xl bg-[#F39200] hover:bg-[#E08400] text-black font-extrabold text-xs flex items-center justify-center gap-2 cursor-pointer transition-all shadow-md shadow-[#F39200]/25 disabled:opacity-50"
+                          >
+                            <LogIn className="w-4 h-4" />
+                            <span>{isSubmitting ? 'Ingresando...' : 'Ingresar a mi perfil'}</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setLoginEmail(existingAccountFound.email);
+                              setCurrentView('login');
+                            }}
+                            className="px-3 h-10 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-300 hover:text-white text-xs font-semibold cursor-pointer"
+                          >
+                            Ir al Login
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* Botón Siguiente Paso */}
             <div className="pt-3">
               <button
                 type="submit"
-                className="w-full h-11 rounded-xl bg-[#F39200] hover:bg-[#E08400] text-black font-extrabold text-xs flex items-center justify-center gap-2 cursor-pointer transition-all shadow-md shadow-[#F39200]/25"
+                disabled={isCheckingEmail}
+                className="w-full h-11 rounded-xl bg-[#F39200] hover:bg-[#E08400] text-black font-extrabold text-xs flex items-center justify-center gap-2 cursor-pointer transition-all shadow-md shadow-[#F39200]/25 disabled:opacity-60"
               >
-                <span>Siguiente: Gustos & Match</span>
+                <span>{isCheckingEmail ? 'Verificando cuenta...' : 'Siguiente: Gustos & Match'}</span>
                 <ArrowRight className="w-4 h-4" />
               </button>
             </div>
@@ -886,7 +1038,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
         {/* WIZARD STEP 2: MATCH & GUSTOS (SIGNO, MÚSICA, TRAGO)      */}
         {/* ========================================================== */}
         {currentView === 'register_step_2' && (
-          <form onSubmit={handleProceedToStep3} className="space-y-4 pt-1">
+          <form onSubmit={handleProceedToStep3} className="space-y-4 pt-1 w-full min-w-0 overflow-x-hidden box-border">
             {/* Header con indicador de paso */}
             <div className="flex items-center justify-between pb-3 border-b border-zinc-800">
               <div className="flex items-center gap-2">
@@ -916,14 +1068,14 @@ export const AuthModal: React.FC<AuthModalProps> = ({
               <div className="bg-gradient-to-r from-amber-500 to-[#F39200] h-1.5 rounded-full w-2/3 transition-all duration-300" />
             </div>
 
-            <div className="space-y-4 text-xs">
+            <div className="space-y-4 text-xs min-w-0 w-full">
               {/* 1. Ver en Match (todos, hombres, mujeres) */}
-              <div>
+              <div className="min-w-0 w-full">
                 <label className="text-zinc-300 block mb-1.5 font-bold flex items-center gap-1.5">
                   <Users className="w-3.5 h-3.5 text-[#F39200]" />
                   <span>Ver en Match</span>
                 </label>
-                <div className="grid grid-cols-3 gap-2">
+                <div className="grid grid-cols-3 gap-2 w-full min-w-0">
                   {[
                     { id: 'todos', label: 'Todos' },
                     { id: 'hombres', label: 'Hombres' },
@@ -933,7 +1085,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                       key={opt.id}
                       type="button"
                       onClick={() => setRegPreference(opt.id as PreferenceGender)}
-                      className={`h-9 rounded-xl font-bold cursor-pointer transition-all ${
+                      className={`h-9 rounded-xl font-bold cursor-pointer transition-all min-w-0 truncate ${
                         regPreference === opt.id
                           ? 'bg-[#F39200] text-black shadow-md'
                           : 'bg-zinc-900 border border-zinc-800 text-zinc-400 hover:text-white'
@@ -946,7 +1098,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
               </div>
 
               {/* 2. SIGNO (PONE SIGNO SOLAMENTE EN EL TÍTULO) */}
-              <div>
+              <div className="min-w-0 w-full">
                 <div className="flex items-center justify-between mb-1.5">
                   <label className="text-zinc-300 font-bold flex items-center gap-1.5">
                     <Sparkles className="w-3.5 h-3.5 text-[#F39200]" />
@@ -957,7 +1109,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                   </span>
                 </div>
 
-                <div className="grid grid-cols-4 sm:grid-cols-6 gap-1.5">
+                <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-1.5 w-full min-w-0">
                   {ZODIAC_SIGNS.map((s) => {
                     const isSelected = regZodiacSign === s.name;
                     return (
@@ -965,14 +1117,14 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                         key={s.name}
                         type="button"
                         onClick={() => setRegZodiacSign(s.name)}
-                        className={`p-2 rounded-xl border text-center transition-all cursor-pointer flex flex-col items-center justify-center gap-0.5 ${
+                        className={`p-1.5 sm:p-2 rounded-xl border text-center transition-all cursor-pointer flex flex-col items-center justify-center gap-0.5 min-w-0 w-full overflow-hidden ${
                           isSelected
                             ? 'bg-gradient-to-b from-[#F39200]/25 to-amber-500/10 border-[#F39200] text-amber-300 font-bold ring-1 ring-[#F39200]/50'
                             : 'bg-zinc-900/80 border-zinc-800 text-zinc-400 hover:text-white hover:border-zinc-700'
                         }`}
                       >
                         <span className="text-sm">{s.symbol}</span>
-                        <span className="text-[10.5px] leading-tight truncate w-full">{s.name}</span>
+                        <span className="text-[10px] sm:text-[10.5px] leading-tight truncate w-full block text-center">{s.name}</span>
                       </button>
                     );
                   })}
@@ -980,7 +1132,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
               </div>
 
               {/* 3. ¿QUÉ MÚSICA TE GUSTA? */}
-              <div>
+              <div className="min-w-0 w-full">
                 <div className="flex items-center justify-between mb-1.5">
                   <label className="text-zinc-300 font-bold flex items-center gap-1.5">
                     <Music className="w-3.5 h-3.5 text-[#F39200]" />
@@ -991,7 +1143,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                   </span>
                 </div>
 
-                <div className="flex flex-wrap gap-1.5">
+                <div className="flex flex-wrap gap-1.5 w-full min-w-0">
                   {MUSIC_GENRES.map((genre) => {
                     const isSelected = regMusicPreferences.includes(genre);
                     return (
@@ -999,14 +1151,14 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                         key={genre}
                         type="button"
                         onClick={() => toggleMusicGenre(genre)}
-                        className={`px-3 py-1.5 rounded-full text-[11px] font-bold cursor-pointer transition-all flex items-center gap-1 ${
+                        className={`px-2.5 sm:px-3 py-1.5 rounded-full text-[11px] font-bold cursor-pointer transition-all flex items-center gap-1 min-w-0 max-w-full truncate ${
                           isSelected
                             ? 'bg-[#F39200] text-black shadow-sm'
                             : 'bg-zinc-900 border border-zinc-800 text-zinc-400 hover:text-white'
                         }`}
                       >
-                        {isSelected && <Check className="w-3 h-3 stroke-[3]" />}
-                        <span>{genre}</span>
+                        {isSelected && <Check className="w-3 h-3 stroke-[3] shrink-0" />}
+                        <span className="truncate">{genre}</span>
                       </button>
                     );
                   })}
@@ -1014,7 +1166,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
               </div>
 
               {/* 4. ¿QUÉ TOMÁS? (SELECCIÓN DE 2 OPCIONES) */}
-              <div>
+              <div className="min-w-0 w-full">
                 <div className="flex items-center justify-between mb-1.5">
                   <label className="text-zinc-300 font-bold flex items-center gap-1.5">
                     <GlassWater className="w-3.5 h-3.5 text-[#F39200]" />
@@ -1025,7 +1177,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                   </span>
                 </div>
 
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 w-full min-w-0">
                   {DRINK_OPTIONS.map((drink) => {
                     const isSelected = regDrinks.includes(drink);
                     return (
@@ -1033,14 +1185,14 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                         key={drink}
                         type="button"
                         onClick={() => toggleDrink(drink)}
-                        className={`h-9 px-2.5 rounded-xl text-xs font-bold cursor-pointer transition-all flex items-center justify-center gap-1.5 ${
+                        className={`h-9 px-2 sm:px-2.5 rounded-xl text-[11px] sm:text-xs font-bold cursor-pointer transition-all flex items-center justify-center gap-1.5 min-w-0 truncate ${
                           isSelected
                             ? 'bg-amber-400 text-black shadow-md font-extrabold'
                             : 'bg-zinc-900 border border-zinc-800 text-zinc-400 hover:text-white'
                         }`}
                       >
-                        <span>{drink}</span>
-                        {isSelected && <Check className="w-3 h-3 stroke-[3]" />}
+                        <span className="truncate">{drink}</span>
+                        {isSelected && <Check className="w-3 h-3 stroke-[3] shrink-0" />}
                       </button>
                     );
                   })}
@@ -1072,7 +1224,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
         {/* WIZARD STEP 3: HASTA 3 FOTOS, BIO Y BOTÓN "CREAR CACHE ID" */}
         {/* ========================================================== */}
         {currentView === 'register_step_3' && (
-          <form onSubmit={handleCreateCacheId} className="space-y-4 pt-1">
+          <form onSubmit={handleCreateCacheId} className="space-y-4 pt-1 w-full min-w-0 overflow-x-hidden box-border">
             {/* Header con indicador de paso */}
             <div className="flex items-center justify-between pb-3 border-b border-zinc-800">
               <div className="flex items-center gap-2">
@@ -1102,9 +1254,9 @@ export const AuthModal: React.FC<AuthModalProps> = ({
               <div className="bg-gradient-to-r from-amber-500 to-[#F39200] h-1.5 rounded-full w-full transition-all duration-300" />
             </div>
 
-            <div className="space-y-4 text-xs">
+            <div className="space-y-4 text-xs min-w-0 w-full">
               {/* Fotos (hasta 3 fotos) */}
-              <div>
+              <div className="min-w-0 w-full">
                 <div className="flex items-center justify-between mb-1.5">
                   <label className="text-zinc-300 font-bold flex items-center gap-1.5">
                     <Camera className="w-3.5 h-3.5 text-[#F39200]" />
@@ -1116,14 +1268,14 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                 </div>
 
                 {/* Slots de fotos */}
-                <div className="grid grid-cols-3 gap-2.5">
+                <div className="grid grid-cols-3 gap-2 sm:gap-2.5 w-full min-w-0">
                   {[0, 1, 2].map((idx) => {
                     const photoUrl = regPhotos[idx];
                     const isRequired = idx === 0;
                     return (
                       <div
                         key={idx}
-                        className={`relative aspect-[3/4] rounded-2xl overflow-hidden border-2 flex flex-col items-center justify-center transition-all ${
+                        className={`relative aspect-[3/4] rounded-2xl overflow-hidden border-2 flex flex-col items-center justify-center transition-all min-w-0 w-full ${
                           photoUrl
                             ? 'border-[#F39200]/80 bg-zinc-950 shadow-md'
                             : isRequired
@@ -1199,7 +1351,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
               </div>
 
               {/* Biografía */}
-              <div>
+              <div className="min-w-0 w-full">
                 <label className="text-zinc-300 block mb-1 font-bold">
                   Biografía
                 </label>
@@ -1209,7 +1361,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                   placeholder="Contá algo sobre vos, cómo te gusta salir o con qué tema no te sentás..."
                   value={regBio}
                   onChange={(e) => setRegBio(e.target.value)}
-                  className="w-full p-3 rounded-xl bg-zinc-900 border border-zinc-800 text-white font-medium focus:outline-none focus:border-[#F39200] leading-relaxed resize-none text-xs"
+                  className="w-full min-w-0 max-w-full p-3 rounded-xl bg-zinc-900 border border-zinc-800 text-white font-medium focus:outline-none focus:border-[#F39200] leading-relaxed resize-none text-xs box-border"
                 />
               </div>
             </div>

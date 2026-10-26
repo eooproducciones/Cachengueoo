@@ -20,9 +20,10 @@ import {
   ExternalLink,
   Music,
   Ban,
+  Flame,
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
-import { MatchPair, MatchProfile, UserProfile } from '../../types';
+import { ChatMessage, MatchPair, MatchProfile, UserProfile } from '../../types';
 import { matchService } from '../../services/matchService';
 import { eventService } from '../../services/eventService';
 import { DrinkPlusIcon } from '../common/DrinkPlusIcon';
@@ -52,7 +53,7 @@ export const MatchView: React.FC<MatchViewProps> = ({
 }) => {
   const [profiles, setProfiles] = useState<MatchProfile[]>(() => matchService.getAvailableProfiles());
   const [currentIndex, setCurrentIndex] = useState(0);
-  const [matches, setMatches] = useState<MatchPair[]>(() => matchService.getMatches());
+  const [matches, setMatches] = useState<MatchPair[]>(() => matchService.getMatches(currentUser?.id));
   const [celebrationMatch, setCelebrationMatch] = useState<MatchPair | null>(null);
   const [selectedChatMatch, setSelectedChatMatch] = useState<MatchPair | null>(null);
   const [swipeDirection, setSwipeDirection] = useState<'left' | 'right' | null>(null);
@@ -130,6 +131,7 @@ export const MatchView: React.FC<MatchViewProps> = ({
     // 2. Cargar personas que dieron corazón (Conectá) y Matches mutuos
     let pollInterval: ReturnType<typeof setInterval> | null = null;
     if (currentUser?.id) {
+      setMatches(matchService.getMatches(currentUser.id));
       setLoadingConecta(true);
       const refreshConectaAndMatches = () => {
         Promise.all([
@@ -438,16 +440,17 @@ export const MatchView: React.FC<MatchViewProps> = ({
                 : 'text-zinc-400 hover:text-white'
             }`}
           >
+            <Heart className={`w-3.5 h-3.5 ${matchSection === 'conecta' ? 'fill-black' : 'fill-current'}`} />
             <span>Conectá</span>
             {conectaProfiles.length > 0 && (
               <span
                 className={`px-1.5 py-0.2 rounded-full text-[10px] font-black ${
                   matchSection === 'conecta'
                     ? 'bg-black text-[#F39200]'
-                    : 'bg-[#F39200] text-black'
+                    : 'bg-rose-500 text-white animate-pulse'
                 }`}
               >
-                {conectaProfiles.length}
+                +{conectaProfiles.length}
               </span>
             )}
           </button>
@@ -461,13 +464,14 @@ export const MatchView: React.FC<MatchViewProps> = ({
                 : 'text-zinc-400 hover:text-white'
             }`}
           >
+            <Flame className={`w-3.5 h-3.5 ${matchSection === 'mismatch' ? 'fill-black' : 'fill-current'}`} />
             <span>Mis Match</span>
             {matches.length > 0 && (
               <span
                 className={`px-1.5 py-0.2 rounded-full text-[10px] font-black ${
                   matchSection === 'mismatch'
                     ? 'bg-black text-[#F39200]'
-                    : 'bg-zinc-800 text-zinc-300'
+                    : 'bg-[#F39200] text-black'
                 }`}
               >
                 {matches.length}
@@ -479,13 +483,27 @@ export const MatchView: React.FC<MatchViewProps> = ({
         {/* ===================== APARTADO 1: CONECTÁ ===================== */}
         {matchSection === 'conecta' && (
           <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
-            <div className="shrink-0 pb-2">
+            {/* Diferencial destacado: Se interesaron en vos y te dieron me gusta */}
+            <div className="shrink-0 mb-3 p-3.5 rounded-2xl bg-gradient-to-r from-amber-500/15 via-rose-500/15 to-transparent border border-[#F39200]/40 shadow-lg relative overflow-hidden">
+              <div className="flex flex-wrap items-center gap-2 mb-1.5">
+                <span className="px-2 py-0.5 rounded-full bg-[#F39200] text-black font-black text-[10px] tracking-wider uppercase flex items-center gap-1 shadow-sm">
+                  <Sparkles className="w-3 h-3 fill-black" />
+                  Se interesaron en vos
+                </span>
+                <span className="text-[11px] font-extrabold text-rose-400 flex items-center gap-1">
+                  <Heart className="w-3.5 h-3.5 fill-rose-500" />
+                  Te dieron Me Gusta
+                </span>
+              </div>
               <h2 className="text-base font-black text-white font-display uppercase tracking-tight">
-                Conectá
+                ¡Se fijaron en vos en la pista!
               </h2>
+              <p className="text-[11px] text-zinc-300 leading-relaxed mt-0.5">
+                Estas personas vieron tu perfil en Cachengueoo y te dieron corazón ❤️. Mirá quiénes son, qué trago toman y si te gustan, tocalas para conectar. ¡Si les devolvés el Me Gusta hacen <strong>Match instantáneo</strong> para hablar ya mismo!
+              </p>
             </div>
 
-            <div className="flex-1 min-h-0 overflow-y-auto pt-2 pb-6">
+            <div className="flex-1 min-h-0 overflow-y-auto pt-1 pb-6">
               {loadingConecta ? (
                 <div className="flex items-center justify-center py-16 text-zinc-400 text-xs gap-2">
                   <div className="w-4 h-4 border-2 border-[#F39200] border-t-transparent rounded-full animate-spin"></div>
@@ -514,8 +532,14 @@ export const MatchView: React.FC<MatchViewProps> = ({
                   {conectaProfiles.map((item) => (
                     <div
                       key={item.userId}
-                      className="rounded-2xl bg-[#121217] border border-zinc-800/90 overflow-hidden flex flex-col justify-between shadow-lg hover:border-[#F39200]/50 transition-all group"
+                      className="rounded-2xl bg-[#121217] border border-zinc-800/90 overflow-hidden flex flex-col justify-between shadow-lg hover:border-[#F39200]/50 transition-all group relative"
                     >
+                      {/* Badge flotante destacando que le gustó tu perfil */}
+                      <div className="absolute top-2 left-2 z-10 flex items-center gap-1 px-2 py-0.5 rounded-full bg-rose-600/95 text-white font-black text-[9.5px] shadow-lg border border-rose-400/40 backdrop-blur-sm animate-pulse">
+                        <Heart className="w-2.5 h-2.5 fill-white" />
+                        <span>¡Le gustaste!</span>
+                      </div>
+
                       <div className="relative aspect-[3/4] w-full bg-zinc-900 overflow-hidden">
                         <img
                           src={item.avatarUrl || item.photos?.[0]}
@@ -529,7 +553,7 @@ export const MatchView: React.FC<MatchViewProps> = ({
                             {item.nickname}, {item.age}
                           </h4>
                           {item.drinkFavorite && (
-                            <span className="text-[10px] text-zinc-300 truncate block">
+                            <span className="text-[10px] text-amber-300 truncate block font-medium">
                               🍸 {item.drinkFavorite}
                             </span>
                           )}
@@ -543,9 +567,10 @@ export const MatchView: React.FC<MatchViewProps> = ({
                             setInspectingPhotoIndex(0);
                             setInspectingConectaProfile(item);
                           }}
-                          className="w-full py-2 px-3 rounded-xl bg-[#F39200] hover:bg-[#E08400] text-black font-black text-xs flex items-center justify-center gap-1.5 cursor-pointer shadow-md shadow-[#F39200]/20 active:scale-95 transition-all"
+                          className="w-full py-2 px-3 rounded-xl bg-gradient-to-r from-[#F39200] to-amber-500 hover:from-[#E08400] hover:to-amber-600 text-black font-black text-xs flex items-center justify-center gap-1.5 cursor-pointer shadow-md shadow-[#F39200]/20 active:scale-95 transition-all"
                         >
-                          Ver perfil
+                          <Sparkles className="w-3.5 h-3.5" />
+                          Conectar y Ver Perfil
                         </button>
                       </div>
                     </div>
@@ -559,13 +584,23 @@ export const MatchView: React.FC<MatchViewProps> = ({
         {/* ===================== APARTADO 2: MIS MATCH ===================== */}
         {matchSection === 'mismatch' && (
           <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
-            <div className="shrink-0 pb-2">
+            {/* Encabezado explicativo con incentivo a conversar */}
+            <div className="shrink-0 mb-3 p-3.5 rounded-2xl bg-gradient-to-r from-[#F39200]/15 via-emerald-500/10 to-transparent border border-zinc-800 shadow-md">
+              <div className="flex items-center gap-1.5 mb-1">
+                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping"></span>
+                <span className="text-[10px] font-black uppercase text-[#F39200] tracking-wider">
+                  Conexiones Mutuas en Cachengueoo
+                </span>
+              </div>
               <h2 className="text-base font-black text-white font-display uppercase tracking-tight">
                 Mis Match
               </h2>
+              <p className="text-[11px] text-zinc-300 leading-relaxed mt-0.5">
+                ¡Ambos se gustaron! Hablen un ratito, tomen algo juntos o invítense un trago en la barra.
+              </p>
             </div>
 
-            <div className="flex-1 min-h-0 overflow-y-auto space-y-2.5 pt-2 pb-6">
+            <div className="flex-1 min-h-0 overflow-y-auto space-y-2.5 pt-1 pb-6">
               {matches.length === 0 ? (
                 <div className="p-8 rounded-3xl bg-[#121217] border border-zinc-800 text-center space-y-3 mt-4">
                   <div className="w-12 h-12 rounded-2xl bg-zinc-900 border border-zinc-800 flex items-center justify-center mx-auto text-[#F39200]">
@@ -588,12 +623,13 @@ export const MatchView: React.FC<MatchViewProps> = ({
                 matches.map((item) => {
                   const partner = item.partnerProfile;
                   if (!partner) return null;
+                  const hasMessages = Boolean(item.lastMessageSnippet);
 
                   return (
                     <div
                       key={item.id}
                       onClick={() => setSelectedChatMatch(item)}
-                      className="p-3.5 rounded-2xl bg-[#121217] border border-zinc-800 hover:border-[#F39200]/60 flex items-center gap-3.5 cursor-pointer transition-all active:scale-[0.99] shadow-md group"
+                      className="p-3.5 rounded-2xl bg-[#121217] border border-zinc-800 hover:border-[#F39200]/60 flex items-center gap-3.5 cursor-pointer transition-all active:scale-[0.99] shadow-md group relative overflow-hidden"
                     >
                       <div className="relative shrink-0">
                         <img
@@ -610,12 +646,26 @@ export const MatchView: React.FC<MatchViewProps> = ({
                           <h4 className="text-sm font-black text-white font-display truncate">
                             {partner.nickname}, {partner.age}
                           </h4>
-                          <span className="text-[10px] text-[#F39200] font-bold">
+                          <span className="text-[10px] text-[#F39200] font-bold shrink-0">
                             {item.lastMessageAt || 'Ahora'}
                           </span>
                         </div>
+
+                        {/* Notificación especial para avisar que hicieron match o le escribió */}
+                        {hasMessages ? (
+                          <div className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-emerald-500/20 border border-emerald-500/50 text-emerald-400 text-[10px] font-black mb-1 animate-pulse">
+                            <MessageCircle className="w-3 h-3 fill-emerald-500" />
+                            <span>¡Te escribió! Tocá para responder</span>
+                          </div>
+                        ) : (
+                          <div className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-[#F39200]/20 border border-[#F39200]/50 text-[#F39200] text-[10px] font-black mb-1">
+                            <Flame className="w-3 h-3 fill-[#F39200]" />
+                            <span>¡Nuevo Match! Iniciá la conversación</span>
+                          </div>
+                        )}
+
                         <p className="text-xs text-zinc-400 truncate">
-                          {item.lastMessageSnippet || '¡Nuevo Match! Tocá para chatear.'}
+                          {item.lastMessageSnippet || '¡Hicieron Match! Tocá acá para empezar a chatear.'}
                         </p>
                       </div>
                     </div>
@@ -710,6 +760,17 @@ export const MatchView: React.FC<MatchViewProps> = ({
 
                 {/* Información y botones de interacción */}
                 <div className="relative z-20 p-4 pb-4 flex flex-col justify-end space-y-3 pointer-events-auto">
+                  {/* Banner destacado: Se interesaron en vos */}
+                  <div className="p-2.5 rounded-2xl bg-gradient-to-r from-rose-950/90 to-amber-950/85 border border-rose-500/50 text-center shadow-lg">
+                    <p className="text-xs font-black text-rose-200 flex items-center justify-center gap-1.5">
+                      <Heart className="w-3.5 h-3.5 fill-rose-500 text-rose-500 animate-pulse" />
+                      ¡{inspectingConectaProfile.nickname} se interesó en vos y te dio Me Gusta!
+                    </p>
+                    <p className="text-[10px] text-zinc-300 mt-0.5">
+                      Tocá el botón verde abajo para hacer <strong>Match mutuo</strong> y empezar a chatear.
+                    </p>
+                  </div>
+
                   <div className="space-y-1 w-full min-w-0">
                     <div className="flex items-center gap-1.5">
                       <h3 className="text-xl sm:text-2xl font-black text-white font-display tracking-tight leading-none drop-shadow-md truncate">
@@ -798,35 +859,70 @@ export const MatchView: React.FC<MatchViewProps> = ({
             }}
             onBlockOrReport={() => {
               setSelectedChatMatch(null);
-              setMatches(matchService.getMatches());
+              setMatches(matchService.getMatches(currentUser.id));
             }}
           />
         )}
 
         {/* Modal de Celebración de Match dentro de la vista Matches / Conectá */}
         {celebrationMatch && celebrationMatch.partnerProfile && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/90 backdrop-blur-lg animate-in zoom-in-95 duration-200">
-            <div className="max-w-sm w-full bg-[#121217] border border-[#F39200]/40 rounded-3xl p-6 text-center space-y-4 shadow-2xl relative">
-              <h3 className="text-2xl font-black text-white font-display uppercase tracking-tight">
-                ¡Hicieron Match!
-              </h3>
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/95 backdrop-blur-xl animate-in zoom-in-95 duration-200">
+            <div className="max-w-sm w-full bg-gradient-to-b from-[#1c140d] via-[#121217] to-[#09090b] border-2 border-[#F39200]/70 rounded-3xl p-6 text-center space-y-4 shadow-[0_0_50px_rgba(243,146,0,0.35)] relative overflow-hidden">
+              <div className="absolute -top-16 left-1/2 -translate-x-1/2 w-48 h-48 bg-[#F39200]/20 rounded-full blur-3xl pointer-events-none"></div>
 
-              <div className="flex items-center justify-center -space-x-3 py-1">
-                <img
-                  src={currentUser.avatarUrl}
-                  alt={currentUser.fullName}
-                  className="w-16 h-16 rounded-full object-cover border-2 border-[#F39200] shadow-xl"
-                  referrerPolicy="no-referrer"
-                />
-                <div className="w-8 h-8 rounded-full bg-[#F39200] text-black font-black flex items-center justify-center z-10 shadow-md text-sm">
+              <div className="relative space-y-1 pt-1">
+                <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#F39200]/20 border border-[#F39200]/50 text-[#F39200] font-black text-[11px] uppercase tracking-wider shadow-sm">
+                  <Sparkles className="w-3.5 h-3.5 fill-[#F39200]" />
+                  ¡Conexión en Cachengueoo!
+                </span>
+                <h3 className="text-3xl font-black text-transparent bg-clip-text bg-gradient-to-r from-amber-300 via-white to-[#F39200] font-display uppercase tracking-tight drop-shadow-md">
+                  ¡Hicieron Match!
+                </h3>
+                <p className="text-xs sm:text-sm text-amber-200/95 font-medium italic">
+                  “Hablen un ratito, tomen algo, pasenla lindo”
+                </p>
+              </div>
+
+              {/* Colisión de avatares con resplandor dorado */}
+              <div className="relative flex items-center justify-center -space-x-4 py-2">
+                <div className="relative">
+                  <img
+                    src={currentUser.avatarUrl}
+                    alt={currentUser.fullName}
+                    className="w-20 h-20 rounded-full object-cover border-3 border-[#F39200] shadow-[0_0_20px_rgba(243,146,0,0.4)]"
+                    referrerPolicy="no-referrer"
+                  />
+                  <span className="absolute bottom-0 right-0 w-4 h-4 rounded-full bg-emerald-500 border-2 border-black" />
+                </div>
+
+                <div className="w-10 h-10 rounded-full bg-gradient-to-tr from-[#F39200] to-rose-500 text-white font-black flex items-center justify-center z-10 shadow-xl text-base ring-4 ring-[#121217] animate-pulse">
                   ❤️
                 </div>
-                <img
-                  src={celebrationMatch.partnerProfile.avatarUrl}
-                  alt={celebrationMatch.partnerProfile.fullName}
-                  className="w-16 h-16 rounded-full object-cover border-2 border-[#F39200] shadow-xl"
-                  referrerPolicy="no-referrer"
-                />
+
+                <div className="relative">
+                  <img
+                    src={celebrationMatch.partnerProfile.avatarUrl}
+                    alt={celebrationMatch.partnerProfile.fullName}
+                    className="w-20 h-20 rounded-full object-cover border-3 border-[#F39200] shadow-[0_0_20px_rgba(243,146,0,0.4)]"
+                    referrerPolicy="no-referrer"
+                  />
+                  <span className="absolute bottom-0 right-0 w-4 h-4 rounded-full bg-emerald-500 border-2 border-black" />
+                </div>
+              </div>
+
+              <div className="space-y-1 text-center">
+                <p className="text-sm font-extrabold text-white font-display">
+                  Vos y {celebrationMatch.partnerProfile.nickname} se gustaron
+                </p>
+                {celebrationMatch.partnerProfile.drinkFavorite ? (
+                  <p className="text-[11px] text-zinc-300">
+                    🍸 Su trago favorito es <strong className="text-amber-400">{celebrationMatch.partnerProfile.drinkFavorite}</strong>
+                  </p>
+                ) : (
+                  <p className="text-[11px] text-zinc-400">
+                    Están en la misma fiesta esta noche
+                  </p>
+                )}
               </div>
 
               <div className="space-y-2 pt-2">
@@ -836,15 +932,15 @@ export const MatchView: React.FC<MatchViewProps> = ({
                     setCelebrationMatch(null);
                     setSelectedChatMatch(m);
                   }}
-                  className="w-full h-11 rounded-xl bg-[#F39200] hover:bg-[#E08400] text-black font-bold text-xs flex items-center justify-center gap-2 cursor-pointer shadow-lg shadow-[#F39200]/20 active:scale-95 transition-all"
+                  className="w-full h-12 rounded-2xl bg-gradient-to-r from-[#F39200] to-amber-500 hover:from-[#E08400] hover:to-amber-600 text-black font-black text-sm flex items-center justify-center gap-2 cursor-pointer shadow-xl shadow-[#F39200]/30 active:scale-95 transition-all"
                 >
-                  <MessageCircle className="w-4 h-4" />
-                  Escribir ahora por chat
+                  <MessageCircle className="w-4 h-4 fill-black" />
+                  Escribir ahora por chat 💬
                 </button>
 
                 <button
                   onClick={() => setCelebrationMatch(null)}
-                  className="w-full h-9 rounded-xl bg-zinc-900 border border-zinc-800 text-zinc-300 font-medium text-xs cursor-pointer hover:text-white transition-colors"
+                  className="w-full h-10 rounded-xl bg-zinc-900/90 border border-zinc-800 text-zinc-300 font-bold text-xs cursor-pointer hover:text-white hover:bg-zinc-800 transition-colors"
                 >
                   Seguir mirando
                 </button>
@@ -1412,29 +1508,63 @@ export const MatchView: React.FC<MatchViewProps> = ({
 
       {/* MODAL DE CELEBRACIÓN DE MATCH */}
       {celebrationMatch && celebrationMatch.partnerProfile && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/90 backdrop-blur-lg animate-in zoom-in-95 duration-200">
-          <div className="max-w-sm w-full bg-[#121217] border border-[#F39200]/40 rounded-3xl p-6 text-center space-y-4 shadow-2xl relative">
-            <h3 className="text-2xl font-black text-white font-display uppercase tracking-tight">
-              ¡Hicieron Match!
-            </h3>
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/95 backdrop-blur-xl animate-in zoom-in-95 duration-200">
+          <div className="max-w-sm w-full bg-gradient-to-b from-[#1c140d] via-[#121217] to-[#09090b] border-2 border-[#F39200]/70 rounded-3xl p-6 text-center space-y-4 shadow-[0_0_50px_rgba(243,146,0,0.35)] relative overflow-hidden">
+            <div className="absolute -top-16 left-1/2 -translate-x-1/2 w-48 h-48 bg-[#F39200]/20 rounded-full blur-3xl pointer-events-none"></div>
 
-            {/* Colisión de avatares */}
-            <div className="flex items-center justify-center -space-x-3 py-1">
-              <img
-                src={currentUser.avatarUrl}
-                alt={currentUser.fullName}
-                className="w-16 h-16 rounded-full object-cover border-2 border-[#F39200] shadow-xl"
-                referrerPolicy="no-referrer"
-              />
-              <div className="w-8 h-8 rounded-full bg-[#F39200] text-black font-black flex items-center justify-center z-10 shadow-md text-sm">
+            <div className="relative space-y-1 pt-1">
+              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#F39200]/20 border border-[#F39200]/50 text-[#F39200] font-black text-[11px] uppercase tracking-wider shadow-sm">
+                <Sparkles className="w-3.5 h-3.5 fill-[#F39200]" />
+                ¡Conexión en Cachengueoo!
+              </span>
+              <h3 className="text-3xl font-black text-transparent bg-clip-text bg-gradient-to-r from-amber-300 via-white to-[#F39200] font-display uppercase tracking-tight drop-shadow-md">
+                ¡Hicieron Match!
+              </h3>
+              <p className="text-xs sm:text-sm text-amber-200/95 font-medium italic">
+                “Hablen un ratito, tomen algo, pasenla lindo”
+              </p>
+            </div>
+
+            {/* Colisión de avatares con resplandor dorado */}
+            <div className="relative flex items-center justify-center -space-x-4 py-2">
+              <div className="relative">
+                <img
+                  src={currentUser.avatarUrl}
+                  alt={currentUser.fullName}
+                  className="w-20 h-20 rounded-full object-cover border-3 border-[#F39200] shadow-[0_0_20px_rgba(243,146,0,0.4)]"
+                  referrerPolicy="no-referrer"
+                />
+                <span className="absolute bottom-0 right-0 w-4 h-4 rounded-full bg-emerald-500 border-2 border-black" />
+              </div>
+
+              <div className="w-10 h-10 rounded-full bg-gradient-to-tr from-[#F39200] to-rose-500 text-white font-black flex items-center justify-center z-10 shadow-xl text-base ring-4 ring-[#121217] animate-pulse">
                 ❤️
               </div>
-              <img
-                src={celebrationMatch.partnerProfile.avatarUrl}
-                alt={celebrationMatch.partnerProfile.fullName}
-                className="w-16 h-16 rounded-full object-cover border-2 border-[#F39200] shadow-xl"
-                referrerPolicy="no-referrer"
-              />
+
+              <div className="relative">
+                <img
+                  src={celebrationMatch.partnerProfile.avatarUrl}
+                  alt={celebrationMatch.partnerProfile.fullName}
+                  className="w-20 h-20 rounded-full object-cover border-3 border-[#F39200] shadow-[0_0_20px_rgba(243,146,0,0.4)]"
+                  referrerPolicy="no-referrer"
+                />
+                <span className="absolute bottom-0 right-0 w-4 h-4 rounded-full bg-emerald-500 border-2 border-black" />
+              </div>
+            </div>
+
+            <div className="space-y-1 text-center">
+              <p className="text-sm font-extrabold text-white font-display">
+                Vos y {celebrationMatch.partnerProfile.nickname} se gustaron
+              </p>
+              {celebrationMatch.partnerProfile.drinkFavorite ? (
+                <p className="text-[11px] text-zinc-300">
+                  🍸 Su trago favorito es <strong className="text-amber-400">{celebrationMatch.partnerProfile.drinkFavorite}</strong>
+                </p>
+              ) : (
+                <p className="text-[11px] text-zinc-400">
+                  Están en la misma fiesta esta noche
+                </p>
+              )}
             </div>
 
             <div className="space-y-2 pt-2">
@@ -1444,15 +1574,15 @@ export const MatchView: React.FC<MatchViewProps> = ({
                   setCelebrationMatch(null);
                   setSelectedChatMatch(m);
                 }}
-                className="w-full h-11 rounded-xl bg-[#F39200] hover:bg-[#E08400] text-black font-bold text-xs flex items-center justify-center gap-2 cursor-pointer shadow-lg shadow-[#F39200]/20 active:scale-95 transition-all"
+                className="w-full h-12 rounded-2xl bg-gradient-to-r from-[#F39200] to-amber-500 hover:from-[#E08400] hover:to-amber-600 text-black font-black text-sm flex items-center justify-center gap-2 cursor-pointer shadow-xl shadow-[#F39200]/30 active:scale-95 transition-all"
               >
-                <MessageCircle className="w-4 h-4" />
-                Escribir ahora por chat
+                <MessageCircle className="w-4 h-4 fill-black" />
+                Escribir ahora por chat 💬
               </button>
 
               <button
                 onClick={() => setCelebrationMatch(null)}
-                className="w-full h-9 rounded-xl bg-zinc-900 border border-zinc-800 text-zinc-300 font-medium text-xs cursor-pointer hover:text-white transition-colors"
+                className="w-full h-10 rounded-xl bg-zinc-900/90 border border-zinc-800 text-zinc-300 font-bold text-xs cursor-pointer hover:text-white hover:bg-zinc-800 transition-colors"
               >
                 Seguir en la Pista
               </button>
@@ -1475,7 +1605,7 @@ export const MatchView: React.FC<MatchViewProps> = ({
           }}
           onBlockOrReport={() => {
             setSelectedChatMatch(null);
-            setMatches(matchService.getMatches());
+            setMatches(matchService.getMatches(currentUser.id));
           }}
         />
       )}
@@ -1498,35 +1628,42 @@ const ChatModal: React.FC<ChatModalProps> = ({
   onOpenInfo,
   onBlockOrReport,
 }) => {
-  const [messages, setMessages] = useState(() => matchService.getMessages(match.id));
+  const partner = match.partnerProfile;
+  const [messages, setMessages] = useState(() =>
+    matchService.getMessages(match.id, currentUser.id, partner?.userId)
+  );
   const [inputText, setInputText] = useState('');
   const [showMenu, setShowMenu] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  const partner = match.partnerProfile;
   if (!partner) return null;
 
   // Sincronización en vivo con Supabase
   useEffect(() => {
     // 1. Cargar historial completo de Supabase
-    matchService.fetchMessages(match.id).then((fresh) => {
+    matchService.fetchMessages(match.id, currentUser.id, partner.userId).then((fresh) => {
       if (fresh && fresh.length > 0) {
         setMessages(fresh);
       }
     });
 
     // 2. Suscribirse a nuevos mensajes en tiempo real
-    const unsubscribe = matchService.subscribeToMessages(match.id, (incoming) => {
-      setMessages((prev) => {
-        if (prev.some((m) => m.id === incoming.id)) return prev;
-        return [...prev, incoming];
-      });
-    });
+    const unsubscribe = matchService.subscribeToMessages(
+      match.id,
+      (incoming: ChatMessage) => {
+        setMessages((prev) => {
+          if (prev.some((m) => m.id === incoming.id)) return prev;
+          return [...prev, incoming];
+        });
+      },
+      currentUser.id,
+      partner.userId
+    );
 
     return () => {
       unsubscribe();
     };
-  }, [match.id]);
+  }, [match.id, currentUser.id, partner.userId]);
 
   // Auto-scroll al recibir o enviar mensajes
   useEffect(() => {

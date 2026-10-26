@@ -202,19 +202,38 @@ export const matchService = {
     localStorage.removeItem(DISMISSED_STORAGE_KEY);
   },
 
-  getMatches(): MatchPair[] {
+  getMatches(currentUserId?: string): MatchPair[] {
     try {
-      const saved = localStorage.getItem(MATCHES_STORAGE_KEY);
-      if (saved) return JSON.parse(saved);
+      if (!currentUserId) return [];
+      const key = `${MATCHES_STORAGE_KEY}_${currentUserId}`;
+      const saved = localStorage.getItem(key);
+      if (saved) {
+        const parsed: MatchPair[] = JSON.parse(saved);
+        return parsed.filter((m) => m.userAId === currentUserId || m.userBId === currentUserId);
+      }
+      // Migración desde legacy storage key (únicamente si pertenece al usuario)
+      const legacy = localStorage.getItem(MATCHES_STORAGE_KEY);
+      if (legacy) {
+        const parsed: MatchPair[] = JSON.parse(legacy);
+        const filtered = parsed.filter((m) => m.userAId === currentUserId || m.userBId === currentUserId);
+        if (filtered.length > 0) {
+          localStorage.setItem(key, JSON.stringify(filtered));
+        }
+        return filtered;
+      }
     } catch (e) {
       console.error(e);
     }
     return [];
   },
 
-  saveMatches(matches: MatchPair[]): void {
+  saveMatches(matches: MatchPair[], currentUserId?: string): void {
     try {
-      localStorage.setItem(MATCHES_STORAGE_KEY, JSON.stringify(matches));
+      if (currentUserId) {
+        const key = `${MATCHES_STORAGE_KEY}_${currentUserId}`;
+        const filtered = matches.filter((m) => m.userAId === currentUserId || m.userBId === currentUserId);
+        localStorage.setItem(key, JSON.stringify(filtered));
+      }
     } catch (e) {
       console.error(e);
     }
@@ -352,7 +371,7 @@ export const matchService = {
         }
       }
 
-      const matches = this.getMatches();
+      const matches = this.getMatches(fromUserId);
       const existing = matches.find(
         (m) =>
           m.id === finalMatchId ||
@@ -376,7 +395,7 @@ export const matchService = {
       };
 
       const updatedMatches = [newMatch, ...matches.filter((m) => m.id !== finalMatchId)];
-      this.saveMatches(updatedMatches);
+      this.saveMatches(updatedMatches, fromUserId);
 
       return { isMatch: true, newMatch };
     }
@@ -388,7 +407,7 @@ export const matchService = {
   async fetchIncomingLikes(currentUserId: string): Promise<MatchProfile[]> {
     if (!currentUserId) return [];
     const client = getSupabaseClient();
-    const matches = this.getMatches();
+    const matches = this.getMatches(currentUserId);
     const matchedUserIds = new Set(
       matches.map((m) => (m.userAId === currentUserId ? m.userBId : m.userAId))
     );
@@ -500,7 +519,8 @@ export const matchService = {
   },
 
   async fetchUserMatches(currentUserId: string): Promise<MatchPair[]> {
-    const localMatches = this.getMatches();
+    if (!currentUserId) return [];
+    const localMatches = this.getMatches(currentUserId);
     const client = getSupabaseClient();
     if (client && currentUserId) {
       try {
@@ -510,7 +530,16 @@ export const matchService = {
           .or(`user_a_id.eq.${currentUserId},user_b_id.eq.${currentUserId}`)
           .order('matched_at', { ascending: false });
 
-        if (!error && Array.isArray(data) && data.length > 0) {
+        if (!error && Array.isArray(data)) {
+          if (data.length === 0) {
+            // Usuario sin matches en Supabase: asegurar que no tenga matches residuales de otros usuarios
+            const validLocal = localMatches.filter(
+              (m) => m.userAId === currentUserId || m.userBId === currentUserId
+            );
+            this.saveMatches(validLocal, currentUserId);
+            return validLocal;
+          }
+
           const partnerIds = data.map((m: any) =>
             m.user_a_id === currentUserId ? m.user_b_id : m.user_a_id
           );
@@ -564,45 +593,76 @@ export const matchService = {
           const map = new Map<string, MatchPair>();
           remoteMatches.forEach((m) => map.set(m.id, m));
           localMatches.forEach((m) => {
-            if (!map.has(m.id)) map.set(m.id, m);
+            if ((m.userAId === currentUserId || m.userBId === currentUserId) && !map.has(m.id)) {
+              map.set(m.id, m);
+            }
           });
           const merged = Array.from(map.values());
-          this.saveMatches(merged);
+          this.saveMatches(merged, currentUserId);
           return merged;
         }
       } catch (e) {
         console.warn('Error fetching matches from Supabase:', e);
       }
     }
-    return localMatches;
+    return localMatches.filter((m) => m.userAId === currentUserId || m.userBId === currentUserId);
   },
 
-  getMessages(matchId: string): ChatMessage[] {
+  getMessages(matchId: string, currentUserId?: string, partnerId?: string): ChatMessage[] {
     try {
       const stored = localStorage.getItem(MESSAGES_STORAGE_KEY);
       const all: Record<string, ChatMessage[]> = stored ? JSON.parse(stored) : INITIAL_MESSAGES;
-      return all[matchId] || [];
+      let msgs: ChatMessage[] = all[matchId] || [];
+
+      if (currentUserId && partnerId) {
+        const pairKey = [currentUserId, partnerId].sort().join('_');
+        if (all[pairKey] && all[pairKey].length > msgs.length) {
+          msgs = all[pairKey];
+        }
+      }
+
+      // Filtrar estrictamente a esta conversación para que nunca se filtren mensajes a terceros
+      if (currentUserId && partnerId) {
+        return msgs.filter(
+          (m) =>
+            (m.senderId === currentUserId && m.receiverId === partnerId) ||
+            (m.senderId === partnerId && m.receiverId === currentUserId) ||
+            m.matchId === matchId
+        );
+      }
+
+      return msgs;
     } catch (e) {
       console.error(e);
       return [];
     }
   },
 
-  async fetchMessages(matchId: string): Promise<ChatMessage[]> {
-    const localMsgs = this.getMessages(matchId);
+  async fetchMessages(
+    matchId: string,
+    currentUserId?: string,
+    partnerId?: string
+  ): Promise<ChatMessage[]> {
+    const localMsgs = this.getMessages(matchId, currentUserId, partnerId);
     const client = getSupabaseClient();
     if (client) {
       try {
-        const { data, error } = await client
-          .from('chat_messages')
-          .select('*')
-          .eq('match_id', matchId)
-          .order('created_at', { ascending: true });
+        let query = client.from('chat_messages').select('*');
+
+        if (currentUserId && partnerId) {
+          query = query.or(
+            `match_id.eq.${matchId},and(sender_id.eq.${currentUserId},receiver_id.eq.${partnerId}),and(sender_id.eq.${partnerId},receiver_id.eq.${currentUserId})`
+          );
+        } else {
+          query = query.eq('match_id', matchId);
+        }
+
+        const { data, error } = await query.order('created_at', { ascending: true });
 
         if (!error && Array.isArray(data)) {
           const remoteMsgs: ChatMessage[] = data.map((row: any) => ({
             id: String(row.id),
-            matchId: row.match_id,
+            matchId: row.match_id || matchId,
             senderId: row.sender_id,
             receiverId: row.receiver_id,
             text: row.text,
@@ -610,14 +670,9 @@ export const matchService = {
             read: Boolean(row.read),
           }));
 
-          // Mezclar sin duplicados
           const map = new Map<string, ChatMessage>();
-          remoteMsgs.forEach((m) => map.set(m.id, m));
-          localMsgs.forEach((m) => {
-            if (!map.has(m.id)) {
-              map.set(m.id, m);
-            }
-          });
+          localMsgs.forEach((m) => map.set(m.id || `${m.senderId}_${m.createdAt}`, m));
+          remoteMsgs.forEach((m) => map.set(m.id || `${m.senderId}_${m.createdAt}`, m));
 
           const merged = Array.from(map.values()).sort(
             (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
@@ -627,6 +682,10 @@ export const matchService = {
           const stored = localStorage.getItem(MESSAGES_STORAGE_KEY);
           const all: Record<string, ChatMessage[]> = stored ? JSON.parse(stored) : {};
           all[matchId] = merged;
+          if (currentUserId && partnerId) {
+            const pairKey = [currentUserId, partnerId].sort().join('_');
+            all[pairKey] = merged;
+          }
           localStorage.setItem(MESSAGES_STORAGE_KEY, JSON.stringify(all));
 
           return merged;
@@ -644,52 +703,106 @@ export const matchService = {
     receiverId: string,
     text: string
   ): Promise<ChatMessage> {
-    const stored = localStorage.getItem(MESSAGES_STORAGE_KEY);
-    const all: Record<string, ChatMessage[]> = stored ? JSON.parse(stored) : INITIAL_MESSAGES;
+    const cleanText = text.trim();
+    const nowIso = new Date().toISOString();
+    const localId = `msg_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+    const pairKey = [senderId, receiverId].sort().join('_');
 
     const newMsg: ChatMessage = {
-      id: `msg_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      id: localId,
       matchId,
       senderId,
       receiverId,
-      text: text.trim(),
-      createdAt: new Date().toISOString(),
+      text: cleanText,
+      createdAt: nowIso,
       read: false,
     };
 
+    // 1. Guardar en almacenamiento local
+    const stored = localStorage.getItem(MESSAGES_STORAGE_KEY);
+    const all: Record<string, ChatMessage[]> = stored ? JSON.parse(stored) : INITIAL_MESSAGES;
     const currentList = all[matchId] || [];
     all[matchId] = [...currentList, newMsg];
+    all[pairKey] = [...(all[pairKey] || []), newMsg];
     localStorage.setItem(MESSAGES_STORAGE_KEY, JSON.stringify(all));
 
-    // Actualizar snippet en la lista de matches
-    const matches = this.getMatches();
-    const updatedMatches = matches.map((m) => {
-      if (m.id === matchId) {
-        return {
-          ...m,
-          lastMessageSnippet: text.trim(),
-          lastMessageAt: 'Ahora',
-        };
+    // 2. Transmitir en vivo localmente vía BroadcastChannel (comunicación instantánea entre pestañas)
+    try {
+      if (typeof BroadcastChannel !== 'undefined') {
+        const bc = new BroadcastChannel('cachengueoo_chat_bus');
+        bc.postMessage({ type: 'new_message', message: newMsg, pairKey, matchId });
+        bc.close();
       }
-      return m;
-    });
-    this.saveMatches(updatedMatches);
+    } catch {}
 
-    // Enviar a Supabase para sincronización real entre dispositivos
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('cachengueoo_new_chat_message', { detail: newMsg }));
+    }
+
+    // 3. Actualizar snippet en la lista de matches para ambos usuarios
+    [senderId, receiverId].forEach((uid) => {
+      const userMatches = this.getMatches(uid);
+      const updated = userMatches.map((m) => {
+        if (
+          m.id === matchId ||
+          (m.userAId === senderId && m.userBId === receiverId) ||
+          (m.userAId === receiverId && m.userBId === senderId)
+        ) {
+          return {
+            ...m,
+            lastMessageSnippet: cleanText,
+            lastMessageAt: 'Ahora',
+          };
+        }
+        return m;
+      });
+      this.saveMatches(updated, uid);
+    });
+
+    // 4. Enviar a Supabase para sincronización real entre dispositivos
     const client = getSupabaseClient();
     if (client) {
       try {
-        await client.from('chat_messages').insert({
-          id: newMsg.id,
-          match_id: matchId,
+        const broadcastChannel = client.channel(`chat_${pairKey}`);
+        broadcastChannel.subscribe((status) => {
+          if (status === 'SUBSCRIBED') {
+            broadcastChannel.send({
+              type: 'broadcast',
+              event: 'new_message',
+              payload: newMsg,
+            });
+          }
+        });
+
+        const payload: Record<string, any> = {
           sender_id: senderId,
           receiver_id: receiverId,
-          text: text.trim(),
-          created_at: newMsg.createdAt,
+          text: cleanText,
+          created_at: nowIso,
           read: false,
-        });
+        };
+        if (isValidUuid(matchId)) {
+          payload.match_id = matchId;
+        } else if (isValidUuid(senderId) && isValidUuid(receiverId)) {
+          const { data: dbMatch } = await client
+            .from('matches')
+            .select('id')
+            .or(`and(user_a_id.eq.${senderId},user_b_id.eq.${receiverId}),and(user_a_id.eq.${receiverId},user_b_id.eq.${senderId})`)
+            .maybeSingle();
+          if (dbMatch?.id) {
+            payload.match_id = dbMatch.id;
+          }
+        }
+        if (isValidUuid(localId)) {
+          payload.id = localId;
+        }
+
+        const { error: insertErr } = await client.from('chat_messages').insert(payload);
+        if (insertErr) {
+          console.warn('Nota chat_messages Supabase insert:', insertErr.message);
+        }
       } catch (e) {
-        console.warn('Error inserting message to Supabase:', e);
+        console.warn('Error sincronizando mensaje en Supabase:', e);
       }
     }
 
@@ -698,36 +811,63 @@ export const matchService = {
 
   subscribeToMessages(
     matchId: string,
-    onNewMessage: (msg: ChatMessage) => void
+    arg2: ((msg: ChatMessage) => void) | string,
+    arg3?: string | ((msg: ChatMessage) => void),
+    arg4?: ((msg: ChatMessage) => void) | string
   ): () => void {
+    let onNewMessage: (msg: ChatMessage) => void;
+    let currentUserId = '';
+    let partnerId = '';
+
+    if (typeof arg2 === 'function') {
+      onNewMessage = arg2;
+      currentUserId = typeof arg3 === 'string' ? arg3 : '';
+      partnerId = typeof arg4 === 'string' ? arg4 : '';
+    } else {
+      currentUserId = arg2 || '';
+      partnerId = typeof arg3 === 'string' ? arg3 : '';
+      onNewMessage = typeof arg4 === 'function' ? arg4 : () => {};
+    }
+
+    const pairKey = [currentUserId, partnerId].filter(Boolean).sort().join('_') || matchId;
     const client = getSupabaseClient();
     let channel: any = null;
 
     if (client) {
       try {
         channel = client
-          .channel(`chat_room_${matchId}`)
+          .channel(`chat_${pairKey}`)
+          .on('broadcast', { event: 'new_message' }, (payload: any) => {
+            if (payload.payload) {
+              onNewMessage(payload.payload);
+            }
+          })
           .on(
             'postgres_changes',
             {
               event: 'INSERT',
               schema: 'public',
               table: 'chat_messages',
-              filter: `match_id=eq.${matchId}`,
             },
             (payload) => {
               if (payload.new) {
                 const row = payload.new;
-                const newMsg: ChatMessage = {
-                  id: String(row.id),
-                  matchId: row.match_id,
-                  senderId: row.sender_id,
-                  receiverId: row.receiver_id,
-                  text: row.text,
-                  createdAt: row.created_at,
-                  read: Boolean(row.read),
-                };
-                onNewMessage(newMsg);
+                if (
+                  (row.sender_id === currentUserId && row.receiver_id === partnerId) ||
+                  (row.sender_id === partnerId && row.receiver_id === currentUserId) ||
+                  row.match_id === matchId
+                ) {
+                  const newMsg: ChatMessage = {
+                    id: String(row.id),
+                    matchId: row.match_id || matchId,
+                    senderId: row.sender_id,
+                    receiverId: row.receiver_id,
+                    text: row.text,
+                    createdAt: row.created_at,
+                    read: Boolean(row.read),
+                  };
+                  onNewMessage(newMsg);
+                }
               }
             }
           )
@@ -737,15 +877,55 @@ export const matchService = {
       }
     }
 
-    // Polling de respaldo cada 2.5s para sincronizar en vivo si Realtime no está activo
+    // Bus local de BroadcastChannel para pruebas multipestaña en el mismo navegador
+    let bc: BroadcastChannel | null = null;
+    try {
+      if (typeof BroadcastChannel !== 'undefined') {
+        bc = new BroadcastChannel('cachengueoo_chat_bus');
+        bc.onmessage = (event) => {
+          if (event.data?.type === 'new_message' && event.data.message) {
+            const m = event.data.message;
+            if (
+              (m.senderId === currentUserId && m.receiverId === partnerId) ||
+              (m.senderId === partnerId && m.receiverId === currentUserId)
+            ) {
+              onNewMessage(m);
+            }
+          }
+        };
+      }
+    } catch {}
+
+    const handleLocalCustomEvent = (e: any) => {
+      if (e.detail) {
+        const m = e.detail;
+        if (
+          (m.senderId === currentUserId && m.receiverId === partnerId) ||
+          (m.senderId === partnerId && m.receiverId === currentUserId)
+        ) {
+          onNewMessage(m);
+        }
+      }
+    };
+    if (typeof window !== 'undefined') {
+      window.addEventListener('cachengueoo_new_chat_message', handleLocalCustomEvent);
+    }
+
+    // Polling de respaldo cada 2 segundos
     const interval = setInterval(async () => {
-      const fresh = await this.fetchMessages(matchId);
+      const fresh = await this.fetchMessages(matchId, currentUserId, partnerId);
       fresh.forEach((m) => onNewMessage(m));
-    }, 2500);
+    }, 2000);
 
     return () => {
       if (channel && client) {
         client.removeChannel(channel).then();
+      }
+      if (bc) {
+        bc.close();
+      }
+      if (typeof window !== 'undefined') {
+        window.removeEventListener('cachengueoo_new_chat_message', handleLocalCustomEvent);
       }
       clearInterval(interval);
     };

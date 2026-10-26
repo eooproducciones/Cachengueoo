@@ -19,8 +19,16 @@ export function useAuth() {
           let { data: profileData } = await client
             .from('profiles')
             .select('*')
-            .eq('id', authUser.id)
+            .or(`id.eq.${authUser.id},email.eq.${authUser.email}`)
             .maybeSingle();
+
+          const isAlreadyConfigured = Boolean(
+            profileData &&
+            profileData.full_name &&
+            profileData.birth_date &&
+            profileData.birth_date !== '2001-01-01' &&
+            profileData.avatar_url
+          );
 
           // Si el usuario ingresó por Google y aún no tiene fila en profiles, crearla automáticamente
           if (!profileData && authUser.email) {
@@ -60,12 +68,28 @@ export function useAuth() {
 
           const currentLocal = authService.getCurrentUser();
           const mergedUser = buildUserProfileFromSources(authUser, profileData, currentLocal);
+          if (authUser.email && (!mergedUser.email || mergedUser.email.includes('usuario.cache'))) {
+            mergedUser.email = authUser.email;
+          }
+
           setUser(mergedUser);
           localStorage.setItem('cachengueoo_current_user', JSON.stringify(mergedUser));
           sessionStorage.setItem('cachengueoo_current_user', JSON.stringify(mergedUser));
           notifyAuthChange();
 
-          // Si el usuario ingresó por Google o su Cache ID está pendiente de configuración, abrir el wizard en el Paso 1
+          // Si la cuenta ya estaba registrada y configurada, reconocerla de inmediato y no abrir wizard
+          if (isAlreadyConfigured) {
+            sessionStorage.removeItem('cachengueoo_flow_intent');
+            localStorage.removeItem('cachengueoo_flow_intent');
+            window.dispatchEvent(
+              new CustomEvent('cachengueoo_show_toast', {
+                detail: `¡Bienvenido de nuevo, ${mergedUser.nickname || mergedUser.fullName}! Reconocimos tu cuenta de Google.`,
+              })
+            );
+            return;
+          }
+
+          // Si es cuenta nueva o incompleta, guiar al wizard de Cache ID en el Paso 1
           if (!mergedUser.isAdmin && !mergedUser.email?.toLowerCase().includes('admin')) {
             const flowIntent =
               sessionStorage.getItem('cachengueoo_flow_intent') ||

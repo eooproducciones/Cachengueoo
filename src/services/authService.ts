@@ -362,14 +362,79 @@ export const authService = {
     return { success: true, user: localUser };
   },
 
+  async checkEmailExists(email: string): Promise<{
+    exists: boolean;
+    provider?: string;
+    profile?: UserProfile;
+  }> {
+    const cleanEmail = email.trim().toLowerCase();
+    if (!cleanEmail) return { exists: false };
+
+    // 1. Consultar en Supabase profiles
+    const client = getSupabaseClient();
+    if (client) {
+      try {
+        const { data } = await client
+          .from('profiles')
+          .select('*')
+          .eq('email', cleanEmail)
+          .maybeSingle();
+
+        if (data) {
+          const profile: UserProfile = {
+            id: data.id,
+            email: data.email,
+            fullName: data.full_name || '',
+            nickname: data.nickname || data.full_name || '',
+            birthDate: data.birth_date || '2001-01-01',
+            age: Number(data.age) || 23,
+            avatarUrl: data.avatar_url || '',
+            photos: Array.isArray(data.photos) ? data.photos : (data.avatar_url ? [data.avatar_url] : []),
+            gender: data.gender || 'hombre',
+            preference: data.preference || 'todos',
+            interests: Array.isArray(data.interests) ? data.interests : [],
+            bio: data.bio || '',
+            drinkFavorite: data.drink_favorite || 'Fernet con Coca',
+            instagram: data.instagram || undefined,
+            createdAt: data.created_at || new Date().toISOString(),
+          };
+          return { exists: true, profile };
+        }
+      } catch (err) {
+        console.warn('Error verificando email en Supabase profiles:', err);
+      }
+    }
+
+    // 2. Consultar en usuarios registrados locales
+    const local = this.getAllUsers().find((u) => u.email?.toLowerCase() === cleanEmail);
+    if (local) {
+      return { exists: true, profile: local };
+    }
+
+    return { exists: false };
+  },
+
   async signInWithGoogle(): Promise<{ success: boolean; message?: string }> {
     const client = getSupabaseClient();
     if (!client) {
       return { success: false, message: 'No hay conexión activa con la base de datos de Supabase.' };
     }
     try {
-      const redirectUrl = typeof window !== 'undefined' ? window.location.origin : '';
-      const { error } = await client.auth.signInWithOAuth({
+      // 1. Limpiar sesión previa si se está intentando cambiar de cuenta
+      try {
+        await client.auth.signOut({ scope: 'local' });
+      } catch {}
+
+      // Limpiar datos de sesión local de usuario previo
+      localStorage.removeItem(USER_STORAGE_KEY);
+      sessionStorage.removeItem(USER_STORAGE_KEY);
+
+      // Usar la URL exacta limpia actual para el callback
+      const redirectUrl = typeof window !== 'undefined'
+        ? window.location.href.split('#')[0].split('?')[0]
+        : '';
+
+      const { data, error } = await client.auth.signInWithOAuth({
         provider: 'google',
         options: {
           redirectTo: redirectUrl,
@@ -379,9 +444,16 @@ export const authService = {
           },
         },
       });
+
       if (error) {
         return { success: false, message: error.message };
       }
+
+      // Si Supabase devuelve la URL directamente, forzar redirección de inmediato
+      if (data?.url && typeof window !== 'undefined') {
+        window.location.href = data.url;
+      }
+
       return { success: true };
     } catch (err: unknown) {
       return {
@@ -412,6 +484,8 @@ export const authService = {
     }
     sessionStorage.removeItem(USER_STORAGE_KEY);
     localStorage.removeItem(USER_STORAGE_KEY);
+    sessionStorage.removeItem('cachengueoo_flow_intent');
+    localStorage.removeItem('cachengueoo_flow_intent');
     presenceService.clearPresence();
     notifyAuthChange();
   },

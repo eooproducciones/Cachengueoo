@@ -306,7 +306,7 @@ export const NightNotesView: React.FC<NightNotesViewProps> = ({
 
           <div className="flex items-center gap-1.5 text-[10px] text-zinc-400">
             <Clock className="w-3 h-3 text-[#F39200]" />
-            <span>Se borran en 1 h o al salir</span>
+            <span>Duran hasta 6 h o hasta que la borres</span>
           </div>
         </div>
       </div>

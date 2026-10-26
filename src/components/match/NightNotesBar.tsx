@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Plus, X, Check, MessageSquareHeart } from 'lucide-react';
 import { MatchProfile, UserProfile } from '../../types';
 import { formatTimeAgo } from '../../utils/timeAgo';
+import { nightNotesService } from '../../services/nightNotesService';
 
 interface NightNotesBarProps {
   currentUser: UserProfile;
@@ -28,10 +29,24 @@ export const NightNotesBar: React.FC<NightNotesBarProps> = ({
   const [isNoteModalOpen, setIsNoteModalOpen] = useState(false);
   const [noteInput, setNoteInput] = useState(currentUser.nightNote?.text || '');
 
-  const handleSaveNote = (textToSave = noteInput) => {
+  const handleSaveNote = async (textToSave = noteInput) => {
     if (!textToSave.trim()) return;
-    onUpdateMyNote(textToSave.trim());
+    const clean = textToSave.trim();
+    onUpdateMyNote(clean);
     setIsNoteModalOpen(false);
+    await nightNotesService.publishNote(
+      currentUser.id,
+      currentUser.nickname || currentUser.fullName,
+      currentUser.avatarUrl,
+      clean
+    );
+  };
+
+  const handleDeleteNote = async () => {
+    onUpdateMyNote('');
+    setNoteInput('');
+    setIsNoteModalOpen(false);
+    await nightNotesService.deleteNote(currentUser.id);
   };
 
   return (
@@ -225,10 +240,7 @@ export const NightNotesBar: React.FC<NightNotesBarProps> = ({
               {currentUser.nightNote && (
                 <button
                   type="button"
-                  onClick={() => {
-                    onUpdateMyNote('');
-                    setIsNoteModalOpen(false);
-                  }}
+                  onClick={handleDeleteNote}
                   className="px-3 h-10 rounded-xl bg-zinc-900 border border-zinc-800 text-red-400 hover:text-red-300 text-xs font-semibold cursor-pointer"
                 >
                   Borrar
