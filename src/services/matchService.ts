@@ -826,23 +826,38 @@ export const matchService = {
       }
     }
 
-    const merged = Array.from(map.values()).sort(
+    const sorted = Array.from(map.values()).sort(
       (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
     );
 
-    // Actualizar caché local
+    // Deduplicación estricta por ID y semántica (senderId + texto + timestamp cercano)
+    const deduplicated: ChatMessage[] = [];
+    for (const msg of sorted) {
+      const isDup = deduplicated.some(
+        (existing) =>
+          existing.id === msg.id ||
+          (existing.senderId === msg.senderId &&
+            existing.text.trim() === msg.text.trim() &&
+            Math.abs(new Date(existing.createdAt).getTime() - new Date(msg.createdAt).getTime()) < 3000)
+      );
+      if (!isDup) {
+        deduplicated.push(msg);
+      }
+    }
+
+    // Actualizar caché local limpia
     try {
       const stored = localStorage.getItem(MESSAGES_STORAGE_KEY);
       const all: Record<string, ChatMessage[]> = stored ? JSON.parse(stored) : {};
-      all[matchId] = merged;
+      all[matchId] = deduplicated;
       if (currentUserId && partnerId) {
         const pairKey = [currentUserId, partnerId].sort().join('_');
-        all[pairKey] = merged;
+        all[pairKey] = deduplicated;
       }
       localStorage.setItem(MESSAGES_STORAGE_KEY, JSON.stringify(all));
     } catch {}
 
-    return merged;
+    return deduplicated;
   },
 
   async sendMessage(
@@ -853,12 +868,16 @@ export const matchService = {
   ): Promise<ChatMessage> {
     const cleanText = text.trim();
     const nowIso = new Date().toISOString();
-    const localId = `msg_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
     const pairKey = [senderId, receiverId].sort().join('_');
     const channelId = getChatChannelId(senderId, receiverId, matchId);
 
+    // Generar ID único de Firestore de inmediato (estable y único para todos los oyentes)
+    const messagesCol = collection(db, 'chats', channelId, 'messages');
+    const messageDocRef = doc(messagesCol);
+    const stableMessageId = messageDocRef.id;
+
     const newMsg: ChatMessage = {
-      id: localId,
+      id: stableMessageId,
       matchId,
       senderId,
       receiverId,
@@ -867,15 +886,26 @@ export const matchService = {
       read: false,
     };
 
-    // 1. Guardar en almacenamiento local
-    const stored = localStorage.getItem(MESSAGES_STORAGE_KEY);
-    const all: Record<string, ChatMessage[]> = stored ? JSON.parse(stored) : INITIAL_MESSAGES;
-    const currentList = all[matchId] || [];
-    all[matchId] = [...currentList, newMsg];
-    all[pairKey] = [...(all[pairKey] || []), newMsg];
-    localStorage.setItem(MESSAGES_STORAGE_KEY, JSON.stringify(all));
+    // 1. Guardar en almacenamiento local evitando duplicados
+    try {
+      const stored = localStorage.getItem(MESSAGES_STORAGE_KEY);
+      const all: Record<string, ChatMessage[]> = stored ? JSON.parse(stored) : INITIAL_MESSAGES;
+      const currentList = all[matchId] || [];
+      const alreadyInLocal = currentList.some(
+        (m) =>
+          m.id === stableMessageId ||
+          (m.senderId === senderId &&
+            m.text.trim() === cleanText &&
+            Math.abs(new Date(m.createdAt).getTime() - new Date(nowIso).getTime()) < 3000)
+      );
+      if (!alreadyInLocal) {
+        all[matchId] = [...currentList, newMsg];
+        all[pairKey] = [...(all[pairKey] || []), newMsg];
+        localStorage.setItem(MESSAGES_STORAGE_KEY, JSON.stringify(all));
+      }
+    } catch {}
 
-    // 2. Transmitir en vivo localmente vía BroadcastChannel (comunicación instantánea entre pestañas)
+    // 2. Transmitir entre pestañas distintas del navegador vía BroadcastChannel
     try {
       if (typeof BroadcastChannel !== 'undefined') {
         const bc = new BroadcastChannel('cachengueoo_chat_bus');
@@ -884,13 +914,9 @@ export const matchService = {
       }
     } catch {}
 
-    if (typeof window !== 'undefined') {
-      window.dispatchEvent(new CustomEvent('cachengueoo_new_chat_message', { detail: newMsg }));
-    }
-
-    // 3. ENVIAR A FIREBASE FIRESTORE EN TIEMPO REAL (Llega garantizadamente al otro usuario en cualquier dispositivo)
+    // 3. ENVIAR A FIREBASE FIRESTORE CON EL ID ESTABLE
     try {
-      const docRef = await addDoc(collection(db, 'chats', channelId, 'messages'), {
+      await setDoc(messageDocRef, {
         matchId,
         senderId,
         receiverId,
@@ -898,7 +924,6 @@ export const matchService = {
         createdAt: nowIso,
         read: false,
       });
-      newMsg.id = docRef.id;
     } catch (e) {
       console.warn('Error enviando mensaje a Firestore:', e);
     }
@@ -927,17 +952,6 @@ export const matchService = {
     const client = getSupabaseClient();
     if (client) {
       try {
-        const broadcastChannel = client.channel(`chat_${pairKey}`);
-        broadcastChannel.subscribe((status) => {
-          if (status === 'SUBSCRIBED') {
-            broadcastChannel.send({
-              type: 'broadcast',
-              event: 'new_message',
-              payload: newMsg,
-            });
-          }
-        });
-
         const payload: Record<string, any> = {
           sender_id: senderId,
           receiver_id: receiverId,
@@ -957,8 +971,8 @@ export const matchService = {
             payload.match_id = dbMatch.id;
           }
         }
-        if (isValidUuid(localId)) {
-          payload.id = localId;
+        if (isValidUuid(stableMessageId)) {
+          payload.id = stableMessageId;
         }
 
         const { error: insertErr } = await client.from('chat_messages').insert(payload);
@@ -997,8 +1011,26 @@ export const matchService = {
     const channelId = getChatChannelId(currentUserId, partnerId, matchId);
     const seenMsgIds = new Set<string>();
 
+    const emitUniqueMessage = (msg: ChatMessage) => {
+      const timeBucket = Math.floor(new Date(msg.createdAt).getTime() / 2500);
+      const contentKey = `${msg.senderId}_${msg.text.trim()}_${timeBucket}`;
+
+      if (seenMsgIds.has(msg.id) || seenMsgIds.has(contentKey)) {
+        return;
+      }
+      seenMsgIds.add(msg.id);
+      seenMsgIds.add(contentKey);
+
+      if (
+        (msg.senderId === currentUserId && msg.receiverId === partnerId) ||
+        (msg.senderId === partnerId && msg.receiverId === currentUserId) ||
+        (!partnerId && msg.matchId === matchId)
+      ) {
+        onNewMessage(msg);
+      }
+    };
+
     // 1. ESCUCHADOR EN VIVO DE FIREBASE FIRESTORE (onSnapshot)
-    // Se activa instantáneamente al enviar o recibir cualquier mensaje
     let unsubscribeFirestore: (() => void) | null = null;
     try {
       const messagesRef = collection(db, 'chats', channelId, 'messages');
@@ -1018,18 +1050,7 @@ export const matchService = {
                 createdAt: data.createdAt,
                 read: Boolean(data.read),
               };
-
-              if (!seenMsgIds.has(newMsg.id)) {
-                seenMsgIds.add(newMsg.id);
-                // Asegurar que el mensaje pertenece estrictamente a esta conversación
-                if (
-                  (newMsg.senderId === currentUserId && newMsg.receiverId === partnerId) ||
-                  (newMsg.senderId === partnerId && newMsg.receiverId === currentUserId) ||
-                  (!partnerId && newMsg.matchId === matchId)
-                ) {
-                  onNewMessage(newMsg);
-                }
-              }
+              emitUniqueMessage(newMsg);
             }
           });
         },
@@ -1050,9 +1071,8 @@ export const matchService = {
         channel = client
           .channel(`chat_${pairKey}`)
           .on('broadcast', { event: 'new_message' }, (payload: any) => {
-            if (payload.payload && !seenMsgIds.has(payload.payload.id)) {
-              seenMsgIds.add(payload.payload.id);
-              onNewMessage(payload.payload);
+            if (payload.payload) {
+              emitUniqueMessage(payload.payload);
             }
           })
           .on(
@@ -1065,26 +1085,16 @@ export const matchService = {
             (payload) => {
               if (payload.new) {
                 const row = payload.new;
-                const newMsgId = String(row.id);
-                if (!seenMsgIds.has(newMsgId)) {
-                  seenMsgIds.add(newMsgId);
-                  if (
-                    (row.sender_id === currentUserId && row.receiver_id === partnerId) ||
-                    (row.sender_id === partnerId && row.receiver_id === currentUserId) ||
-                    row.match_id === matchId
-                  ) {
-                    const newMsg: ChatMessage = {
-                      id: newMsgId,
-                      matchId: row.match_id || matchId,
-                      senderId: row.sender_id,
-                      receiverId: row.receiver_id,
-                      text: row.text,
-                      createdAt: row.created_at,
-                      read: Boolean(row.read),
-                    };
-                    onNewMessage(newMsg);
-                  }
-                }
+                const newMsg: ChatMessage = {
+                  id: String(row.id),
+                  matchId: row.match_id || matchId,
+                  senderId: row.sender_id,
+                  receiverId: row.receiver_id,
+                  text: row.text,
+                  createdAt: row.created_at,
+                  read: Boolean(row.read),
+                };
+                emitUniqueMessage(newMsg);
               }
             }
           )
@@ -1101,50 +1111,19 @@ export const matchService = {
         bc = new BroadcastChannel('cachengueoo_chat_bus');
         bc.onmessage = (event) => {
           if (event.data?.type === 'new_message' && event.data.message) {
-            const m = event.data.message;
-            if (!seenMsgIds.has(m.id)) {
-              seenMsgIds.add(m.id);
-              if (
-                (m.senderId === currentUserId && m.receiverId === partnerId) ||
-                (m.senderId === partnerId && m.receiverId === currentUserId)
-              ) {
-                onNewMessage(m);
-              }
-            }
+            emitUniqueMessage(event.data.message);
           }
         };
       }
     } catch {}
 
-    // 4. CustomEvent local para la misma ventana
-    const handleLocalCustomEvent = (e: any) => {
-      if (e.detail) {
-        const m = e.detail;
-        if (!seenMsgIds.has(m.id)) {
-          seenMsgIds.add(m.id);
-          if (
-            (m.senderId === currentUserId && m.receiverId === partnerId) ||
-            (m.senderId === partnerId && m.receiverId === currentUserId)
-          ) {
-            onNewMessage(m);
-          }
-        }
-      }
-    };
-    if (typeof window !== 'undefined') {
-      window.addEventListener('cachengueoo_new_chat_message', handleLocalCustomEvent);
-    }
-
-    // 5. Polling de respaldo cada 2.5 segundos para garantizar entrega
+    // 4. Polling de respaldo cada 3 segundos
     const interval = setInterval(async () => {
       const fresh = await this.fetchMessages(matchId, currentUserId, partnerId);
       fresh.forEach((m) => {
-        if (!seenMsgIds.has(m.id)) {
-          seenMsgIds.add(m.id);
-          onNewMessage(m);
-        }
+        emitUniqueMessage(m);
       });
-    }, 2500);
+    }, 3000);
 
     return () => {
       if (unsubscribeFirestore) {
@@ -1155,9 +1134,6 @@ export const matchService = {
       }
       if (bc) {
         bc.close();
-      }
-      if (typeof window !== 'undefined') {
-        window.removeEventListener('cachengueoo_new_chat_message', handleLocalCustomEvent);
       }
       clearInterval(interval);
     };

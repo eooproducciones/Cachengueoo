@@ -1685,7 +1685,14 @@ const ChatModal: React.FC<ChatModalProps> = ({
       match.id,
       (incoming: ChatMessage) => {
         setMessages((prev) => {
-          if (prev.some((m) => m.id === incoming.id)) return prev;
+          const isDup = prev.some(
+            (m) =>
+              m.id === incoming.id ||
+              (m.senderId === incoming.senderId &&
+                m.text.trim() === incoming.text.trim() &&
+                Math.abs(new Date(m.createdAt).getTime() - new Date(incoming.createdAt).getTime()) < 3000)
+          );
+          if (isDup) return prev;
           return [...prev, incoming];
         });
       },
@@ -1709,7 +1716,7 @@ const ChatModal: React.FC<ChatModalProps> = ({
     const text = textToSend.trim();
     setInputText('');
 
-    // Envío real a Supabase y caché local
+    // Envío real a Firebase Firestore / Supabase y caché local
     const newMsg = await matchService.sendMessage(
       match.id,
       currentUser.id,
@@ -1718,7 +1725,14 @@ const ChatModal: React.FC<ChatModalProps> = ({
     );
 
     setMessages((prev) => {
-      if (prev.some((m) => m.id === newMsg.id)) return prev;
+      const isDup = prev.some(
+        (m) =>
+          m.id === newMsg.id ||
+          (m.senderId === newMsg.senderId &&
+            m.text.trim() === newMsg.text.trim() &&
+            Math.abs(new Date(m.createdAt).getTime() - new Date(newMsg.createdAt).getTime()) < 3000)
+      );
+      if (isDup) return prev;
       return [...prev, newMsg];
     });
   };
