@@ -117,21 +117,34 @@ export default function App() {
     return () => window.removeEventListener('hashchange', handleHash);
   }, []);
 
-  // Escuchar evento para abrir wizard de configuración de Cache ID (tras registro con Google o si el perfil está incompleto)
+  // Escuchar evento para abrir wizard de configuración de Cache ID (tras registro con Google por primera vez)
   useEffect(() => {
     const handleOpenWizard = () => {
-      setAuthModalMode('register_step_1');
-      setIsAuthModalOpen(true);
+      const currentUser = authService.getCurrentUser();
+      const cacheIdCreated = localStorage.getItem('cachengueoo_cache_id_created') === 'true';
+      if (!currentUser || !cacheIdCreated) {
+        setAuthModalMode('register_step_1');
+        setIsAuthModalOpen(true);
+      }
     };
 
     window.addEventListener('cachengueoo_open_cache_id_wizard', handleOpenWizard);
 
-    const flowIntent =
-      sessionStorage.getItem('cachengueoo_flow_intent') ||
-      localStorage.getItem('cachengueoo_flow_intent');
-    if (flowIntent === 'configure_cache_id') {
-      setAuthModalMode('register_step_1');
-      setIsAuthModalOpen(true);
+    // Al recargar la página: si el usuario ya está dentro o ya tiene Cache ID, NUNCA abrir el modal
+    const currentUser = authService.getCurrentUser();
+    const cacheIdCreated = localStorage.getItem('cachengueoo_cache_id_created') === 'true';
+
+    if (currentUser && (cacheIdCreated || (currentUser.fullName && currentUser.avatarUrl))) {
+      sessionStorage.removeItem('cachengueoo_flow_intent');
+      localStorage.removeItem('cachengueoo_flow_intent');
+    } else {
+      const flowIntent =
+        sessionStorage.getItem('cachengueoo_flow_intent') ||
+        localStorage.getItem('cachengueoo_flow_intent');
+      if (flowIntent === 'configure_cache_id' && !currentUser) {
+        setAuthModalMode('register_step_1');
+        setIsAuthModalOpen(true);
+      }
     }
 
     return () => {

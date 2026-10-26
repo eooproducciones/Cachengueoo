@@ -486,6 +486,7 @@ export const authService = {
     localStorage.removeItem(USER_STORAGE_KEY);
     sessionStorage.removeItem('cachengueoo_flow_intent');
     localStorage.removeItem('cachengueoo_flow_intent');
+    localStorage.removeItem('cachengueoo_cache_id_created');
     presenceService.clearPresence();
     notifyAuthChange();
   },

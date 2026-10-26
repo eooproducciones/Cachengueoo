@@ -77,32 +77,28 @@ export function useAuth() {
           sessionStorage.setItem('cachengueoo_current_user', JSON.stringify(mergedUser));
           notifyAuthChange();
 
-          // Si la cuenta ya estaba registrada y configurada, reconocerla de inmediato y no abrir wizard
-          if (isAlreadyConfigured) {
+          const cacheIdAlreadyCreated = Boolean(
+            localStorage.getItem('cachengueoo_cache_id_created') === 'true' ||
+            (currentLocal && currentLocal.fullName && currentLocal.avatarUrl) ||
+            (profileData && profileData.full_name && profileData.avatar_url && profileData.avatar_url.length > 5) ||
+            isAlreadyConfigured
+          );
+
+          // Si el usuario ya tiene su Cache ID o perfil configurado, limpiar flags y NO abrir el wizard al recargar
+          if (cacheIdAlreadyCreated) {
+            localStorage.setItem('cachengueoo_cache_id_created', 'true');
             sessionStorage.removeItem('cachengueoo_flow_intent');
             localStorage.removeItem('cachengueoo_flow_intent');
-            window.dispatchEvent(
-              new CustomEvent('cachengueoo_show_toast', {
-                detail: `¡Bienvenido de nuevo, ${mergedUser.nickname || mergedUser.fullName}! Reconocimos tu cuenta de Google.`,
-              })
-            );
             return;
           }
 
-          // Si es cuenta nueva o incompleta, guiar al wizard de Cache ID en el Paso 1
-          if (!mergedUser.isAdmin && !mergedUser.email?.toLowerCase().includes('admin')) {
-            const flowIntent =
-              sessionStorage.getItem('cachengueoo_flow_intent') ||
-              localStorage.getItem('cachengueoo_flow_intent');
-            const isCacheIdIncomplete =
-              !mergedUser.bio ||
-              mergedUser.birthDate === '2001-01-01' ||
-              !mergedUser.drinks ||
-              mergedUser.drinks.length === 0;
+          // Solo guiar al wizard si viene explícitamente de Google OAuth por primera vez sin Cache ID
+          const flowIntent =
+            sessionStorage.getItem('cachengueoo_flow_intent') ||
+            localStorage.getItem('cachengueoo_flow_intent');
 
-            if (flowIntent === 'configure_cache_id' || isCacheIdIncomplete) {
-              window.dispatchEvent(new CustomEvent('cachengueoo_open_cache_id_wizard'));
-            }
+          if (flowIntent === 'configure_cache_id' && !cacheIdAlreadyCreated) {
+            window.dispatchEvent(new CustomEvent('cachengueoo_open_cache_id_wizard'));
           }
         } catch (err) {
           console.warn('Error fetching or creating Supabase profile in useAuth:', err);

@@ -15,7 +15,6 @@ import {
   Heart,
   Users,
   Instagram,
-  Smartphone,
   Eye,
   EyeOff,
   Camera,
@@ -70,7 +69,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   onProceedToMatch,
 }) => {
   const [currentView, setCurrentView] = useState<AuthModalView>('choice');
-  const [authProvider, setAuthProvider] = useState<'gmail' | 'instagram' | 'phone'>('gmail');
+  const [authProvider, setAuthProvider] = useState<'gmail' | 'email'>('gmail');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [successNotice, setSuccessNotice] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -280,8 +279,8 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     }
   };
 
-  // Seleccionar proveedor de registro
-  const handleSelectProvider = (provider: 'gmail' | 'instagram' | 'phone') => {
+  // Seleccionar proveedor de registro (Solo Gmail o Correo electrónico)
+  const handleSelectProvider = (provider: 'gmail' | 'email') => {
     setAuthProvider(provider);
     setErrorMessage(null);
     setExistingAccountFound(null);
@@ -291,29 +290,62 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       if (u?.email && !u.email.includes('usuario.cache')) {
         setRegEmail(u.email);
       }
+    } else {
+      if (regEmail.includes('usuario.cache')) {
+        setRegEmail('');
+      }
     }
 
     setCurrentView('register_step_1');
   };
 
-  // Avanzar a Step 2 verificando primero si el correo ya existe para evitar cuentas duplicadas
+  // Avanzar a Step 2: Validación estricta y obligatoria de todos los campos del Paso 1
   const handleProceedToStep2 = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMessage(null);
     setExistingAccountFound(null);
 
+    const cleanFullName = regFullName.trim();
+    const cleanNickname = regNickname.trim();
     const cleanEmail = regEmail.trim().toLowerCase();
-    if (!regFullName.trim() || !regNickname.trim() || !cleanEmail) {
-      setErrorMessage('Por favor completá los campos obligatorios.');
+
+    if (!cleanFullName) {
+      setErrorMessage('El nombre completo es obligatorio.');
       return;
     }
 
-    if (!isAdult) {
+    if (!cleanNickname) {
+      setErrorMessage('El apodo es obligatorio.');
+      return;
+    }
+
+    if (!regBirthDate) {
+      setErrorMessage('La fecha de nacimiento es obligatoria.');
+      return;
+    }
+
+    if (!calculatedAge || calculatedAge < 18) {
       setErrorMessage('Debés tener 18 años o más para ingresar a Cachengueoo.');
       return;
     }
 
-    // Verificar si el correo ya está registrado en Cachengueoo
+    if (!regGender) {
+      setErrorMessage('Por favor seleccioná tu género.');
+      return;
+    }
+
+    if (!cleanEmail) {
+      setErrorMessage('El correo electrónico es obligatorio.');
+      return;
+    }
+
+    // Validación básica de formato de correo
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) {
+      setErrorMessage('Por favor ingresá un correo electrónico válido.');
+      return;
+    }
+
+    // Verificar si el correo ya está registrado en Cachengueoo para evitar cuentas duplicadas
     setIsCheckingEmail(true);
     try {
       const emailCheck = await authService.checkEmailExists(cleanEmail);
@@ -328,14 +360,19 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       setIsCheckingEmail(false);
     }
 
-    // Los usuarios autenticados con Google no requieren contraseña manual
+    // Para registro con correo electrónico, la contraseña es obligatoria
     if (authProvider !== 'gmail') {
-      if (regPassword.length < 4) {
-        setErrorMessage('La contraseña debe tener al menos 4 caracteres.');
+      if (!regPassword || regPassword.length < 4) {
+        setErrorMessage('La contraseña es obligatoria (mínimo 4 caracteres).');
         return;
       }
 
-      if (!passwordsMatch) {
+      if (!regRepeatPassword) {
+        setErrorMessage('Por favor confirmá tu contraseña.');
+        return;
+      }
+
+      if (regPassword !== regRepeatPassword) {
         setErrorMessage('Las contraseñas no coinciden. Por favor corroboralas.');
         return;
       }
@@ -355,6 +392,9 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     try {
       const res = await authService.loginWithCredentials(regEmail, existingPasswordInput);
       if (res.success && res.user) {
+        localStorage.setItem('cachengueoo_cache_id_created', 'true');
+        sessionStorage.removeItem('cachengueoo_flow_intent');
+        localStorage.removeItem('cachengueoo_flow_intent');
         onAuthSuccess(res.user);
         onClose();
       } else {
@@ -367,43 +407,54 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     }
   };
 
-  // Avanzar a Step 3
+  // Avanzar a Step 3: Validación estricta y obligatoria de todos los campos del Paso 2
   const handleProceedToStep3 = (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMessage(null);
 
-    if (!regZodiacSign) {
-      setErrorMessage('Por favor seleccioná tu signo zodiacal.');
+    if (!regPreference) {
+      setErrorMessage('Seleccioná a quién querés ver en Match (Todos, Hombres o Mujeres).');
       return;
     }
 
-    if (regMusicPreferences.length === 0) {
-      setErrorMessage('Seleccioná al menos un género musical que te guste.');
+    if (!regZodiacSign || !regZodiacSign.trim()) {
+      setErrorMessage('El signo zodiacal es obligatorio. Por favor seleccioná tu signo.');
       return;
     }
 
-    if (regDrinks.length === 0) {
-      setErrorMessage('Seleccioná al menos una opción en ¿Qué tomás? (elegí 2).');
+    if (!regMusicPreferences || regMusicPreferences.length === 0) {
+      setErrorMessage('Seleccioná al menos un género musical de tu preferencia.');
+      return;
+    }
+
+    if (!regDrinks || regDrinks.length === 0) {
+      setErrorMessage('Seleccioná al menos un trago en ¿Qué tomás? (podés elegir hasta 2).');
       return;
     }
 
     setCurrentView('register_step_3');
   };
 
-  // Finalizar creación: "Crear Cache ID"
+  // Finalizar creación: "Crear Cache ID" (Validación estricta y obligatoria del Paso 3)
   const handleCreateCacheId = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMessage(null);
 
-    if (regPhotos.length === 0) {
-      setErrorMessage('Por favor agregá al menos una foto de perfil.');
+    if (!regPhotos || regPhotos.length === 0 || !regPhotos[0]) {
+      setErrorMessage('La foto principal de tu perfil es obligatoria. Por favor subí tu foto.');
+      return;
+    }
+
+    const cleanBio = regBio.trim();
+    if (!cleanBio) {
+      setErrorMessage('La biografía es obligatoria. Contá algo breve sobre vos.');
       return;
     }
 
     setIsSubmitting(true);
 
     try {
-      const chosenDrinks = regDrinks.length > 0 ? regDrinks : ['Fernet', 'Skyy'];
+      const chosenDrinks = regDrinks.length > 0 ? regDrinks : ['Fernet'];
       const currentUser = authService.getCurrentUser();
       const currentId = currentUser?.id || `usr_cache_${Date.now()}`;
 
@@ -419,7 +470,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
         gender: regGender,
         preference: regPreference,
         interests: [...chosenDrinks, ...regMusicPreferences.slice(0, 3)],
-        bio: regBio.trim() || 'Disfrutando de la noche en Cachengueoo.',
+        bio: cleanBio,
         drinks: chosenDrinks,
         drinkFavorite: chosenDrinks.join(' & '),
         zodiacSign: regZodiacSign,
@@ -436,22 +487,23 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       if (authProvider === 'gmail') {
         const updatedUser = await authService.updateProfile(newCacheIdUser);
         const userToUse = updatedUser || newCacheIdUser;
-        setRegisteredUser(userToUse);
-        onAuthSuccess(userToUse);
+        localStorage.setItem('cachengueoo_cache_id_created', 'true');
         sessionStorage.removeItem('cachengueoo_flow_intent');
         localStorage.removeItem('cachengueoo_flow_intent');
+        setRegisteredUser(userToUse);
+        onAuthSuccess(userToUse);
         setCurrentView('register_success');
         return;
       }
 
       const regResult = await authService.registerUser(newCacheIdUser, regPassword);
       const userToUse = regResult.user || newCacheIdUser;
-      setRegisteredUser(userToUse);
-      onAuthSuccess(userToUse);
+      localStorage.setItem('cachengueoo_cache_id_created', 'true');
       sessionStorage.removeItem('cachengueoo_flow_intent');
       localStorage.removeItem('cachengueoo_flow_intent');
+      setRegisteredUser(userToUse);
+      onAuthSuccess(userToUse);
 
-      // La creación y edición del Cache ID es 100% independiente de estar en la fiesta
       setCurrentView('register_success');
     } catch (err: unknown) {
       setErrorMessage(err instanceof Error ? err.message : 'Error al crear tu Cache ID');
@@ -581,7 +633,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
         )}
 
         {/* ========================================================== */}
-        {/* VIEW 2: PROVIDER SELECTION (GMAIL, INSTAGRAM, TELÉFONO)   */}
+        {/* VIEW 2: PROVIDER SELECTION (GMAIL O CORREO ELECTRÓNICO)     */}
         {/* ========================================================== */}
         {currentView === 'register_provider' && (
           <div className="space-y-5 pt-1">
@@ -604,7 +656,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
             </div>
 
             <p className="text-xs text-zinc-400 leading-relaxed">
-              Podés registrarte rápidamente usando tu cuenta de Google, tu perfil de Instagram o tu número de teléfono móvil:
+              Podés registrarte rápidamente usando tu cuenta de Google o con tu correo electrónico y contraseña:
             </p>
 
             <div className="space-y-3 pt-1">
@@ -636,44 +688,22 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                 <ArrowRight className="w-4 h-4 text-zinc-500 group-hover:text-white group-hover:translate-x-1 transition-all" />
               </button>
 
-              {/* Opción 2: Crear con Instagram */}
+              {/* Opción 2: Crear con Correo electrónico */}
               <button
                 type="button"
-                onClick={() => handleSelectProvider('instagram')}
-                className="w-full p-4 rounded-2xl bg-zinc-900/90 hover:bg-zinc-800 border border-zinc-800 hover:border-pink-500/50 flex items-center justify-between cursor-pointer transition-all group shadow-sm text-left"
+                onClick={() => handleSelectProvider('email')}
+                className="w-full p-4 rounded-2xl bg-zinc-900/90 hover:bg-zinc-800 border border-zinc-800 hover:border-amber-500/50 flex items-center justify-between cursor-pointer transition-all group shadow-sm text-left"
               >
                 <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-yellow-500/20 via-pink-500/20 to-purple-500/20 border border-pink-500/30 flex items-center justify-center text-pink-400 shrink-0">
-                    <Instagram className="w-5 h-5 text-pink-400" />
+                  <div className="w-10 h-10 rounded-xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-center text-amber-400 shrink-0">
+                    <Mail className="w-5 h-5 text-[#F39200]" />
                   </div>
                   <div>
-                    <h4 className="text-xs sm:text-sm font-bold text-white group-hover:text-pink-300 transition-colors">
-                      Crear con Instagram
+                    <h4 className="text-xs sm:text-sm font-bold text-white group-hover:text-amber-300 transition-colors">
+                      Crear con correo electrónico
                     </h4>
                     <span className="text-[11px] text-zinc-400 block">
-                      Mostrá tu @usuario para conectar en redes
-                    </span>
-                  </div>
-                </div>
-                <ArrowRight className="w-4 h-4 text-zinc-500 group-hover:text-white group-hover:translate-x-1 transition-all" />
-              </button>
-
-              {/* Opción 3: Crear con número de teléfono */}
-              <button
-                type="button"
-                onClick={() => handleSelectProvider('phone')}
-                className="w-full p-4 rounded-2xl bg-zinc-900/90 hover:bg-zinc-800 border border-zinc-800 hover:border-emerald-500/50 flex items-center justify-between cursor-pointer transition-all group shadow-sm text-left"
-              >
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-xl bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-emerald-400 shrink-0">
-                    <Smartphone className="w-5 h-5 text-emerald-400" />
-                  </div>
-                  <div>
-                    <h4 className="text-xs sm:text-sm font-bold text-white group-hover:text-emerald-300 transition-colors">
-                      Crear con número de teléfono
-                    </h4>
-                    <span className="text-[11px] text-zinc-400 block">
-                      Registro ágil mediante SMS o WhatsApp
+                      Registrate con tu mail y una contraseña segura
                     </span>
                   </div>
                 </div>
@@ -685,7 +715,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
               <button
                 type="button"
                 onClick={() => setCurrentView('login')}
-                className="text-xs text-zinc-400 hover:text-white underline"
+                className="text-xs text-zinc-400 hover:text-white underline cursor-pointer"
               >
                 ¿Ya tenés cuenta? Iniciar sesión
               </button>
@@ -1073,7 +1103,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
               <div className="min-w-0 w-full">
                 <label className="text-zinc-300 block mb-1.5 font-bold flex items-center gap-1.5">
                   <Users className="w-3.5 h-3.5 text-[#F39200]" />
-                  <span>Ver en Match</span>
+                  <span>Ver en Match <span className="text-red-400">*</span></span>
                 </label>
                 <div className="grid grid-cols-3 gap-2 w-full min-w-0">
                   {[
@@ -1102,10 +1132,10 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                 <div className="flex items-center justify-between mb-1.5">
                   <label className="text-zinc-300 font-bold flex items-center gap-1.5">
                     <Sparkles className="w-3.5 h-3.5 text-[#F39200]" />
-                    <span>Signo</span>
+                    <span>Signo <span className="text-red-400">*</span></span>
                   </label>
                   <span className="text-[10px] text-zinc-400 font-medium">
-                    Seleccionado: <strong className="text-amber-400">{regZodiacSign}</strong>
+                    Seleccionado: <strong className="text-amber-400">{regZodiacSign || 'Ninguno'}</strong>
                   </span>
                 </div>
 
@@ -1136,7 +1166,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                 <div className="flex items-center justify-between mb-1.5">
                   <label className="text-zinc-300 font-bold flex items-center gap-1.5">
                     <Music className="w-3.5 h-3.5 text-[#F39200]" />
-                    <span>¿Qué música te gusta?</span>
+                    <span>¿Qué música te gusta? <span className="text-red-400">*</span></span>
                   </label>
                   <span className="text-[10px] text-zinc-400">
                     {regMusicPreferences.length} seleccionados
@@ -1170,7 +1200,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                 <div className="flex items-center justify-between mb-1.5">
                   <label className="text-zinc-300 font-bold flex items-center gap-1.5">
                     <GlassWater className="w-3.5 h-3.5 text-[#F39200]" />
-                    <span>¿Qué tomás? (Elegí 2)</span>
+                    <span>¿Qué tomás? (Elegí hasta 2) <span className="text-red-400">*</span></span>
                   </label>
                   <span className="text-[10px] text-amber-400 font-bold">
                     {regDrinks.length}/2 opciones elegidas: {regDrinks.join(' y ')}
@@ -1260,7 +1290,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                 <div className="flex items-center justify-between mb-1.5">
                   <label className="text-zinc-300 font-bold flex items-center gap-1.5">
                     <Camera className="w-3.5 h-3.5 text-[#F39200]" />
-                    <span>Fotos de tu perfil (hasta 3 fotos)</span>
+                    <span>Fotos de tu perfil (foto 1 obligatoria) <span className="text-red-400">*</span></span>
                   </label>
                   <span className="text-[10px] text-zinc-400 font-mono">
                     {regPhotos.length}/3 fotos
@@ -1353,7 +1383,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
               {/* Biografía */}
               <div className="min-w-0 w-full">
                 <label className="text-zinc-300 block mb-1 font-bold">
-                  Biografía
+                  Biografía <span className="text-red-400">*</span>
                 </label>
                 <textarea
                   rows={3}
