@@ -139,15 +139,16 @@ export const presenceService = {
       throw new Error('La geolocalización no está soportada por este navegador.');
     }
 
-    try {
-      await syncVenueLocationsFromSupabase();
-    } catch (e) {
-      console.warn('Notice refreshing locations before GPS check:', e);
-    }
+    // Sincronizar sedes en segundo plano sin demorar la llamada nativa de geolocalización
+    const syncPromise = syncVenueLocationsFromSupabase().catch(() => null);
 
     return new Promise((resolve, reject) => {
+      // Llamada inmediata al GPS del dispositivo en el mismo tick de interacción del usuario
       navigator.geolocation.getCurrentPosition(
-        (position) => {
+        async (position) => {
+          try {
+            await syncPromise;
+          } catch {}
           const { latitude, longitude, accuracy } = position.coords;
           const venue = getVenueConfig();
           const result = validateVenuePresence(latitude, longitude, accuracy, venue);
@@ -156,18 +157,18 @@ export const presenceService = {
         (error) => {
           let msg = 'No se pudo obtener la ubicación GPS.';
           if (error.code === error.PERMISSION_DENIED) {
-            msg = 'Permiso de ubicación denegado. Podés validar tu presencia escaneando el QR del boliche.';
+            msg = 'Permiso de ubicación denegado. Por favor tocá "Permitir" cuando el navegador te pida acceso a tu ubicación, o escaneá el QR del boliche.';
           } else if (error.code === error.POSITION_UNAVAILABLE) {
-            msg = 'Señal de GPS no disponible en este momento.';
+            msg = 'Señal de GPS no disponible en este momento. Verificá que la ubicación esté activada en tu celular.';
           } else if (error.code === error.TIMEOUT) {
-            msg = 'Tiempo de espera de GPS agotado.';
+            msg = 'Tiempo de espera de GPS agotado. Intentá presionar nuevamente para comprobar tu ubicación.';
           }
           reject(new Error(msg));
         },
         {
           enableHighAccuracy: true,
-          timeout: 10000,
-          maximumAge: 30000,
+          timeout: 12000,
+          maximumAge: 10000,
         }
       );
     });

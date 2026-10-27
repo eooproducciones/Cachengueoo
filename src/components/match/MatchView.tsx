@@ -22,6 +22,7 @@ import {
   Ban,
   Flame,
   Camera,
+  Eye,
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { ChatMessage, MatchPair, MatchProfile, UserProfile } from '../../types';
@@ -74,6 +75,7 @@ export const MatchView: React.FC<MatchViewProps> = ({
   const [loadingConecta, setLoadingConecta] = useState(false);
   const [inspectingConectaProfile, setInspectingConectaProfile] = useState<MatchProfile | null>(null);
   const [inspectingPhotoIndex, setInspectingPhotoIndex] = useState(0);
+  const [isConnectingMatch, setIsConnectingMatch] = useState<string | null>(null);
 
   // Navegación de fotos del perfil actual (hasta 3 fotos)
   const [currentPhotoIndex, setCurrentPhotoIndex] = useState(0);
@@ -279,27 +281,38 @@ export const MatchView: React.FC<MatchViewProps> = ({
 
   // Acciones desde el apartado Conectá
   const handleLikeFromConecta = async (target: MatchProfile) => {
-    const activeEvt = eventService.getActiveTonightEvent();
-    const result = await matchService.registerSwipe(
-      currentUser.id,
-      target,
-      'like',
-      activeEvt?.id
-    );
-    setConectaProfiles((prev) => prev.filter((p) => p.userId !== target.userId));
-    setInspectingConectaProfile(null);
+    if (!target) return;
+    setIsConnectingMatch(target.userId);
 
-    if (result.isMatch && result.newMatch) {
-      setCelebrationMatch(result.newMatch);
-      const updated = await matchService.fetchUserMatches(currentUser.id);
-      setMatches(updated);
+    try {
+      const activeEvt = eventService.getActiveTonightEvent();
+      const result = await matchService.registerSwipe(
+        currentUser.id,
+        target,
+        'like',
+        activeEvt?.id,
+        true // forceMatch = true, es un Match Instantáneo garantizado en Conectá
+      );
 
-      confetti({
-        particleCount: 90,
-        spread: 80,
-        origin: { y: 0.6 },
-        colors: ['#F39200', '#FFFFFF', '#10B981'],
-      });
+      setConectaProfiles((prev) => prev.filter((p) => p.userId !== target.userId));
+      setInspectingConectaProfile(null);
+
+      if (result.isMatch && result.newMatch) {
+        setCelebrationMatch(result.newMatch);
+        const updated = await matchService.fetchUserMatches(currentUser.id);
+        setMatches(updated);
+
+        confetti({
+          particleCount: 90,
+          spread: 80,
+          origin: { y: 0.6 },
+          colors: ['#F39200', '#FFFFFF', '#10B981'],
+        });
+      }
+    } catch (err) {
+      console.error('Error al conectar desde Conectá:', err);
+    } finally {
+      setIsConnectingMatch(null);
     }
   };
 
@@ -585,17 +598,39 @@ export const MatchView: React.FC<MatchViewProps> = ({
                         </div>
                       </div>
 
-                      <div className="p-2.5 bg-[#121217]">
+                      <div className="p-2.5 bg-[#121217] space-y-1.5">
+                        <button
+                          type="button"
+                          disabled={isConnectingMatch === item.userId}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleLikeFromConecta(item);
+                          }}
+                          className="w-full py-2 px-3 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600 text-white font-black text-xs flex items-center justify-center gap-1.5 cursor-pointer shadow-md shadow-emerald-500/20 active:scale-95 transition-all disabled:opacity-60"
+                        >
+                          {isConnectingMatch === item.userId ? (
+                            <>
+                              <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                              <span>Haciendo Match...</span>
+                            </>
+                          ) : (
+                            <>
+                              <Heart className="w-3.5 h-3.5 fill-white" />
+                              <span>Hacer Match ❤️</span>
+                            </>
+                          )}
+                        </button>
+
                         <button
                           type="button"
                           onClick={() => {
                             setInspectingPhotoIndex(0);
                             setInspectingConectaProfile(item);
                           }}
-                          className="w-full py-2 px-3 rounded-xl bg-gradient-to-r from-[#F39200] to-amber-500 hover:from-[#E08400] hover:to-amber-600 text-black font-black text-xs flex items-center justify-center gap-1.5 cursor-pointer shadow-md shadow-[#F39200]/20 active:scale-95 transition-all"
+                          className="w-full py-1.5 px-3 rounded-xl bg-zinc-900 border border-zinc-700/80 hover:border-zinc-500 text-zinc-300 font-bold text-[11px] flex items-center justify-center gap-1.5 cursor-pointer active:scale-95 transition-all"
                         >
-                          <Sparkles className="w-3.5 h-3.5" />
-                          Conectar y Ver Perfil
+                          <Eye className="w-3.5 h-3.5 text-[#F39200]" />
+                          <span>Ver Perfil y Fotos</span>
                         </button>
                       </div>
                     </div>
@@ -867,29 +902,54 @@ export const MatchView: React.FC<MatchViewProps> = ({
                     </p>
                   )}
 
-                  {/* Botones de Interacción: ✕ Pasar y ❤️ Corazón */}
-                  <div className="pt-2 flex items-center justify-center gap-8">
-                    {/* Botón PASAR (✕) */}
+                  {/* Botones de Interacción: Conectar / Match y Pasar */}
+                  <div className="pt-2 space-y-2.5">
+                    {/* Botón principal prominente: ¡Hacer Match Instantáneo! */}
                     <button
                       type="button"
-                      onClick={() => handlePassFromConecta(inspectingConectaProfile)}
-                      className="w-16 h-16 rounded-full bg-zinc-950/90 border-2 border-rose-500/80 text-rose-500 hover:text-white hover:bg-rose-600/30 flex items-center justify-center shadow-2xl active:scale-90 transition-all cursor-pointer group"
-                      aria-label="Pasar"
-                      title="Pasar"
+                      disabled={Boolean(isConnectingMatch)}
+                      onClick={() => handleLikeFromConecta(inspectingConectaProfile)}
+                      className="w-full py-3 px-4 rounded-2xl bg-gradient-to-r from-emerald-500 via-teal-500 to-emerald-600 hover:from-emerald-600 hover:to-teal-600 text-white font-black text-sm flex items-center justify-center gap-2 shadow-xl shadow-emerald-500/25 active:scale-95 transition-all cursor-pointer disabled:opacity-60"
                     >
-                      <X className="w-8 h-8 stroke-[3] group-hover:scale-110 transition-transform" />
+                      {isConnectingMatch === inspectingConectaProfile.userId ? (
+                        <>
+                          <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                          <span>Haciendo Match Instantáneo...</span>
+                        </>
+                      ) : (
+                        <>
+                          <Heart className="w-5 h-5 fill-white" />
+                          <span>¡Hacer Match Instantáneo! ❤️</span>
+                        </>
+                      )}
                     </button>
 
-                    {/* Botón CORAZÓN (❤️) */}
-                    <button
-                      type="button"
-                      onClick={() => handleLikeFromConecta(inspectingConectaProfile)}
-                      className="w-16 h-16 rounded-full bg-zinc-950/90 border-2 border-emerald-400 text-emerald-400 hover:text-white hover:bg-emerald-600/30 flex items-center justify-center shadow-2xl active:scale-90 transition-all cursor-pointer group"
-                      aria-label="Corazón"
-                      title="Corazón"
-                    >
-                      <Heart className="w-8 h-8 fill-emerald-400 stroke-emerald-400 group-hover:scale-110 transition-transform" />
-                    </button>
+                    {/* Botones circulares inferiores: Pasar (✕) y Corazón (❤️) */}
+                    <div className="flex items-center justify-center gap-6 pt-1">
+                      {/* Botón PASAR (✕) */}
+                      <button
+                        type="button"
+                        disabled={Boolean(isConnectingMatch)}
+                        onClick={() => handlePassFromConecta(inspectingConectaProfile)}
+                        className="w-13 h-13 rounded-full bg-zinc-950/90 border-2 border-rose-500/80 text-rose-500 hover:text-white hover:bg-rose-600/30 flex items-center justify-center shadow-2xl active:scale-90 transition-all cursor-pointer group disabled:opacity-40"
+                        aria-label="Pasar"
+                        title="Pasar"
+                      >
+                        <X className="w-6 h-6 stroke-[3] group-hover:scale-110 transition-transform" />
+                      </button>
+
+                      {/* Botón CORAZÓN (❤️) */}
+                      <button
+                        type="button"
+                        disabled={Boolean(isConnectingMatch)}
+                        onClick={() => handleLikeFromConecta(inspectingConectaProfile)}
+                        className="w-13 h-13 rounded-full bg-zinc-950/90 border-2 border-emerald-400 text-emerald-400 hover:text-white hover:bg-emerald-600/30 flex items-center justify-center shadow-2xl active:scale-90 transition-all cursor-pointer group disabled:opacity-40"
+                        aria-label="Hacer Match"
+                        title="Hacer Match"
+                      >
+                        <Heart className="w-6 h-6 fill-emerald-400 stroke-emerald-400 group-hover:scale-110 transition-transform" />
+                      </button>
+                    </div>
                   </div>
                 </div>
               </div>

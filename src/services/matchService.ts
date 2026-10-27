@@ -14,6 +14,7 @@ import {
   where,
   orderBy,
   onSnapshot,
+  deleteDoc,
 } from 'firebase/firestore';
 
 const MATCHES_STORAGE_KEY = 'cachengueoo_user_matches';
@@ -462,7 +463,8 @@ export const matchService = {
     fromUserId: string,
     targetProfile: MatchProfile,
     action: 'like' | 'pass' | 'superlike',
-    eventId?: string
+    eventId?: string,
+    forceMatch: boolean = false
   ): Promise<{ isMatch: boolean; newMatch?: MatchPair }> {
     this.addDismissedProfileId(targetProfile.userId, fromUserId);
 
@@ -555,9 +557,9 @@ export const matchService = {
     }
 
     // 4. Verificar si el otro usuario ya le había dado corazón a fromUserId (COINCIDENCIA RECÍPROCA)
-    let hasReciprocalLike = false;
+    let hasReciprocalLike = forceMatch;
 
-    if (client && isValidUuid(fromUserId) && isValidUuid(targetProfile.userId)) {
+    if (!hasReciprocalLike && client && isValidUuid(fromUserId) && isValidUuid(targetProfile.userId)) {
       try {
         const { data, error } = await client
           .from('likes')
@@ -586,6 +588,17 @@ export const matchService = {
         const reciprocalSnap = await getDoc(doc(db, 'likes', reciprocalLikeDocId));
         if (reciprocalSnap.exists()) {
           hasReciprocalLike = true;
+        } else {
+          // Búsqueda por consulta en Firestore
+          const qReciprocal = query(
+            collection(db, 'likes'),
+            where('fromUserId', '==', targetProfile.userId),
+            where('toUserId', '==', fromUserId)
+          );
+          const reciprocalDocs = await getDocs(qReciprocal);
+          if (!reciprocalDocs.empty) {
+            hasReciprocalLike = true;
+          }
         }
       } catch (e) {
         console.warn('Error verificando like recíproco en Firestore:', e);
@@ -594,6 +607,12 @@ export const matchService = {
 
     // 5. ÚNICAMENTE SI AMBOS SE DIERON CORAZÓN MUTUAMENTE SE GENERA EL MATCH
     if (hasReciprocalLike) {
+      // Eliminar el like pendiente de Firestore ya que ahora es un match formal
+      try {
+        const reciprocalLikeDocId = `${targetProfile.userId}___${fromUserId}`.replace(/[^a-zA-Z0-9_-]/g, '_');
+        deleteDoc(doc(db, 'likes', reciprocalLikeDocId)).catch(() => {});
+      } catch {}
+
       const pairKey = [fromUserId, targetProfile.userId].sort().join('_');
       let finalMatchId = `match_${pairKey}`;
 

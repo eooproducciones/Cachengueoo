@@ -23,7 +23,7 @@ import { authService } from './services/authService';
 import { presenceService, PresenceStatus } from './services/presenceService';
 import { syncVenueLocationsFromSupabase, getVenueConfig } from './config/venue';
 import { VenueLocation } from './types';
-import { CheckCircle2 } from 'lucide-react';
+import { CheckCircle2, MapPin, Sparkles, X } from 'lucide-react';
 import { OutOfRangeModal } from './components/presence/OutOfRangeModal';
 import { purgeMockData } from './utils/cleanMockData';
 import { getSupabaseClient } from './services/supabaseClient';
@@ -36,6 +36,7 @@ export default function App() {
   const [isPresenceModalOpen, setIsPresenceModalOpen] = useState<boolean>(false);
   const [isQrScannerOpen, setIsQrScannerOpen] = useState<boolean>(false);
   const [isAuthModalOpen, setIsAuthModalOpen] = useState<boolean>(false);
+  const [isCheckingGpsLocation, setIsCheckingGpsLocation] = useState<boolean>(false);
   const [authModalMode, setAuthModalMode] = useState<
     'login' | 'register' | 'choice' | 'verify' | 'register_step_1'
   >('choice');
@@ -269,32 +270,17 @@ export default function App() {
       return;
     }
 
-    // Sincronizar siempre las sedes más recientes desde la nube antes de comprobar
-    const freshLocations = await syncVenueLocationsFromSupabase().catch(() => null);
-    const currentVenue = getVenueConfig();
-    let activeLocations: VenueLocation[] = (currentVenue.locations || []).filter(
-      (l: VenueLocation) => l.isActive
-    );
-    if (activeLocations.length === 0 && freshLocations && freshLocations.length > 0) {
-      activeLocations = freshLocations.filter((l) => l.isActive);
-    }
+    // Activar inmediatamente el cartel y modal de comprobación de ubicación
+    setIsCheckingGpsLocation(true);
 
-    if (activeLocations.length === 0) {
-      presenceService.clearPresence();
-      window.dispatchEvent(new Event('storage'));
-      setOutOfRangeDetails({
-        distanceMeters: 0,
-        radiusMeters: 200,
-        closestLocationName: 'Cachengueoo',
-        customMessage: 'No hay sedes o locaciones configuradas para validar presencia.',
-      });
-      setIsOutOfRangeModalOpen(true);
-      return;
-    }
-
-    showToast('Comprobando tu ubicación GPS en tiempo real...');
     try {
+      // Disparar navigator.geolocation.getCurrentPosition en el acto
       const gpsResult = await presenceService.checkRealGeolocation();
+      const currentVenue = getVenueConfig();
+      const activeLocations: VenueLocation[] = (currentVenue.locations || []).filter(
+        (l: VenueLocation) => l.isActive
+      );
+
       if (gpsResult.isInside) {
         const current = presenceService.getStoredPresence();
         const updated: PresenceStatus = {
@@ -330,7 +316,7 @@ export default function App() {
       } else {
         presenceService.clearPresence();
         window.dispatchEvent(new Event('storage'));
-        const refLoc = activeLocations[0];
+        const refLoc = activeLocations[0] || currentVenue.locations?.[0];
         setOutOfRangeDetails({
           distanceMeters: gpsResult.distanceMeters,
           radiusMeters: refLoc?.radiusMeters || 150,
@@ -345,7 +331,8 @@ export default function App() {
       presenceService.clearPresence();
       window.dispatchEvent(new Event('storage'));
       const msg = err instanceof Error ? err.message : 'Error al verificar ubicación por GPS';
-      const refLoc = activeLocations[0];
+      const currentVenue = getVenueConfig();
+      const refLoc = (currentVenue.locations || []).find((l) => l.isActive) || currentVenue.locations?.[0];
       setOutOfRangeDetails({
         distanceMeters: 0,
         radiusMeters: refLoc?.radiusMeters || 150,
@@ -353,6 +340,8 @@ export default function App() {
         customMessage: msg,
       });
       setIsOutOfRangeModalOpen(true);
+    } finally {
+      setIsCheckingGpsLocation(false);
     }
   };
 
@@ -575,6 +564,53 @@ export default function App() {
         customMessage={outOfRangeDetails.customMessage}
         isChecking={isChecking}
       />
+
+      {/* MODAL INMEDIATO: COMPROBANDO UBICACIÓN GPS EN TIEMPO REAL */}
+      {isCheckingGpsLocation && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-md animate-in fade-in duration-200">
+          <div className="max-w-xs w-full bg-[#121217] border-2 border-[#F39200]/80 rounded-3xl p-6 text-center space-y-4 shadow-[0_0_50px_rgba(243,146,0,0.35)] relative overflow-hidden">
+            <div className="absolute -top-12 left-1/2 -translate-x-1/2 w-40 h-40 bg-[#F39200]/20 rounded-full blur-3xl pointer-events-none" />
+
+            <div className="relative w-16 h-16 mx-auto flex items-center justify-center">
+              <span className="absolute inset-0 rounded-full bg-[#F39200]/30 animate-ping duration-1000" />
+              <div className="w-16 h-16 rounded-2xl bg-zinc-900 border border-[#F39200]/70 flex items-center justify-center text-[#F39200] shadow-xl z-10">
+                <MapPin className="w-8 h-8 animate-bounce text-[#F39200]" />
+              </div>
+            </div>
+
+            <div className="space-y-1.5 relative z-10">
+              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#F39200]/20 border border-[#F39200]/50 text-[#F39200] font-black text-[11px] uppercase tracking-wider">
+                <Sparkles className="w-3.5 h-3.5 fill-[#F39200]" />
+                Verificación en Tiempo Real
+              </span>
+              <h3 className="text-base font-black text-white font-display uppercase tracking-tight">
+                Comprobando ubicación
+              </h3>
+              <p className="text-xs text-amber-200/90 leading-relaxed font-medium">
+                Comprobando que estás en <strong>Cachengueoo</strong> para ingresar a Match...
+              </p>
+            </div>
+
+            <div className="p-3 rounded-2xl bg-zinc-900/80 border border-zinc-800 text-[11px] text-zinc-400 text-left space-y-1 relative z-10">
+              <p className="flex items-center gap-1.5 text-zinc-200 font-bold">
+                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse shrink-0" />
+                Permiso de ubicación
+              </p>
+              <p className="leading-snug">
+                Si tu celular o navegador te pide permisos, tocá <strong className="text-white">"Permitir"</strong> para validar tu presencia al instante.
+              </p>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setIsCheckingGpsLocation(false)}
+              className="w-full py-2 rounded-xl bg-zinc-900 border border-zinc-800 text-zinc-400 hover:text-white font-bold text-xs cursor-pointer active:scale-95 transition-all"
+            >
+              Cancelar
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Notificación Toast flotante */}
       {toastMessage && (

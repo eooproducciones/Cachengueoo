@@ -27,6 +27,7 @@ import {
   Eye,
   Heart,
   Info,
+  Flame,
 } from 'lucide-react';
 import { UserProfile, UserGender, PreferenceGender } from '../../types';
 import {
@@ -473,17 +474,31 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
             </div>
           </div>
 
-          {/* BOTÓN DESTACADO: ¿CÓMO ME VEO EN MATCH? */}
-          <div className="pt-3 mt-3 border-t border-zinc-800/80">
+          {/* BOTÓN DESTACADO: ¿CÓMO ME VEO EN MATCH? & ENTRAR A MATCH */}
+          <div className="pt-3 mt-3 border-t border-zinc-800/80 space-y-2">
+            <button
+              type="button"
+              onClick={() => onNavigateTab('match')}
+              className="w-full h-12 rounded-2xl bg-gradient-to-r from-[#F39200] via-amber-500 to-[#F39200] hover:from-[#E08400] hover:to-amber-600 text-black font-black text-xs flex items-center justify-between px-4 cursor-pointer shadow-xl shadow-[#F39200]/25 transition-all active:scale-[0.99] group"
+            >
+              <span className="flex items-center gap-2">
+                <Flame className="w-4 h-4 fill-black text-black group-hover:scale-110 transition-transform" />
+                <span className="uppercase tracking-tight text-xs font-black">Entrar a Cachengueoo Match</span>
+              </span>
+              <span className="px-2 py-0.5 rounded-full bg-black/20 text-black font-black text-[10px]">
+                En vivo 🔥 →
+              </span>
+            </button>
+
             <button
               type="button"
               onClick={() => {
                 setPreviewPhotoIndex(0);
                 setShowMatchPreview(true);
               }}
-              className="w-full h-11 rounded-2xl bg-gradient-to-r from-[#F39200]/20 via-amber-500/10 to-[#F39200]/20 hover:from-[#F39200]/30 hover:to-[#F39200]/30 border border-[#F39200]/50 text-[#F39200] hover:text-amber-300 font-extrabold text-xs flex items-center justify-center gap-2 cursor-pointer shadow-lg shadow-[#F39200]/10 transition-all active:scale-[0.99] group"
+              className="w-full h-10 rounded-2xl bg-zinc-900/80 hover:bg-zinc-800/80 border border-zinc-800 text-zinc-300 hover:text-white font-bold text-xs flex items-center justify-center gap-2 cursor-pointer transition-all active:scale-[0.99] group"
             >
-              <Eye className="w-4 h-4 text-[#F39200] group-hover:scale-110 transition-transform" />
+              <Eye className="w-3.5 h-3.5 text-[#F39200] group-hover:scale-110 transition-transform" />
               <span>Cómo me veo en Match</span>
             </button>
           </div>
