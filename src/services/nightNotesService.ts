@@ -10,6 +10,7 @@ import {
   updateDoc,
   query,
   orderBy,
+  onSnapshot,
 } from 'firebase/firestore';
 
 const STORIES_STORAGE_KEY = 'cachengueoo_night_stories';
@@ -55,6 +56,47 @@ export const nightNotesService = {
       console.error('Error reading stories from storage', e);
     }
     return [];
+  },
+
+  // Suscripción en tiempo real a Instantáneas (Historias) con Firestore onSnapshot
+  subscribeToLiveStories(callback: (stories: NightStory[]) => void): () => void {
+    const qStories = query(collection(db, 'night_stories'), orderBy('createdAt', 'desc'));
+    return onSnapshot(
+      qStories,
+      (snapshot) => {
+        const stories: NightStory[] = [];
+        const seenIds = new Set<string>();
+        const now = Date.now();
+
+        snapshot.docs.forEach((d) => {
+          const s = d.data() as any;
+          const createdMs = new Date(s.createdAt || s.created_at || new Date()).getTime();
+          if (now - createdMs <= NIGHT_MAX_AGE_MS) {
+            if (!seenIds.has(d.id)) {
+              seenIds.add(d.id);
+              stories.push({
+                id: d.id,
+                userId: s.userId || s.user_id,
+                userName: s.userName || s.user_name || 'Cachenguero',
+                userAvatar: s.userAvatar || s.user_avatar || '',
+                mediaUrl: s.mediaUrl || s.media_url,
+                mediaType: s.mediaType || s.media_type || 'image',
+                createdAt: s.createdAt || s.created_at,
+                expiresAt: s.expiresAt || s.expires_at || new Date(createdMs + NIGHT_MAX_AGE_MS).toISOString(),
+                isLiveInstant: true,
+                hearts: Number(s.hearts) || 0,
+              });
+            }
+          }
+        });
+
+        localStorage.setItem(STORIES_STORAGE_KEY, JSON.stringify(stories));
+        callback(stories);
+      },
+      (error) => {
+        console.warn('Error listening to night stories onSnapshot:', error);
+      }
+    );
   },
 
   async fetchStories(): Promise<NightStory[]> {
@@ -347,6 +389,44 @@ export const nightNotesService = {
 
     return Array.from(notesMap.values()).sort(
       (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+    );
+  },
+
+  // Suscripción en tiempo real a Notitas con Firestore onSnapshot
+  subscribeToLiveNotes(callback: (notes: NightNoteRecord[]) => void): () => void {
+    const qNotes = query(collection(db, 'night_notes'));
+    return onSnapshot(
+      qNotes,
+      (snapshot) => {
+        const notesMap = new Map<string, NightNoteRecord>();
+        const now = Date.now();
+
+        snapshot.docs.forEach((d) => {
+          const data = d.data() as any;
+          if (data && data.text) {
+            const createdMs = new Date(data.createdAt || data.created_at || new Date()).getTime();
+            if (now - createdMs <= NIGHT_MAX_AGE_MS) {
+              notesMap.set(data.userId, {
+                id: d.id,
+                userId: data.userId,
+                userName: data.userName || data.user_name || 'Cachenguero',
+                userAvatar: data.userAvatar || data.user_avatar || '',
+                text: data.text,
+                createdAt: data.createdAt || data.created_at || new Date().toISOString(),
+                hearts: Number(data.hearts) || 0,
+              });
+            }
+          }
+        });
+
+        const sorted = Array.from(notesMap.values()).sort(
+          (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+        );
+        callback(sorted);
+      },
+      (error) => {
+        console.warn('Error listening to night notes onSnapshot:', error);
+      }
     );
   },
 

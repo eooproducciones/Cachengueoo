@@ -41,25 +41,33 @@ export const NightNotesView: React.FC<NightNotesViewProps> = ({
   // Notitas de la noche sincronizadas directamente con la tabla night_notes de Supabase
   const [liveNotes, setLiveNotes] = useState<import('../../services/nightNotesService').NightNoteRecord[]>([]);
 
-  // Sincronizar historias e historias vigentes desde Supabase
+  // Sincronizar historias y notitas vigentes en tiempo real con Firestore onSnapshot
   React.useEffect(() => {
-    nightNotesService.fetchStories().then((activeStories) => {
+    // 1. Suscripción reactiva en tiempo real a Instantáneas
+    const unsubStories = nightNotesService.subscribeToLiveStories((activeStories) => {
       if (Array.isArray(activeStories)) {
         setStories(activeStories);
       }
     });
 
-    const loadNotes = () => {
-      nightNotesService.fetchNotes().then((notes) => {
-        if (Array.isArray(notes)) {
-          setLiveNotes(notes);
-        }
-      });
-    };
+    // 2. Suscripción reactiva en tiempo real a Notitas
+    const unsubNotes = nightNotesService.subscribeToLiveNotes((notes) => {
+      if (Array.isArray(notes)) {
+        setLiveNotes(notes);
+      }
+    });
 
-    loadNotes();
-    const interval = setInterval(loadNotes, 4000);
-    return () => clearInterval(interval);
+    // Carga inicial rápida
+    nightNotesService.fetchStories().then((activeStories) => {
+      if (Array.isArray(activeStories) && activeStories.length > 0) {
+        setStories(activeStories);
+      }
+    });
+
+    return () => {
+      unsubStories();
+      unsubNotes();
+    };
   }, []);
 
   // Estado local para seguimiento de qué notitas les dio like este dispositivo

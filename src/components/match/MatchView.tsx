@@ -174,8 +174,8 @@ export const MatchView: React.FC<MatchViewProps> = ({
         setMatches(userMatches || []);
       });
 
-      // Intervalo de respaldo periódico
-      pollInterval = setInterval(refreshConectaAndMatches, 6000);
+      // Intervalo de respaldo periódico ligero (cada 45s) para no congestionar la red
+      pollInterval = setInterval(refreshConectaAndMatches, 45000);
     }
 
     return () => {
@@ -279,41 +279,44 @@ export const MatchView: React.FC<MatchViewProps> = ({
     setCurrentIndex(0);
   };
 
-  // Acciones desde el apartado Conectá
-  const handleLikeFromConecta = async (target: MatchProfile) => {
+  // Acciones desde el apartado Conectá: Match Instantáneo en 0 ms
+  const handleLikeFromConecta = (target: MatchProfile) => {
     if (!target) return;
     setIsConnectingMatch(target.userId);
 
-    try {
-      const activeEvt = eventService.getActiveTonightEvent();
-      const result = await matchService.registerSwipe(
-        currentUser.id,
-        target,
-        'like',
-        activeEvt?.id,
-        true // forceMatch = true, es un Match Instantáneo garantizado en Conectá
-      );
+    const pairKey = [currentUser.id, target.userId].sort().join('_');
+    const finalMatchId = `match_${pairKey}`;
+    const newMatch: MatchPair = {
+      id: finalMatchId,
+      userAId: currentUser.id,
+      userBId: target.userId,
+      eventId: 'evt_tonight',
+      eventTitle: 'CACHENGUEOO NIGHT',
+      matchedAt: new Date().toISOString(),
+      lastMessageSnippet: '¡Hicieron Match!',
+      lastMessageAt: 'Recién',
+      partnerProfile: target,
+    };
 
-      setConectaProfiles((prev) => prev.filter((p) => p.userId !== target.userId));
-      setInspectingConectaProfile(null);
+    // 1. RESPUESTA OPTIMISTA INMEDIATA (0 ms): abrir modal de celebración y confetti en el acto
+    setConectaProfiles((prev) => prev.filter((p) => p.userId !== target.userId));
+    setInspectingConectaProfile(null);
+    setCelebrationMatch(newMatch);
+    setMatches((prev) => [newMatch, ...prev.filter((m) => m.id !== finalMatchId)]);
 
-      if (result.isMatch && result.newMatch) {
-        setCelebrationMatch(result.newMatch);
-        const updated = await matchService.fetchUserMatches(currentUser.id);
-        setMatches(updated);
+    confetti({
+      particleCount: 90,
+      spread: 80,
+      origin: { y: 0.6 },
+      colors: ['#F39200', '#FFFFFF', '#10B981'],
+    });
 
-        confetti({
-          particleCount: 90,
-          spread: 80,
-          origin: { y: 0.6 },
-          colors: ['#F39200', '#FFFFFF', '#10B981'],
-        });
-      }
-    } catch (err) {
-      console.error('Error al conectar desde Conectá:', err);
-    } finally {
-      setIsConnectingMatch(null);
-    }
+    // 2. Persistencia asíncrona en segundo plano sin congelar la interfaz
+    const activeEvt = eventService.getActiveTonightEvent();
+    matchService
+      .registerSwipe(currentUser.id, target, 'like', activeEvt?.id, true)
+      .catch((err) => console.warn('Aviso persistiendo match en background:', err))
+      .finally(() => setIsConnectingMatch(null));
   };
 
   const handlePassFromConecta = async (target: MatchProfile) => {

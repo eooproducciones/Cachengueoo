@@ -817,10 +817,71 @@ export const matchService = {
     const qLikes = query(collection(db, 'likes'), where('toUserId', '==', currentUserId));
     const unsubscribe = onSnapshot(
       qLikes,
-      async () => {
+      async (snapshot) => {
         try {
-          const fresh = await this.fetchIncomingLikes(currentUserId);
-          onLikesChange(fresh);
+          const matches = this.getMatches(currentUserId);
+          const matchedUserIds = new Set(
+            matches.map((m) => (m.userAId === currentUserId ? m.userBId : m.userAId))
+          );
+          let blockedList: string[] = [];
+          try {
+            blockedList = JSON.parse(localStorage.getItem('cachengueoo_blocked_match_users') || '[]');
+          } catch {}
+          const passedIds = this.getPassedUserIds(currentUserId);
+
+          const profiles: MatchProfile[] = [];
+          const seenSenders = new Set<string>();
+          const unresolvedSenders: string[] = [];
+
+          snapshot.docs.forEach((d) => {
+            const data = d.data();
+            const fromId = data.fromUserId;
+            if (!fromId || fromId === currentUserId || seenSenders.has(fromId)) return;
+            if (matchedUserIds.has(fromId) || blockedList.includes(fromId) || passedIds.includes(fromId)) return;
+
+            seenSenders.add(fromId);
+
+            if (data.senderProfile) {
+              const sp = data.senderProfile;
+              const photos = Array.isArray(sp.photos) && sp.photos.length > 0
+                ? sp.photos
+                : sp.avatarUrl ? [sp.avatarUrl] : [];
+              profiles.push({
+                userId: fromId,
+                fullName: sp.fullName || sp.nickname || 'Usuario',
+                nickname: sp.nickname || sp.fullName || 'Usuario',
+                age: Number(sp.age) || 23,
+                avatarUrl: photos[0] || sp.avatarUrl || '',
+                photos,
+                bio: sp.bio || '',
+                interests: sp.interests || sp.drinks || ['Fernet'],
+                drinkFavorite: sp.drinkFavorite || 'Fernet con Coca',
+                drinks: sp.drinks || ['Fernet'],
+                zodiacSign: sp.zodiacSign,
+                musicPreferences: sp.musicPreferences || ['Reggaeton', 'Cumbia'],
+                verifiedInVenue: true,
+                lastPresenceCheck: data.createdAt || new Date().toISOString(),
+                instagram: sp.instagram,
+                gender: sp.gender,
+              });
+            } else {
+              unresolvedSenders.push(fromId);
+            }
+          });
+
+          // Disparar inmediatamente los perfiles con payload embebido en memoria (0 ms)
+          onLikesChange(profiles);
+
+          // Si hubiera algún emisor antiguo sin payload embebido, resolverlo de fondo
+          if (unresolvedSenders.length > 0) {
+            for (const senderId of unresolvedSenders) {
+              const resolved = await this.resolveMatchProfile(senderId);
+              if (resolved && !profiles.some((p) => p.userId === resolved.userId)) {
+                profiles.push(resolved);
+              }
+            }
+            onLikesChange([...profiles]);
+          }
         } catch (e) {
           console.warn('Error in subscribeToIncomingLikes snapshot listener:', e);
         }
