@@ -19,26 +19,35 @@ export const Header: React.FC<HeaderProps> = ({
   currentUser,
 }) => {
   return (
-    <header className="sticky top-0 z-40 bg-[#09090b]/95 backdrop-blur-md border-b border-zinc-800/80 px-4 sm:px-6 h-14 sm:h-16 flex items-center justify-between transition-colors overflow-hidden select-none">
-      {/* Zona 1: Logo Wordmark Cachengueoo o Volver de Admin */}
-      <div className="flex items-center gap-3 min-w-0">
-        {isAdmin ? (
+    <header className="sticky top-0 z-40 bg-[#09090b]/95 backdrop-blur-md border-b border-zinc-800/80 px-3.5 sm:px-6 h-15 sm:h-16 flex items-center justify-between transition-colors overflow-hidden select-none">
+      {/* Zona 1: Logo Wordmark Cachengueoo con protagonismo en móvil (Click lleva al Inicio) */}
+      <div className="flex items-center gap-2.5 min-w-0">
+        {isAdmin && (
           <button
             onClick={onExitAdmin}
-            className="flex items-center gap-2 text-xs font-bold text-[#F39200] hover:text-white cursor-pointer px-3 py-1.5 rounded-xl bg-zinc-900 border border-zinc-800 active:scale-95 transition-all"
+            className="flex items-center gap-1.5 text-xs font-bold text-[#F39200] hover:text-white cursor-pointer px-2.5 py-1.5 rounded-xl bg-zinc-900 border border-zinc-800 active:scale-95 transition-all shrink-0"
+            title="Volver a la App"
           >
             <ArrowLeft className="w-4 h-4" />
-            <span>Volver a la App</span>
-          </button>
-        ) : (
-          <button
-            onClick={() => onTabChange('inicio')}
-            className="focus:outline-none flex items-center gap-2 text-left cursor-pointer truncate"
-            aria-label="Ir a Inicio"
-          >
-            <CachengueooLogo size="md" />
+            <span className="hidden xs:inline">Volver</span>
           </button>
         )}
+
+        <button
+          type="button"
+          onClick={() => {
+            if (isAdmin) onExitAdmin();
+            onTabChange('inicio');
+            window.scrollTo({ top: 0, left: 0, behavior: 'smooth' });
+            document.documentElement.scrollTo({ top: 0, left: 0, behavior: 'smooth' });
+            document.body.scrollTo({ top: 0, left: 0, behavior: 'smooth' });
+          }}
+          className="focus:outline-none flex items-center gap-2 text-left cursor-pointer active:scale-95 transition-all shrink-0 group"
+          aria-label="Ir al Inicio de Cachengueoo"
+          title="Ir al Inicio de Cachengueoo"
+        >
+          <CachengueooLogo size="md" className="group-hover:opacity-90 transition-opacity py-0.5" />
+        </button>
       </div>
 
       {/* Zona 2: Enlaces Desktop (solo en pantallas grandes) */}

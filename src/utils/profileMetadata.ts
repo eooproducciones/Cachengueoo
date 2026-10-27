@@ -174,24 +174,37 @@ export function buildUserProfileFromSources(
 
   const age = Number(profileRow?.age || meta.age || localUser?.age || 23);
 
-  // Fotos (priorizar fotos reales de Supabase)
+  // Fotos (priorizar fotos reales)
   let photos: string[] = [];
   if (Array.isArray(profileRow?.photos) && profileRow.photos.length > 0) {
-    photos = profileRow.photos;
-  } else if (unpacked.extraPhotos.length > 0 || profileRow?.avatar_url) {
-    photos = [profileRow?.avatar_url || meta.avatar_url, ...unpacked.extraPhotos].filter(Boolean) as string[];
-  } else if (Array.isArray(meta.photos) && meta.photos.length > 0) {
-    photos = meta.photos;
-  } else if (Array.isArray(localUser?.photos) && localUser!.photos.length > 0) {
-    photos = localUser!.photos;
+    photos = profileRow.photos.filter((p: string) => p && !p.includes('images.unsplash.com'));
+  }
+  if (
+    photos.length === 0 &&
+    (unpacked.extraPhotos.length > 0 ||
+      (profileRow?.avatar_url && !profileRow.avatar_url.includes('images.unsplash.com')))
+  ) {
+    photos = [
+      profileRow?.avatar_url || meta.avatar_url,
+      ...unpacked.extraPhotos,
+    ].filter((p) => p && !p.includes('images.unsplash.com')) as string[];
+  }
+  if (photos.length === 0 && Array.isArray(localUser?.photos) && localUser!.photos.length > 0) {
+    photos = localUser!.photos.filter((p) => p && !p.includes('images.unsplash.com'));
   }
 
   // Avatar principal
   const avatarUrl =
-    profileRow?.avatar_url ||
-    meta.avatar_url ||
+    (profileRow?.avatar_url && !profileRow.avatar_url.includes('images.unsplash.com')
+      ? profileRow.avatar_url
+      : null) ||
     photos[0] ||
-    localUser?.avatarUrl ||
+    (localUser?.avatarUrl && !localUser.avatarUrl.includes('images.unsplash.com')
+      ? localUser.avatarUrl
+      : null) ||
+    (meta.avatar_url && !meta.avatar_url.includes('images.unsplash.com')
+      ? meta.avatar_url
+      : null) ||
     '';
 
   if (photos.length === 0 && avatarUrl) {
@@ -211,7 +224,7 @@ export function buildUserProfileFromSources(
     meta.zodiac_sign ||
     meta.zodiacSign ||
     localUser?.zodiacSign ||
-    'Leo';
+    undefined;
 
   // Gustos musicales
   let musicPreferences: string[] = [];
@@ -227,7 +240,7 @@ export function buildUserProfileFromSources(
     musicPreferences = ['Reggaeton', 'Cumbia', 'Cuarteto'];
   }
 
-  // Tragos
+  // Tragos: Si el usuario seleccionó tragos, NUNCA sobreescribirlos con el default 'Fernet con Coca'
   let drinks: string[] = [];
   if (Array.isArray(profileRow?.drinks) && profileRow.drinks.length > 0) {
     drinks = profileRow.drinks;
@@ -237,16 +250,20 @@ export function buildUserProfileFromSources(
     drinks = meta.drinks;
   } else if (Array.isArray(localUser?.drinks) && localUser!.drinks.length > 0) {
     drinks = localUser!.drinks;
+  } else if (profileRow?.drink_favorite && profileRow.drink_favorite !== 'Fernet con Coca') {
+    drinks = [profileRow.drink_favorite];
   } else {
-    drinks = ['Fernet', 'Skyy'];
+    drinks = [];
   }
 
   const drinkFavorite =
-    profileRow?.drink_favorite ||
+    (drinks.length > 0 ? drinks.join(' & ') : null) ||
+    (profileRow?.drink_favorite && profileRow.drink_favorite !== 'Fernet con Coca'
+      ? profileRow.drink_favorite
+      : null) ||
     meta.drink_favorite ||
     localUser?.drinkFavorite ||
-    drinks.join(' & ') ||
-    'Fernet & Skyy';
+    'Fernet con Coca';
 
   // Instagram
   const instagram =

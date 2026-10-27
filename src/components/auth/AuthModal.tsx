@@ -176,11 +176,48 @@ export const AuthModal: React.FC<AuthModalProps> = ({
         if (u.email && (!regEmail || regEmail.includes('usuario.cache'))) setRegEmail(u.email);
         if (u.fullName && !regFullName) setRegFullName(u.fullName);
         if (u.nickname && !regNickname) setRegNickname(u.nickname);
-        if (u.birthDate && u.birthDate !== '2001-01-01' && !regBirthDate) setRegBirthDate(u.birthDate);
-        if (u.avatarUrl && regPhotos.length === 0) setRegPhotos([u.avatarUrl]);
+        if (
+          u.birthDate &&
+          u.birthDate !== '2001-01-01' &&
+          u.birthDate !== '2000-01-01' &&
+          !regBirthDate
+        ) {
+          setRegBirthDate(u.birthDate);
+        }
+        if (
+          u.avatarUrl &&
+          !u.avatarUrl.includes('images.unsplash.com') &&
+          regPhotos.length === 0
+        ) {
+          setRegPhotos([u.avatarUrl]);
+        }
+        if (u.drinks && u.drinks.length > 0 && regDrinks.length === 0) {
+          setRegDrinks(u.drinks);
+        }
+        if (u.zodiacSign && !regZodiacSign) {
+          setRegZodiacSign(u.zodiacSign);
+        }
+        if (
+          u.musicPreferences &&
+          u.musicPreferences.length > 0 &&
+          regMusicPreferences.length === 0
+        ) {
+          setRegMusicPreferences(u.musicPreferences);
+        }
       }
     }
-  }, [isOpen, currentView, regEmail, regFullName, regNickname, regBirthDate, regPhotos.length]);
+  }, [
+    isOpen,
+    currentView,
+    regEmail,
+    regFullName,
+    regNickname,
+    regBirthDate,
+    regPhotos.length,
+    regDrinks.length,
+    regZodiacSign,
+    regMusicPreferences.length,
+  ]);
 
   if (!isOpen) return null;
 
@@ -346,18 +383,34 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     }
 
     // Verificar si el correo ya está registrado en Cachengueoo para evitar cuentas duplicadas
-    setIsCheckingEmail(true);
-    try {
-      const emailCheck = await authService.checkEmailExists(cleanEmail);
-      if (emailCheck.exists && emailCheck.profile) {
+    const currentUser = authService.getCurrentUser();
+    const currentUserId = currentUser?.id;
+    const isCurrentUserEmail = Boolean(
+      (currentUser?.email && currentUser.email.trim().toLowerCase() === cleanEmail) ||
+      authProvider === 'gmail'
+    );
+
+    // Si el usuario se autenticó con Gmail o está utilizando su propio correo verificado,
+    // NUNCA debe bloquearse con error de "ya está registrado", ya que es su propia cuenta legítima configurando su Cache ID.
+    if (!isCurrentUserEmail && authProvider !== 'gmail') {
+      setIsCheckingEmail(true);
+      try {
+        const emailCheck = await authService.checkEmailExists(cleanEmail, currentUserId);
+        if (
+          emailCheck.exists &&
+          emailCheck.profile &&
+          emailCheck.profile.id !== currentUserId &&
+          emailCheck.isConfigured
+        ) {
+          setIsCheckingEmail(false);
+          setExistingAccountFound(emailCheck.profile);
+          return;
+        }
+      } catch {
+        // Continuar si falla la verificación de red
+      } finally {
         setIsCheckingEmail(false);
-        setExistingAccountFound(emailCheck.profile);
-        return;
       }
-    } catch {
-      // Continuar si falla la verificación de red
-    } finally {
-      setIsCheckingEmail(false);
     }
 
     // Para registro con correo electrónico, la contraseña es obligatoria

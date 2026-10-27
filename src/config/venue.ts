@@ -62,38 +62,64 @@ export function saveVenueConfig(config: VenueConfig): void {
   }
 }
 
+import { db } from '../services/firebaseClient';
+import { collection, doc, getDocs, setDoc, deleteDoc } from 'firebase/firestore';
+
 /**
- * Sincroniza las locaciones hacia la tabla public.venue_locations de Supabase
+ * Sincroniza las locaciones hacia la tabla public.venue_locations de Supabase y Firestore
  */
 export async function syncVenueConfigToSupabase(config: VenueConfig): Promise<void> {
   const supabase = getSupabaseClient();
-  if (!supabase) return;
 
   try {
-    if (!config.locations || config.locations.length === 0) {
-      // Si el administrador eliminó todas las locaciones, limpiar la tabla en Supabase
+    const locs = config.locations || [];
+    
+    // 1. Sincronizar en Firestore
+    try {
+      for (const loc of locs) {
+        await setDoc(doc(db, 'venue_locations', loc.id), {
+          id: loc.id,
+          name: loc.name,
+          address: loc.address || '',
+          city: loc.city || 'Mendoza',
+          province: loc.province || 'Mendoza',
+          country: loc.country || 'Argentina',
+          latitude: Number(loc.latitude),
+          longitude: Number(loc.longitude),
+          radius_meters: Number(loc.radiusMeters) || 200,
+          is_active: loc.isActive !== false,
+          updated_at: new Date().toISOString(),
+        }, { merge: true });
+      }
+    } catch (fsErr) {
+      console.warn('Notice syncing venue locations to Firestore:', fsErr);
+    }
+
+    if (!supabase) return;
+
+    if (locs.length === 0) {
       await supabase.from('venue_locations').delete().neq('id', '___empty___');
       return;
     }
 
-    const records = config.locations.map((loc) => ({
+    const records = locs.map((loc) => ({
       id: loc.id,
       name: loc.name,
       address: loc.address || '',
       city: loc.city || 'Mendoza',
       province: loc.province || 'Mendoza',
       country: loc.country || 'Argentina',
-      latitude: loc.latitude,
-      longitude: loc.longitude,
-      radius_meters: loc.radiusMeters,
-      is_active: loc.isActive,
+      latitude: Number(loc.latitude),
+      longitude: Number(loc.longitude),
+      radius_meters: Number(loc.radiusMeters) || 200,
+      is_active: loc.isActive !== false,
       updated_at: new Date().toISOString(),
     }));
 
     await supabase.from('venue_locations').upsert(records, { onConflict: 'id' });
     
     // Eliminar de Supabase las que hayan sido borradas
-    const activeIds = config.locations.map((l) => l.id);
+    const activeIds = locs.map((l) => l.id);
     if (activeIds.length > 0) {
       const { data: allSupabaseRows } = await supabase.from('venue_locations').select('id');
       if (allSupabaseRows) {
@@ -101,6 +127,9 @@ export async function syncVenueConfigToSupabase(config: VenueConfig): Promise<vo
         if (toDelete.length > 0) {
           for (const delId of toDelete) {
             await supabase.from('venue_locations').delete().eq('id', delId);
+            try {
+              await deleteDoc(doc(db, 'venue_locations', delId));
+            } catch {}
           }
         }
       }
@@ -111,9 +140,13 @@ export async function syncVenueConfigToSupabase(config: VenueConfig): Promise<vo
 }
 
 /**
- * Elimina una locación en la nube en Supabase
+ * Elimina una locación en la nube en Supabase y Firestore
  */
 export async function deleteVenueLocationFromSupabase(id: string): Promise<void> {
+  try {
+    await deleteDoc(doc(db, 'venue_locations', id));
+  } catch {}
+
   const supabase = getSupabaseClient();
   if (!supabase) return;
   try {
@@ -124,74 +157,82 @@ export async function deleteVenueLocationFromSupabase(id: string): Promise<void>
 }
 
 /**
- * Descarga las locaciones activas desde Supabase y actualiza el estado local
+ * Descarga las locaciones activas desde Supabase (o Firestore) y actualiza el estado local
  */
 export async function syncVenueLocationsFromSupabase(): Promise<VenueLocation[] | null> {
   const supabase = getSupabaseClient();
-  if (!supabase) return null;
+  let dbRows: any[] = [];
+
+  // 1. Intentar desde Supabase
+  if (supabase) {
+    try {
+      const { data, error } = await supabase
+        .from('venue_locations')
+        .select('*');
+
+      if (!error && Array.isArray(data)) {
+        dbRows = data;
+      }
+    } catch (e) {
+      console.warn('Notice fetching venue locations from Supabase:', e);
+    }
+  }
+
+  // 2. Si Supabase no devolvió filas, consultar Firestore
+  if (dbRows.length === 0) {
+    try {
+      const snap = await getDocs(collection(db, 'venue_locations'));
+      if (!snap.empty) {
+        dbRows = snap.docs.map((d) => d.data());
+      }
+    } catch (e) {
+      console.warn('Notice fetching venue locations from Firestore:', e);
+    }
+  }
 
   try {
-    const { data, error } = await supabase
-      .from('venue_locations')
-      .select('*')
-      .order('created_at', { ascending: true });
-
-    if (error) {
-      console.warn('Error fetching venue locations from Supabase:', error.message);
-      return null;
-    }
-
-    // Si la tabla está vacía en Supabase (ej. el admin las borró todas):
-    if (data && data.length === 0) {
+    // Si la tabla está vacía en la base de datos (ej. el admin las borró todas):
+    if (dbRows.length === 0) {
       const current = getVenueConfig();
-      const updated: VenueConfig = {
-        ...current,
-        locations: [],
-      };
-      localStorage.setItem(VENUE_STORAGE_KEY, JSON.stringify(updated));
-      localStorage.removeItem('cachengueoo_presence_state');
-      if (typeof window !== 'undefined') {
-        window.dispatchEvent(new CustomEvent('cachengueoo_venue_change', { detail: updated }));
-        window.dispatchEvent(new CustomEvent('cachengueoo_presence_change', { detail: { isInside: false } }));
-        window.dispatchEvent(new Event('storage'));
+      // Si el estado local tiene locaciones pero la nube está vacía, no limpiarlas a ciegas a menos que sea explícito
+      if (!current.locations || current.locations.length === 0) {
+        return [];
       }
-      return [];
+      return current.locations;
     }
 
-    if (data && data.length > 0) {
-      const mappedLocations: VenueLocation[] = data.map((row) => ({
-        id: row.id,
-        name: row.name,
-        address: row.address || '',
-        city: row.city || 'Mendoza',
-        province: row.province || 'Mendoza',
-        country: row.country || 'Argentina',
-        latitude: parseFloat(row.latitude),
-        longitude: parseFloat(row.longitude),
-        radiusMeters: parseInt(row.radius_meters, 10) || 180,
-        isActive: Boolean(row.is_active),
-      }));
+    const mappedLocations: VenueLocation[] = dbRows.map((row) => ({
+      id: String(row.id),
+      name: String(row.name || 'Sede Cachengueoo'),
+      address: String(row.address || ''),
+      city: String(row.city || 'Mendoza'),
+      province: String(row.province || 'Mendoza'),
+      country: String(row.country || 'Argentina'),
+      latitude: parseFloat(String(row.latitude)),
+      longitude: parseFloat(String(row.longitude)),
+      radiusMeters: Math.max(50, parseInt(String(row.radius_meters || row.radiusMeters), 10) || 200),
+      isActive: row.is_active !== false && row.isActive !== false,
+    }));
 
-      const current = getVenueConfig();
-      const primary = mappedLocations[0];
-      const updated: VenueConfig = {
-        ...current,
-        name: primary ? primary.name : current.name,
-        city: primary ? primary.city : current.city,
-        latitude: primary ? primary.latitude : current.latitude,
-        longitude: primary ? primary.longitude : current.longitude,
-        radiusMeters: primary ? primary.radiusMeters : current.radiusMeters,
-        locations: mappedLocations,
-      };
+    const current = getVenueConfig();
+    const primary = mappedLocations[0];
+    const updated: VenueConfig = {
+      ...current,
+      name: primary ? primary.name : current.name,
+      city: primary ? primary.city : current.city,
+      latitude: primary ? primary.latitude : current.latitude,
+      longitude: primary ? primary.longitude : current.longitude,
+      radiusMeters: primary ? primary.radiusMeters : current.radiusMeters,
+      locations: mappedLocations,
+    };
 
-      localStorage.setItem(VENUE_STORAGE_KEY, JSON.stringify(updated));
-      if (typeof window !== 'undefined') {
-        window.dispatchEvent(new CustomEvent('cachengueoo_venue_change', { detail: updated }));
-      }
-      return mappedLocations;
+    localStorage.setItem(VENUE_STORAGE_KEY, JSON.stringify(updated));
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('cachengueoo_venue_change', { detail: updated }));
     }
+    return mappedLocations;
   } catch (e) {
-    console.warn('Error syncing venue locations from Supabase', e);
+    console.warn('Error syncing venue locations', e);
   }
   return null;
 }

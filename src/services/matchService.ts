@@ -35,6 +35,12 @@ export const getChatChannelId = (u1: string, u2: string, fallbackMatchId?: strin
   return (fallbackMatchId || 'chat_general').replace(/[^a-zA-Z0-9_-]/g, '_');
 };
 
+export function cleanAvatarUrl(url?: string | null, name?: string): string {
+  if (url && !url.includes("images.unsplash.com")) return url;
+  const seed = encodeURIComponent(name || "Cachenguero");
+  return "https://api.dicebear.com/7.x/initials/svg?seed=" + seed + "&backgroundColor=f39200&textColor=000000";
+}
+
 export const matchService = {
   getDismissedProfileIds(currentUserId?: string): string[] {
     try {
@@ -98,28 +104,28 @@ export const matchService = {
             if (row.email) seenUserIds.add(row.email.toLowerCase());
 
             const unpacked = unpackProfileInterests(row.interests);
-            const avatar =
-              row.avatar_url ||
-              'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=500&auto=format&fit=crop&q=80';
+            const avatar = cleanAvatarUrl(row.avatar_url, row.full_name || row.nickname);
             const photos =
               Array.isArray(row.photos) && row.photos.length > 0
-                ? row.photos
-                : [avatar, ...unpacked.extraPhotos].slice(0, 3);
+                ? row.photos.filter((p: string) => !p.includes('images.unsplash.com'))
+                : [avatar, ...unpacked.extraPhotos].filter((p: string) => !p.includes('images.unsplash.com')).slice(0, 3);
             const drinks =
-              unpacked.drinks.length > 0
+              Array.isArray(row.drinks) && row.drinks.length > 0
+                ? row.drinks
+                : unpacked.drinks.length > 0
                 ? unpacked.drinks
-                : row.drink_favorite
+                : row.drink_favorite && row.drink_favorite !== 'Fernet con Coca'
                 ? [row.drink_favorite]
                 : ['Fernet', 'Skyy'];
             const musicPreferences =
-              unpacked.musicPreferences.length > 0
+              Array.isArray(row.music_preferences) && row.music_preferences.length > 0
+                ? row.music_preferences
+                : unpacked.musicPreferences.length > 0
                 ? unpacked.musicPreferences
                 : ['Reggaeton', 'Cumbia', 'Cuarteto'];
-            const zodiacSign = unpacked.zodiacSign || row.zodiac_sign || undefined;
+            const zodiacSign = row.zodiac_sign || unpacked.zodiacSign || undefined;
 
             // Vigencia en Match de 8 horas:
-            // Si el perfil fue actualizado o verificado en las últimas 8 horas (o si no tiene fecha aún),
-            // se considera activo en la fiesta
             const updatedAtMs = row.updated_at ? new Date(row.updated_at).getTime() : Date.now();
             const isWithin8Hours = Date.now() - updatedAtMs <= 8 * 60 * 60 * 1000;
             const isVerified = row.is_verified_in_venue === true || isWithin8Hours;
@@ -129,11 +135,11 @@ export const matchService = {
               fullName: row.full_name || row.nickname || 'Cachenguero',
               nickname: row.nickname || row.full_name || 'Cachenguero',
               age: Number(row.age) || 23,
-              avatarUrl: avatar,
-              photos,
+              avatarUrl: photos[0] || avatar,
+              photos: photos.length > 0 ? photos : [avatar],
               bio: row.bio || '¡Disfrutando de la noche en Cachengueoo!',
               interests: unpacked.plainInterests.length > 0 ? unpacked.plainInterests : drinks,
-              drinkFavorite: row.drink_favorite || drinks.join(' & '),
+              drinkFavorite: drinks.length > 0 ? drinks.join(' & ') : row.drink_favorite || 'Fernet con Coca',
               drinks,
               zodiacSign,
               musicPreferences,
@@ -148,6 +154,69 @@ export const matchService = {
       } catch (e) {
         console.warn('Error fetching profiles from Supabase:', e);
       }
+    }
+
+    // 1b. Cargar y fusionar desde Firestore profiles
+    try {
+      const fsProfilesSnap = await getDocs(collection(db, 'profiles'));
+      if (!fsProfilesSnap.empty) {
+        fsProfilesSnap.docs.forEach((d) => {
+          const row = d.data();
+          const docId = d.id;
+          if (docId === currentUserId || row.id === currentUserId) return;
+          if (seenUserIds.has(docId) || (row.id && seenUserIds.has(row.id))) return;
+          if (row.email && seenUserIds.has(row.email.toLowerCase())) return;
+          if (dismissed.includes(docId) || (row.id && dismissed.includes(row.id))) return;
+          if (blockedList.includes(docId) || (row.id && blockedList.includes(row.id))) return;
+          if (row.email && blockedList.includes(row.email.toLowerCase())) return;
+
+          seenUserIds.add(docId);
+          if (row.id) seenUserIds.add(row.id);
+          if (row.email) seenUserIds.add(row.email.toLowerCase());
+
+          const unpacked = unpackProfileInterests(row.interests);
+          const avatar = cleanAvatarUrl(row.avatar_url || row.avatarUrl, row.full_name || row.fullName || row.nickname);
+          const rawPhotos = Array.isArray(row.photos) && row.photos.length > 0 ? row.photos : [avatar, ...unpacked.extraPhotos];
+          const photos = rawPhotos.filter((p: string) => !p.includes('images.unsplash.com')).slice(0, 3);
+          const drinks =
+            Array.isArray(row.drinks) && row.drinks.length > 0
+              ? row.drinks
+              : unpacked.drinks.length > 0
+              ? unpacked.drinks
+              : row.drink_favorite && row.drink_favorite !== 'Fernet con Coca'
+              ? [row.drink_favorite]
+              : ['Fernet', 'Skyy'];
+          const musicPreferences =
+            Array.isArray(row.music_preferences) && row.music_preferences.length > 0
+              ? row.music_preferences
+              : unpacked.musicPreferences.length > 0
+              ? unpacked.musicPreferences
+              : ['Reggaeton', 'Cumbia', 'Cuarteto'];
+          const zodiacSign = row.zodiac_sign || row.zodiacSign || unpacked.zodiacSign || undefined;
+
+          loadedProfiles.push({
+            userId: row.id || docId,
+            fullName: row.full_name || row.fullName || row.nickname || 'Cachenguero',
+            nickname: row.nickname || row.fullName || 'Cachenguero',
+            age: Number(row.age) || 23,
+            avatarUrl: photos[0] || avatar,
+            photos: photos.length > 0 ? photos : [avatar],
+            bio: row.bio || '¡Disfrutando de la noche en Cachengueoo!',
+            interests: unpacked.plainInterests.length > 0 ? unpacked.plainInterests : drinks,
+            drinkFavorite: drinks.length > 0 ? drinks.join(' & ') : row.drink_favorite || 'Fernet con Coca',
+            drinks,
+            zodiacSign,
+            musicPreferences,
+            verifiedInVenue: true,
+            lastPresenceCheck: row.updated_at || row.updatedAt || new Date().toISOString(),
+            instagram: row.instagram || undefined,
+            gender: row.gender || undefined,
+            nightNote: unpacked.nightNote || row.nightNote,
+          });
+        });
+      }
+    } catch (e) {
+      console.warn('Notice fetching profiles from Firestore:', e);
     }
 
     // 2. Fusionar con perfiles registrados localmente para garantizar que usuarios creados
@@ -553,35 +622,37 @@ export const matchService = {
         if (!error && Array.isArray(data)) {
           data.forEach((row: any) => {
             const unpacked = unpackProfileInterests(row.interests);
-            const avatar =
-              row.avatar_url ||
-              'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=500&auto=format&fit=crop&q=80';
+            const avatar = cleanAvatarUrl(row.avatar_url, row.full_name || row.nickname);
             const photos =
               Array.isArray(row.photos) && row.photos.length > 0
-                ? row.photos
-                : [avatar, ...unpacked.extraPhotos].slice(0, 3);
+                ? row.photos.filter((p: string) => !p.includes('images.unsplash.com'))
+                : [avatar, ...unpacked.extraPhotos].filter((p: string) => !p.includes('images.unsplash.com')).slice(0, 3);
             const drinks =
-              unpacked.drinks.length > 0
+              Array.isArray(row.drinks) && row.drinks.length > 0
+                ? row.drinks
+                : unpacked.drinks.length > 0
                 ? unpacked.drinks
-                : row.drink_favorite
+                : row.drink_favorite && row.drink_favorite !== 'Fernet con Coca'
                 ? [row.drink_favorite]
                 : ['Fernet', 'Skyy'];
             const musicPreferences =
-              unpacked.musicPreferences.length > 0
+              Array.isArray(row.music_preferences) && row.music_preferences.length > 0
+                ? row.music_preferences
+                : unpacked.musicPreferences.length > 0
                 ? unpacked.musicPreferences
                 : ['Reggaeton', 'Cumbia', 'Cuarteto'];
-            const zodiacSign = unpacked.zodiacSign || row.zodiac_sign || undefined;
+            const zodiacSign = row.zodiac_sign || unpacked.zodiacSign || undefined;
 
             profiles.push({
               userId: row.id,
               fullName: row.full_name || row.nickname || 'Cachenguero',
               nickname: row.nickname || row.full_name || 'Cachenguero',
               age: Number(row.age) || 23,
-              avatarUrl: avatar,
-              photos,
+              avatarUrl: photos[0] || avatar,
+              photos: photos.length > 0 ? photos : [avatar],
               bio: row.bio || '¡Disfrutando de la noche en Cachengueoo!',
               interests: unpacked.plainInterests.length > 0 ? unpacked.plainInterests : drinks,
-              drinkFavorite: row.drink_favorite || drinks.join(' & '),
+              drinkFavorite: drinks.length > 0 ? drinks.join(' & ') : row.drink_favorite || 'Fernet con Coca',
               drinks,
               zodiacSign,
               musicPreferences,
@@ -638,21 +709,19 @@ export const matchService = {
           data.forEach((m: any) => {
             const partnerId = m.user_a_id === currentUserId ? m.user_b_id : m.user_a_id;
             const p = profilesMap.get(partnerId);
-            const avatar =
-              p?.avatar_url ||
-              'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=500&auto=format&fit=crop&q=80';
-            const photos =
-              Array.isArray(p?.photos) && p.photos.length > 0 ? p.photos : [avatar];
+            const avatar = cleanAvatarUrl(p?.avatar_url, p?.full_name || p?.nickname);
+            const rawPhotos = Array.isArray(p?.photos) && p.photos.length > 0 ? p.photos : [avatar];
+            const photos = rawPhotos.filter((ph: string) => !ph.includes('images.unsplash.com'));
             const partnerProfile: MatchProfile = {
               userId: partnerId,
               fullName: p?.full_name || p?.nickname || 'Cachenguero',
               nickname: p?.nickname || p?.full_name || 'Cachenguero',
               age: Number(p?.age) || 23,
-              avatarUrl: avatar,
-              photos,
+              avatarUrl: photos[0] || avatar,
+              photos: photos.length > 0 ? photos : [avatar],
               bio: p?.bio || '',
               interests: [],
-              drinkFavorite: p?.drink_favorite || 'Fernet',
+              drinkFavorite: p?.drink_favorite || 'Fernet & Skyy',
               instagram: p?.instagram || undefined,
               verifiedInVenue: true,
               lastPresenceCheck: new Date().toISOString(),
@@ -688,13 +757,14 @@ export const matchService = {
         const m = d.data();
         if (!map.has(d.id)) {
           const partnerId = m.userAId === currentUserId ? m.userBId : m.userAId;
-          const partnerProfile: MatchProfile = {
+          const defaultAvatar = cleanAvatarUrl(null, 'Cachenguero');
+          const partnerProfile: MatchProfile = m.partnerProfile || {
             userId: partnerId,
             fullName: 'Cachenguero',
             nickname: 'Cachenguero',
             age: 23,
-            avatarUrl: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=500&auto=format&fit=crop&q=80',
-            photos: ['https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=500&auto=format&fit=crop&q=80'],
+            avatarUrl: defaultAvatar,
+            photos: [defaultAvatar],
             bio: '',
             interests: [],
             drinkFavorite: 'Fernet',

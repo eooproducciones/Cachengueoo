@@ -21,17 +21,17 @@ export const CachengueooLogo: React.FC<LogoProps> = ({
   const logoSrc = customLogoUrl || DEFAULT_OFFICIAL_LOGO;
 
   const heightClasses = {
-    sm: 'h-4 sm:h-5 max-w-[120px] sm:max-w-[140px]',
-    md: 'h-5 sm:h-6 md:h-7 max-w-[150px] sm:max-w-[180px] md:max-w-[210px]',
-    lg: 'h-7 sm:h-8 md:h-9 max-w-[190px] sm:max-w-[240px]',
-    xl: 'h-9 sm:h-12 md:h-14 max-w-[240px] sm:max-w-[320px]',
+    sm: 'h-5 sm:h-6 max-w-[130px] sm:max-w-[150px]',
+    md: 'h-8 sm:h-8 md:h-8.5 max-w-[185px] sm:max-w-[215px] md:max-w-[240px]',
+    lg: 'h-9 sm:h-10 md:h-11 max-w-[210px] sm:max-w-[260px]',
+    xl: 'h-11 sm:h-13 md:h-16 max-w-[260px] sm:max-w-[340px]',
   };
 
   const sizeClasses = {
-    sm: 'text-base sm:text-lg tracking-tight',
-    md: 'text-xl sm:text-2xl tracking-tighter',
-    lg: 'text-2xl sm:text-3xl tracking-tighter',
-    xl: 'text-3xl sm:text-5xl tracking-tighter',
+    sm: 'text-lg sm:text-lg tracking-tight',
+    md: 'text-2xl sm:text-2xl md:text-3xl tracking-tighter',
+    lg: 'text-3xl sm:text-3xl tracking-tighter',
+    xl: 'text-4xl sm:text-5xl tracking-tighter',
   };
 
   if (!hasError && logoSrc) {

@@ -35,22 +35,17 @@ service cloud.firestore {
 
     // 1. User Profiles
     match /profiles/{userId} {
-      allow read: if true;
-      allow create: if isOwner(userId) && incoming().id == userId;
-      allow update: if isOwner(userId) && incoming().id == existing().id;
-      allow delete: if isOwner(userId);
+      allow read, write: if true;
     }
 
     // 2. Events (Public view, staff write)
     match /events/{eventId} {
-      allow read: if true;
-      allow write: if isSignedIn();
+      allow read, write: if true;
     }
 
     // 3. Venue Locations (Public view, staff write)
     match /venue_locations/{locationId} {
-      allow read: if true;
-      allow write: if isSignedIn();
+      allow read, write: if true;
     }
 
     // 4. Night Notes (Live 6-hour notes)

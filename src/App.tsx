@@ -269,17 +269,22 @@ export default function App() {
       return;
     }
 
-    // Verificar si existen sedes configuradas
+    // Sincronizar siempre las sedes más recientes desde la nube antes de comprobar
+    const freshLocations = await syncVenueLocationsFromSupabase().catch(() => null);
     const currentVenue = getVenueConfig();
-    const activeLocations: VenueLocation[] = (currentVenue.locations || []).filter(
+    let activeLocations: VenueLocation[] = (currentVenue.locations || []).filter(
       (l: VenueLocation) => l.isActive
     );
+    if (activeLocations.length === 0 && freshLocations && freshLocations.length > 0) {
+      activeLocations = freshLocations.filter((l) => l.isActive);
+    }
+
     if (activeLocations.length === 0) {
       presenceService.clearPresence();
       window.dispatchEvent(new Event('storage'));
       setOutOfRangeDetails({
         distanceMeters: 0,
-        radiusMeters: 150,
+        radiusMeters: 200,
         closestLocationName: 'Cachengueoo',
         customMessage: 'No hay sedes o locaciones configuradas para validar presencia.',
       });

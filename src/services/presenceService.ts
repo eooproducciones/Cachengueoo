@@ -1,4 +1,9 @@
-import { getVenueConfig, validateVenuePresence, GeolocationValidationResult } from '../config/venue';
+import {
+  getVenueConfig,
+  validateVenuePresence,
+  GeolocationValidationResult,
+  syncVenueLocationsFromSupabase,
+} from '../config/venue';
 import { PresenceMethod, PresenceRecord, ValidationMode } from '../types';
 
 const PRESENCE_CACHE_KEY = 'cachengueoo_presence_state';
@@ -132,6 +137,12 @@ export const presenceService = {
   async checkRealGeolocation(): Promise<GeolocationValidationResult> {
     if (!navigator.geolocation) {
       throw new Error('La geolocalización no está soportada por este navegador.');
+    }
+
+    try {
+      await syncVenueLocationsFromSupabase();
+    } catch (e) {
+      console.warn('Notice refreshing locations before GPS check:', e);
     }
 
     return new Promise((resolve, reject) => {

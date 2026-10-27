@@ -22,12 +22,28 @@ export function useAuth() {
             .or(`id.eq.${authUser.id},email.eq.${authUser.email}`)
             .maybeSingle();
 
+          const isPlaceholderAvatar = (url?: string | null) => {
+            if (!url) return true;
+            if (url.includes('images.unsplash.com')) return true;
+            return false;
+          };
+
+          const isPlaceholderBirthDate = (date?: string | null) => {
+            if (!date) return true;
+            if (date === '2001-01-01' || date === '2000-01-01') return true;
+            return false;
+          };
+
           const isAlreadyConfigured = Boolean(
             profileData &&
             profileData.full_name &&
-            profileData.birth_date &&
-            profileData.birth_date !== '2001-01-01' &&
-            profileData.avatar_url
+            !isPlaceholderBirthDate(profileData.birth_date) &&
+            !isPlaceholderAvatar(profileData.avatar_url) &&
+            (
+              (Array.isArray(profileData.drinks) && profileData.drinks.length > 0) ||
+              profileData.zodiac_sign ||
+              (Array.isArray(profileData.interests) && profileData.interests.length > 0)
+            )
           );
 
           // Si el usuario ingresó por Google y aún no tiene fila en profiles, crearla automáticamente
@@ -46,13 +62,13 @@ export function useAuth() {
               email: authUser.email,
               full_name: googleName,
               nickname: googleName.split(' ')[0] || googleName,
-              avatar_url: googleAvatar,
+              avatar_url: isPlaceholderAvatar(googleAvatar) ? '' : googleAvatar,
               gender: 'hombre',
               preference: 'todos',
               birth_date: '2001-01-01',
               age: 23,
               bio: '',
-              drink_favorite: 'Fernet con Coca',
+              drink_favorite: '',
               instagram: '',
               interests: [],
               updated_at: new Date().toISOString(),
@@ -78,10 +94,14 @@ export function useAuth() {
           notifyAuthChange();
 
           const cacheIdAlreadyCreated = Boolean(
-            localStorage.getItem('cachengueoo_cache_id_created') === 'true' ||
-            (currentLocal && currentLocal.fullName && currentLocal.avatarUrl) ||
-            (profileData && profileData.full_name && profileData.avatar_url && profileData.avatar_url.length > 5) ||
-            isAlreadyConfigured
+            (localStorage.getItem('cachengueoo_cache_id_created') === 'true' &&
+              currentLocal &&
+              currentLocal.fullName &&
+              !isPlaceholderAvatar(currentLocal.avatarUrl)) ||
+            (profileData &&
+              profileData.full_name &&
+              !isPlaceholderAvatar(profileData.avatar_url) &&
+              isAlreadyConfigured)
           );
 
           // Si el usuario ya tiene su Cache ID o perfil configurado, limpiar flags y NO abrir el wizard al recargar

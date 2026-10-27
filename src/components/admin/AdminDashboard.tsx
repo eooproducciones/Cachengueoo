@@ -48,6 +48,8 @@ import { birthdayService } from '../../services/birthdayService';
 import { authService } from '../../services/authService';
 import { getVenueConfig, saveVenueConfig } from '../../config/venue';
 import { getSupabaseClient } from '../../services/supabaseClient';
+import { db } from '../../services/firebaseClient';
+import { collection, getDocs } from 'firebase/firestore';
 import { passlineParser, FOUR_PRESET_FLYERS } from '../../services/passlineParser';
 import { VenueMapEditor } from './VenueMapEditor';
 import { unpackProfileInterests } from '../../utils/profileMetadata';
@@ -221,21 +223,89 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onExitAdmin, onL
       }
 
       const mergedMap = new Map<string, any>();
+
       dbUsers.forEach((u) => {
         const unpacked = unpackProfileInterests(u.interests);
+        const avatar = (u.avatar_url && !u.avatar_url.includes('images.unsplash.com')) ? u.avatar_url : '';
+        const rawPhotos = Array.isArray(u.photos) && u.photos.length > 0
+          ? u.photos
+          : [avatar, ...unpacked.extraPhotos].filter(Boolean);
+        const photos = rawPhotos.filter((p: string) => !p.includes('images.unsplash.com'));
+        const drinks = Array.isArray(u.drinks) && u.drinks.length > 0
+          ? u.drinks
+          : unpacked.drinks.length > 0
+          ? unpacked.drinks
+          : (u.drink_favorite && u.drink_favorite !== 'Fernet con Coca' ? [u.drink_favorite] : []);
+        const drinkFavorite =
+          (drinks.length > 0 ? drinks.join(' & ') : null) ||
+          (u.drink_favorite && u.drink_favorite !== 'Fernet con Coca' ? u.drink_favorite : null) ||
+          'Fernet con Coca';
+
         mergedMap.set(u.id || u.email, {
           ...u,
           fullName: u.full_name || u.fullName,
           nickname: u.nickname || u.full_name,
-          zodiacSign: unpacked.zodiacSign || u.zodiac_sign,
-          musicPreferences: unpacked.musicPreferences,
-          drinks: unpacked.drinks,
-          photos:
-            Array.isArray(u.photos) && u.photos.length > 0
-              ? u.photos
-              : [u.avatar_url, ...unpacked.extraPhotos].filter(Boolean),
+          avatarUrl: avatar,
+          zodiacSign: u.zodiac_sign || unpacked.zodiacSign,
+          musicPreferences: Array.isArray(u.music_preferences) && u.music_preferences.length > 0 ? u.music_preferences : unpacked.musicPreferences,
+          drinks,
+          drinkFavorite,
+          photos,
         });
       });
+
+      // Consultar también Firestore profiles
+      try {
+        const snap = await getDocs(collection(db, 'profiles'));
+        if (!snap.empty) {
+          snap.docs.forEach((d) => {
+            const data = d.data();
+            const key = data.id || d.id || data.email;
+            if (key) {
+              const unpacked = unpackProfileInterests(data.interests);
+              const existing = mergedMap.get(key) || {};
+              const avatar = (data.avatar_url || data.avatarUrl || '').includes('images.unsplash.com')
+                ? existing.avatarUrl || ''
+                : data.avatar_url || data.avatarUrl || existing.avatarUrl || '';
+              const rawPhotos = Array.isArray(data.photos) && data.photos.length > 0
+                ? data.photos
+                : existing.photos || [avatar].filter(Boolean);
+              const photos = rawPhotos.filter((p: string) => !p.includes('images.unsplash.com'));
+              const drinks = Array.isArray(data.drinks) && data.drinks.length > 0
+                ? data.drinks
+                : existing.drinks && existing.drinks.length > 0
+                ? existing.drinks
+                : unpacked.drinks;
+              const drinkFavorite =
+                (drinks.length > 0 ? drinks.join(' & ') : null) ||
+                data.drink_favorite ||
+                data.drinkFavorite ||
+                existing.drinkFavorite ||
+                'Fernet con Coca';
+
+              mergedMap.set(key, {
+                ...existing,
+                ...data,
+                fullName: data.full_name || data.fullName || existing.fullName,
+                nickname: data.nickname || existing.nickname,
+                avatarUrl: avatar,
+                zodiacSign: data.zodiac_sign || data.zodiacSign || unpacked.zodiacSign || existing.zodiacSign,
+                musicPreferences:
+                  Array.isArray(data.music_preferences) && data.music_preferences.length > 0
+                    ? data.music_preferences
+                    : Array.isArray(data.musicPreferences) && data.musicPreferences.length > 0
+                    ? data.musicPreferences
+                    : existing.musicPreferences || unpacked.musicPreferences,
+                drinks,
+                drinkFavorite,
+                photos,
+              });
+            }
+          });
+        }
+      } catch (e) {
+        console.warn('Notice loading users from Firestore in admin:', e);
+      }
 
       localUsers.forEach((u) => {
         const key = u.id || u.email;
@@ -1300,9 +1370,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onExitAdmin, onL
                 const ig = usr.instagram ? usr.instagram.replace(/^@/, '') : '';
                 const drink = usr.drink_favorite || usr.drinkFavorite || 'Fernet con Coca';
                 const avatar =
-                  usr.avatar_url ||
-                  usr.avatarUrl ||
-                  'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=400&q=80';
+                  (usr.avatar_url && !usr.avatar_url.includes('images.unsplash.com'))
+                    ? usr.avatar_url
+                    : (usr.avatarUrl && !usr.avatarUrl.includes('images.unsplash.com'))
+                    ? usr.avatarUrl
+                    : (Array.isArray(usr.photos) && usr.photos.length > 0 && !usr.photos[0].includes('images.unsplash.com'))
+                    ? usr.photos[0]
+                    : `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(name)}&backgroundColor=f39200&textColor=000000`;
                 const isVerified = Boolean(usr.is_verified_in_venue ?? usr.isVerified ?? false);
 
                 const isBlockedFromMatch =
@@ -1460,14 +1534,18 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onExitAdmin, onL
             {/* Galería de fotos (hasta 3 fotos obligatorias/cargadas) */}
             {(() => {
               const unpacked = unpackProfileInterests(selectedUserDetail.interests);
+              const fallbackInitials = `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(selectedUserDetail.full_name || selectedUserDetail.fullName || selectedUserDetail.nickname || 'Usuario')}&backgroundColor=f39200&textColor=000000`;
               const avatar =
-                selectedUserDetail.avatar_url ||
-                selectedUserDetail.avatarUrl ||
-                'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=400&q=80';
+                (selectedUserDetail.avatar_url && !selectedUserDetail.avatar_url.includes('images.unsplash.com'))
+                  ? selectedUserDetail.avatar_url
+                  : (selectedUserDetail.avatarUrl && !selectedUserDetail.avatarUrl.includes('images.unsplash.com'))
+                  ? selectedUserDetail.avatarUrl
+                  : null;
               const rawPhotos = Array.isArray(selectedUserDetail.photos) && selectedUserDetail.photos.length > 0
                 ? selectedUserDetail.photos
-                : [avatar, ...unpacked.extraPhotos];
-              const photos = rawPhotos.filter(Boolean).slice(0, 3);
+                : [avatar, ...unpacked.extraPhotos].filter(Boolean);
+              const cleanPhotos = rawPhotos.filter((p: string) => p && !p.includes('images.unsplash.com'));
+              const photos = (cleanPhotos.length > 0 ? cleanPhotos : [avatar || fallbackInitials]).slice(0, 3);
 
               return (
                 <div className="space-y-2">

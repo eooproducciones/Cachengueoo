@@ -2,6 +2,8 @@ import { UserProfile } from '../types';
 import { getSupabaseClient } from './supabaseClient';
 import { buildUserProfileFromSources, packProfileInterests } from '../utils/profileMetadata';
 import { presenceService } from './presenceService';
+import { db } from './firebaseClient';
+import { doc, setDoc, collection, query, where, limit, getDocs } from 'firebase/firestore';
 
 const USER_STORAGE_KEY = 'cachengueoo_current_user';
 const USERS_LIST_STORAGE_KEY = 'cachengueoo_registered_users';
@@ -60,20 +62,62 @@ export const authService = {
 
   async updateProfile(profile: Partial<UserProfile>): Promise<UserProfile | null> {
     const current = this.getCurrentUser();
-    if (!current) return null;
+    
+    let resolvedId = current?.id || profile.id;
+    let resolvedEmail = current?.email || profile.email;
+
+    const client = getSupabaseClient();
+    if (!resolvedId && client) {
+      try {
+        const { data } = await client.auth.getUser();
+        if (data?.user) {
+          resolvedId = data.user.id;
+          if (!resolvedEmail) resolvedEmail = data.user.email;
+        }
+      } catch {}
+    }
+
+    if (!resolvedId) {
+      resolvedId = `usr_${Date.now()}`;
+    }
+
+    const fallbackUser: UserProfile = {
+      id: resolvedId,
+      email: resolvedEmail || '',
+      fullName: profile.fullName || 'Usuario Cachengueoo',
+      nickname: profile.nickname || profile.fullName || 'Amigo',
+      birthDate: profile.birthDate || '2001-01-01',
+      age: profile.age || 23,
+      avatarUrl: profile.avatarUrl || '',
+      photos: profile.photos || [],
+      gender: profile.gender || 'hombre',
+      preference: profile.preference || 'todos',
+      interests: profile.interests || [],
+      bio: profile.bio || '',
+      drinkFavorite: profile.drinkFavorite || 'Fernet con Coca',
+      drinks: profile.drinks || ['Fernet'],
+      zodiacSign: profile.zodiacSign,
+      musicPreferences: profile.musicPreferences || [],
+      instagram: profile.instagram,
+      createdAt: new Date().toISOString(),
+    };
+
+    const base = current || fallbackUser;
 
     const updated: UserProfile = {
-      ...current,
+      ...base,
       ...profile,
-      avatarUrl: profile.avatarUrl || (profile.photos && profile.photos[0]) || current.avatarUrl,
+      id: resolvedId,
+      email: resolvedEmail || base.email,
+      avatarUrl: profile.avatarUrl || (profile.photos && profile.photos[0]) || base.avatarUrl,
       photos:
-        profile.photos && profile.photos.length > 0 ? profile.photos : current.photos,
-      drinks: profile.drinks && profile.drinks.length > 0 ? profile.drinks : current.drinks,
+        profile.photos && profile.photos.length > 0 ? profile.photos : base.photos,
+      drinks: profile.drinks && profile.drinks.length > 0 ? profile.drinks : base.drinks,
       musicPreferences:
         profile.musicPreferences && profile.musicPreferences.length > 0
           ? profile.musicPreferences
-          : current.musicPreferences,
-      zodiacSign: profile.zodiacSign || current.zodiacSign,
+          : base.musicPreferences,
+      zodiacSign: profile.zodiacSign || base.zodiacSign,
     };
 
     // Guardar inmediatamente en localStorage y sessionStorage
@@ -82,7 +126,7 @@ export const authService = {
 
     // Update in all users list
     const all = this.getAllUsers();
-    const existingIdx = all.findIndex((u) => u.id === current.id || (u.email && u.email === current.email));
+    const existingIdx = all.findIndex((u) => u.id === resolvedId || (u.email && u.email === resolvedEmail));
     if (existingIdx >= 0) {
       all[existingIdx] = updated;
     } else {
@@ -90,8 +134,57 @@ export const authService = {
     }
     localStorage.setItem(USERS_LIST_STORAGE_KEY, JSON.stringify(all));
 
+    const computedDrinks = updated.drinks && updated.drinks.length > 0 ? updated.drinks : [];
+    const computedDrinkFavorite =
+      computedDrinks.length > 0
+        ? computedDrinks.join(' & ')
+        : updated.drinkFavorite || 'Fernet con Coca';
+
+    // 2. Guardar en public.profiles con TODAS las columnas
+    const validDbRecord: Record<string, unknown> = {
+      full_name: updated.fullName,
+      nickname: updated.nickname || updated.fullName,
+      birth_date: updated.birthDate,
+      age: updated.age,
+      avatar_url: updated.avatarUrl || '',
+      photos:
+        updated.photos && updated.photos.length > 0
+          ? updated.photos
+          : [updated.avatarUrl].filter(Boolean),
+      gender: updated.gender || 'hombre',
+      preference: updated.preference || 'todos',
+      bio: updated.bio || '',
+      drink_favorite: computedDrinkFavorite,
+      drinks: computedDrinks,
+      zodiac_sign: updated.zodiacSign || null,
+      music_preferences: updated.musicPreferences || [],
+      instagram: updated.instagram || '',
+      interests: packProfileInterests({
+        ...updated,
+        drinks: computedDrinks,
+      }),
+      updated_at: new Date().toISOString(),
+    };
+
+    // Sincronizar en Firestore
+    try {
+      if (resolvedId) {
+        await setDoc(
+          doc(db, 'profiles', resolvedId),
+          {
+            id: resolvedId,
+            email: resolvedEmail || updated.email,
+            ...validDbRecord,
+            updatedAt: new Date().toISOString(),
+          },
+          { merge: true }
+        );
+      }
+    } catch (fsErr) {
+      console.warn('Notice syncing profile to Firestore:', fsErr);
+    }
+
     // Si Supabase está conectado, sincronizar en Auth y en tabla profiles
-    const client = getSupabaseClient();
     if (client) {
       // 1. Guardar metadatos completos en Supabase Auth
       try {
@@ -102,12 +195,12 @@ export const authService = {
             birth_date: updated.birthDate,
             age: updated.age,
             avatar_url: updated.avatarUrl,
-            photos: updated.photos,
+            photos: validDbRecord.photos,
             gender: updated.gender,
             preference: updated.preference,
             bio: updated.bio,
-            drink_favorite: updated.drinkFavorite,
-            drinks: updated.drinks,
+            drink_favorite: computedDrinkFavorite,
+            drinks: computedDrinks,
             zodiac_sign: updated.zodiacSign,
             music_preferences: updated.musicPreferences,
             instagram: updated.instagram,
@@ -117,41 +210,31 @@ export const authService = {
         console.warn('Nota: Supabase auth.updateUser omitido o sin sesión activa:', e);
       }
 
-      // 2. Guardar en public.profiles usando ÚNICAMENTE las columnas existentes
-      const validDbRecord: Record<string, unknown> = {
-        full_name: updated.fullName,
-        nickname: updated.nickname,
-        birth_date: updated.birthDate,
-        age: updated.age,
-        avatar_url: updated.avatarUrl,
-        gender: updated.gender,
-        preference: updated.preference,
-        bio: updated.bio || '',
-        drink_favorite: updated.drinkFavorite || 'Fernet con Coca',
-        instagram: updated.instagram || '',
-        interests: packProfileInterests(updated),
-        updated_at: new Date().toISOString(),
-      };
-
-      const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(current.id);
+      const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(resolvedId);
 
       try {
         if (isUuid) {
-          await client
+          const { error: upsertErr } = await client
             .from('profiles')
             .upsert(
               {
-                id: current.id,
-                email: current.email,
+                id: resolvedId,
+                email: resolvedEmail || updated.email,
                 ...validDbRecord,
               },
               { onConflict: 'id' }
             );
-        } else if (current.email) {
+
+          if (upsertErr) {
+            console.warn('Upsert notice on profiles, updating by id:', upsertErr.message);
+            await client.from('profiles').update(validDbRecord).eq('id', resolvedId);
+          }
+        }
+        if (resolvedEmail || updated.email) {
           await client
             .from('profiles')
             .update(validDbRecord)
-            .eq('email', current.email);
+            .eq('email', (resolvedEmail || updated.email).toLowerCase());
         }
       } catch (e) {
         console.warn('Advertencia al sincronizar perfil en Supabase:', e);
@@ -288,7 +371,7 @@ export const authService = {
         } else {
           return {
             success: false,
-            message: 'Este correo ya está registrado en Cachengueoo. Ingresá en "Iniciar sesión" con tu contraseña.',
+            message: 'Este correo ya está registrado en Cachengueoo. Podés ingresar en "Iniciar sesión" con tu contraseña o con el botón de Google si usás Gmail.',
           };
         }
       } else if (error) {
@@ -296,24 +379,54 @@ export const authService = {
       }
 
       if (userId) {
-        // 2. Guardar en public.profiles usando ÚNICAMENTE las columnas existentes + interests empaquetados
+        const computedDrinks = newUser.drinks && newUser.drinks.length > 0 ? newUser.drinks : [];
+        const computedDrinkFavorite =
+          computedDrinks.length > 0
+            ? computedDrinks.join(' & ')
+            : newUser.drinkFavorite || 'Fernet con Coca';
+
+        // 2. Guardar en public.profiles con todas las columnas
         const validDbRecord = {
           id: userId,
           email: newUser.email,
           full_name: newUser.fullName,
-          nickname: newUser.nickname,
+          nickname: newUser.nickname || newUser.fullName,
           birth_date: newUser.birthDate,
           age: newUser.age,
-          avatar_url: newUser.avatarUrl,
-          gender: newUser.gender,
-          preference: newUser.preference,
-          interests: packProfileInterests(newUser),
+          avatar_url: newUser.avatarUrl || '',
+          photos:
+            newUser.photos && newUser.photos.length > 0
+              ? newUser.photos
+              : [newUser.avatarUrl].filter(Boolean),
+          gender: newUser.gender || 'hombre',
+          preference: newUser.preference || 'todos',
           bio: newUser.bio || '',
-          drink_favorite: newUser.drinkFavorite || 'Fernet con Coca',
+          drink_favorite: computedDrinkFavorite,
+          drinks: computedDrinks,
+          zodiac_sign: newUser.zodiacSign || null,
+          music_preferences: newUser.musicPreferences || [],
           instagram: newUser.instagram || '',
+          interests: packProfileInterests({
+            ...newUser,
+            drinks: computedDrinks,
+          }),
           is_verified_in_venue: false,
           updated_at: new Date().toISOString(),
         };
+
+        // Sincronizar en Firestore
+        try {
+          await setDoc(
+            doc(db, 'profiles', userId),
+            {
+              ...validDbRecord,
+              updatedAt: new Date().toISOString(),
+            },
+            { merge: true }
+          );
+        } catch (fsErr) {
+          console.warn('Notice syncing registered profile to Firestore:', fsErr);
+        }
 
         const { error: upsertErr } = await client.from('profiles').upsert(
           validDbRecord,
@@ -321,12 +434,16 @@ export const authService = {
         );
 
         if (upsertErr) {
-          console.warn('Advertencia al sincronizar perfil en Supabase:', upsertErr.message);
+          console.warn('Advertencia al sincronizar perfil en Supabase, intentando update:', upsertErr.message);
+          await client.from('profiles').update(validDbRecord).eq('id', userId);
         }
 
         const registeredProfile: UserProfile = {
           ...newUser,
           id: userId,
+          drinks: computedDrinks,
+          drinkFavorite: computedDrinkFavorite,
+          photos: validDbRecord.photos,
           isAdmin: newUser.email.includes('admin'),
           role: newUser.email.includes('admin') ? 'admin' : 'user',
         };
@@ -362,25 +479,56 @@ export const authService = {
     return { success: true, user: localUser };
   },
 
-  async checkEmailExists(email: string): Promise<{
+  async checkEmailExists(
+    email: string,
+    excludeUserId?: string
+  ): Promise<{
     exists: boolean;
     provider?: string;
     profile?: UserProfile;
+    isConfigured?: boolean;
   }> {
     const cleanEmail = email.trim().toLowerCase();
-    if (!cleanEmail) return { exists: false };
+    if (!cleanEmail) return { exists: false, isConfigured: false };
+
+    const isPlaceholderAvatar = (url?: string | null) => {
+      if (!url) return true;
+      if (url.includes('images.unsplash.com')) return true;
+      return false;
+    };
+
+    const isPlaceholderBirthDate = (date?: string | null) => {
+      if (!date) return true;
+      if (date === '2001-01-01' || date === '2000-01-01') return true;
+      return false;
+    };
 
     // 1. Consultar en Supabase profiles
     const client = getSupabaseClient();
     if (client) {
       try {
-        const { data } = await client
-          .from('profiles')
-          .select('*')
-          .eq('email', cleanEmail)
-          .maybeSingle();
+        let queryBuilder = client.from('profiles').select('*').eq('email', cleanEmail);
+        if (excludeUserId) {
+          queryBuilder = queryBuilder.neq('id', excludeUserId);
+        }
+        const { data } = await queryBuilder.maybeSingle();
 
         if (data) {
+          if (excludeUserId && data.id === excludeUserId) {
+            return { exists: false, isConfigured: false };
+          }
+
+          const isConfigured = Boolean(
+            data.full_name &&
+            !isPlaceholderBirthDate(data.birth_date) &&
+            !isPlaceholderAvatar(data.avatar_url) &&
+            (
+              (Array.isArray(data.drinks) && data.drinks.length > 0) ||
+              data.zodiac_sign ||
+              (Array.isArray(data.interests) && data.interests.length > 0)
+            )
+          );
+
           const profile: UserProfile = {
             id: data.id,
             email: data.email,
@@ -398,20 +546,64 @@ export const authService = {
             instagram: data.instagram || undefined,
             createdAt: data.created_at || new Date().toISOString(),
           };
-          return { exists: true, profile };
+          return { exists: true, profile, isConfigured };
         }
       } catch (err) {
         console.warn('Error verificando email en Supabase profiles:', err);
       }
     }
 
-    // 2. Consultar en usuarios registrados locales
-    const local = this.getAllUsers().find((u) => u.email?.toLowerCase() === cleanEmail);
+    // 2. Consultar en Firestore profiles
+    try {
+      const q = query(collection(db, 'profiles'), where('email', '==', cleanEmail), limit(1));
+      const snap = await getDocs(q);
+      if (!snap.empty) {
+        const docData = snap.docs[0].data();
+        const docId = snap.docs[0].id;
+        if (!excludeUserId || docId !== excludeUserId) {
+          const isConfigured = Boolean(
+            docData.full_name &&
+            !isPlaceholderBirthDate(docData.birth_date) &&
+            !isPlaceholderAvatar(docData.avatar_url)
+          );
+          const fsProfile: UserProfile = {
+            id: docId,
+            email: docData.email || cleanEmail,
+            fullName: docData.full_name || '',
+            nickname: docData.nickname || docData.full_name || '',
+            birthDate: docData.birth_date || '2001-01-01',
+            age: Number(docData.age) || 23,
+            avatarUrl: docData.avatar_url || '',
+            photos: Array.isArray(docData.photos) ? docData.photos : (docData.avatar_url ? [docData.avatar_url] : []),
+            gender: docData.gender || 'hombre',
+            preference: docData.preference || 'todos',
+            interests: Array.isArray(docData.interests) ? docData.interests : [],
+            bio: docData.bio || '',
+            drinkFavorite: docData.drink_favorite || 'Fernet con Coca',
+            instagram: docData.instagram || undefined,
+            createdAt: docData.created_at || new Date().toISOString(),
+          };
+          return { exists: true, profile: fsProfile, isConfigured };
+        }
+      }
+    } catch {}
+
+    // 3. Consultar en usuarios registrados locales
+    const local = this.getAllUsers().find(
+      (u) =>
+        u.email?.toLowerCase() === cleanEmail &&
+        (!excludeUserId || u.id !== excludeUserId)
+    );
     if (local) {
-      return { exists: true, profile: local };
+      const isConfigured = Boolean(
+        local.fullName &&
+        !isPlaceholderBirthDate(local.birthDate) &&
+        !isPlaceholderAvatar(local.avatarUrl)
+      );
+      return { exists: true, profile: local, isConfigured };
     }
 
-    return { exists: false };
+    return { exists: false, isConfigured: false };
   },
 
   async signInWithGoogle(): Promise<{ success: boolean; message?: string }> {
