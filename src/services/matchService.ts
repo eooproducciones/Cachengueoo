@@ -357,6 +357,107 @@ export const matchService = {
     }
   },
 
+  // Resuelve fielmente el perfil REAL de un usuario desde todas las fuentes disponibles (sin inventar datos)
+  async resolveMatchProfile(
+    userId: string,
+    embeddedFallback?: Partial<MatchProfile> | null
+  ): Promise<MatchProfile | null> {
+    if (!userId) return null;
+
+    // 1. Usuarios registrados locales
+    let localData: any = null;
+    try {
+      const all: any[] = JSON.parse(localStorage.getItem('cachengueoo_registered_users') || '[]');
+      localData = all.find((u) => u.id === userId || (u.email && u.email === userId));
+    } catch {}
+
+    // 2. Base de datos Supabase
+    let supaData: any = null;
+    const client = getSupabaseClient();
+    if (client) {
+      try {
+        const { data } = await client.from('profiles').select('*').eq('id', userId).maybeSingle();
+        if (data) supaData = data;
+      } catch {}
+    }
+
+    // 3. Base de datos Firestore
+    let fsData: any = null;
+    try {
+      const snap = await getDoc(doc(db, 'profiles', userId));
+      if (snap.exists()) {
+        fsData = snap.data();
+      }
+    } catch {}
+
+    const source = supaData || fsData || localData || embeddedFallback;
+    if (!source) return null;
+
+    const rawAvatar = source.avatar_url || source.avatarUrl || embeddedFallback?.avatarUrl || '';
+    const cleanAvatar = cleanAvatarUrl(rawAvatar, source.full_name || source.fullName || source.nickname);
+    const rawPhotos: string[] =
+      Array.isArray(source.photos) && source.photos.length > 0
+        ? source.photos
+        : Array.isArray(embeddedFallback?.photos) && embeddedFallback!.photos!.length > 0
+        ? embeddedFallback!.photos!
+        : cleanAvatar ? [cleanAvatar] : [];
+    const validPhotos = rawPhotos.filter((p: string) => !p.includes('images.unsplash.com'));
+    const finalPhotos = validPhotos.length > 0 ? validPhotos : [cleanAvatar];
+
+    const fullName =
+      source.full_name ||
+      source.fullName ||
+      source.nickname ||
+      embeddedFallback?.fullName ||
+      embeddedFallback?.nickname ||
+      'Usuario';
+
+    const nickname =
+      source.nickname ||
+      source.full_name ||
+      source.fullName ||
+      embeddedFallback?.nickname ||
+      embeddedFallback?.fullName ||
+      fullName.split(' ')[0] ||
+      'Usuario';
+
+    const rawDrinks =
+      Array.isArray(source.drinks) && source.drinks.length > 0
+        ? source.drinks
+        : Array.isArray(embeddedFallback?.drinks) && embeddedFallback!.drinks!.length > 0
+        ? embeddedFallback!.drinks!
+        : source.drink_favorite || source.drinkFavorite
+        ? [source.drink_favorite || source.drinkFavorite]
+        : ['Fernet'];
+
+    const rawMusic =
+      Array.isArray(source.music_preferences) && source.music_preferences.length > 0
+        ? source.music_preferences
+        : Array.isArray(source.musicPreferences) && source.musicPreferences.length > 0
+        ? source.musicPreferences
+        : embeddedFallback?.musicPreferences || ['Reggaeton', 'Cumbia'];
+
+    return {
+      userId,
+      fullName,
+      nickname,
+      age: Number(source.age) || Number(embeddedFallback?.age) || 23,
+      avatarUrl: finalPhotos[0] || cleanAvatar,
+      photos: finalPhotos,
+      bio: source.bio || embeddedFallback?.bio || '',
+      interests: Array.isArray(source.interests) && source.interests.length > 0 ? source.interests : rawDrinks,
+      drinkFavorite: rawDrinks.join(' & ') || source.drink_favorite || source.drinkFavorite || 'Fernet con Coca',
+      drinks: rawDrinks,
+      zodiacSign: source.zodiac_sign || source.zodiacSign || embeddedFallback?.zodiacSign,
+      musicPreferences: rawMusic,
+      verifiedInVenue: true,
+      lastPresenceCheck: source.updated_at || source.updatedAt || new Date().toISOString(),
+      instagram: source.instagram || embeddedFallback?.instagram,
+      gender: source.gender || embeddedFallback?.gender,
+      nightNote: source.nightNote || source.night_note,
+    };
+  },
+
   async registerSwipe(
     fromUserId: string,
     targetProfile: MatchProfile,
@@ -400,12 +501,52 @@ export const matchService = {
       }
     }
 
-    // 3. Registrar like en Firebase Firestore (garantiza sincronización universal entre cualquier cuenta/dispositivo)
+    // 3. Registrar like en Firebase Firestore con el perfil real del emisor para sincronización universal instantánea
+    let currentSenderPayload: Partial<MatchProfile> | null = null;
+    try {
+      const stored = localStorage.getItem('cachengueoo_current_user');
+      if (stored) {
+        const u = JSON.parse(stored);
+        const av = u.avatarUrl || (u.photos && u.photos[0]) || '';
+        currentSenderPayload = {
+          userId: fromUserId,
+          fullName: u.fullName || u.nickname || 'Usuario',
+          nickname: u.nickname || u.fullName || 'Usuario',
+          age: Number(u.age) || 23,
+          avatarUrl: av,
+          photos: u.photos && u.photos.length > 0 ? u.photos : (av ? [av] : []),
+          drinkFavorite: u.drinkFavorite || 'Fernet con Coca',
+          drinks: u.drinks && u.drinks.length > 0 ? u.drinks : ['Fernet'],
+          zodiacSign: u.zodiacSign,
+          musicPreferences: u.musicPreferences || ['Reggaeton', 'Cumbia'],
+          bio: u.bio || '',
+          gender: u.gender,
+          instagram: u.instagram,
+        };
+      }
+    } catch {}
+
     try {
       const firestoreLikeId = `${fromUserId}___${targetProfile.userId}`.replace(/[^a-zA-Z0-9_-]/g, '_');
       await setDoc(doc(db, 'likes', firestoreLikeId), {
         fromUserId,
         toUserId: targetProfile.userId,
+        senderProfile: currentSenderPayload,
+        targetProfile: {
+          userId: targetProfile.userId,
+          fullName: targetProfile.fullName,
+          nickname: targetProfile.nickname,
+          age: targetProfile.age,
+          avatarUrl: targetProfile.avatarUrl,
+          photos: targetProfile.photos || [targetProfile.avatarUrl],
+          drinkFavorite: targetProfile.drinkFavorite,
+          drinks: targetProfile.drinks || [],
+          zodiacSign: targetProfile.zodiacSign,
+          musicPreferences: targetProfile.musicPreferences || [],
+          bio: targetProfile.bio || '',
+          gender: targetProfile.gender,
+          instagram: targetProfile.instagram,
+        },
         eventId: safeEventId || 'evt_tonight',
         createdAt: new Date().toISOString(),
       });
@@ -487,7 +628,7 @@ export const matchService = {
         }
       }
 
-      // Sincronizar en Firestore para persistencia en la nube
+      // Sincronizar en Firestore con los perfiles REALES de ambos usuarios
       try {
         const fsMatchId = `match_${[fromUserId, targetProfile.userId].sort().join('___')}`.replace(/[^a-zA-Z0-9_-]/g, '_');
         await setDoc(
@@ -496,6 +637,22 @@ export const matchService = {
             id: fsMatchId,
             userAId: fromUserId,
             userBId: targetProfile.userId,
+            userAProfile: currentSenderPayload,
+            userBProfile: {
+              userId: targetProfile.userId,
+              fullName: targetProfile.fullName,
+              nickname: targetProfile.nickname,
+              age: targetProfile.age,
+              avatarUrl: targetProfile.avatarUrl,
+              photos: targetProfile.photos || [targetProfile.avatarUrl],
+              drinkFavorite: targetProfile.drinkFavorite,
+              drinks: targetProfile.drinks || [],
+              zodiacSign: targetProfile.zodiacSign,
+              musicPreferences: targetProfile.musicPreferences || [],
+              bio: targetProfile.bio || '',
+              gender: targetProfile.gender,
+              instagram: targetProfile.instagram,
+            },
             eventId: safeEventId || 'evt_tonight',
             eventTitle: 'CACHENGUEOO NIGHT',
             matchedAt: new Date().toISOString(),
@@ -554,6 +711,7 @@ export const matchService = {
 
     const passedIds = this.getPassedUserIds(currentUserId);
     let senderIds: string[] = [];
+    const embeddedSenders = new Map<string, any>();
 
     // 1. Likes de Supabase
     if (client) {
@@ -565,23 +723,30 @@ export const matchService = {
           .order('created_at', { ascending: false });
 
         if (!error && Array.isArray(data)) {
-          senderIds = data
-            .map((r: any) => r.from_user_id)
-            .filter((id: string) => Boolean(id) && id !== currentUserId);
+          data.forEach((r: any) => {
+            if (r.from_user_id && r.from_user_id !== currentUserId && !senderIds.includes(r.from_user_id)) {
+              senderIds.push(r.from_user_id);
+            }
+          });
         }
       } catch (e) {
         console.warn('Error fetching likes from Supabase:', e);
       }
     }
 
-    // 2. Likes de Firestore (garantiza recibir Me Gusta de cualquier usuario en tiempo real)
+    // 2. Likes de Firestore (garantiza recibir Me Gusta en tiempo real)
     try {
       const qLikes = query(collection(db, 'likes'), where('toUserId', '==', currentUserId));
       const snap = await getDocs(qLikes);
       snap.forEach((d) => {
         const data = d.data();
-        if (data.fromUserId && data.fromUserId !== currentUserId && !senderIds.includes(data.fromUserId)) {
-          senderIds.push(data.fromUserId);
+        if (data.fromUserId && data.fromUserId !== currentUserId) {
+          if (!senderIds.includes(data.fromUserId)) {
+            senderIds.push(data.fromUserId);
+          }
+          if (data.senderProfile) {
+            embeddedSenders.set(data.fromUserId, data.senderProfile);
+          }
         }
       });
     } catch (e) {
@@ -612,63 +777,41 @@ export const matchService = {
     if (pendingSenderIds.length === 0) return [];
 
     const profiles: MatchProfile[] = [];
-    if (client) {
-      try {
-        const { data, error } = await client
-          .from('profiles')
-          .select('*')
-          .in('id', pendingSenderIds);
-
-        if (!error && Array.isArray(data)) {
-          data.forEach((row: any) => {
-            const unpacked = unpackProfileInterests(row.interests);
-            const avatar = cleanAvatarUrl(row.avatar_url, row.full_name || row.nickname);
-            const photos =
-              Array.isArray(row.photos) && row.photos.length > 0
-                ? row.photos.filter((p: string) => !p.includes('images.unsplash.com'))
-                : [avatar, ...unpacked.extraPhotos].filter((p: string) => !p.includes('images.unsplash.com')).slice(0, 3);
-            const drinks =
-              Array.isArray(row.drinks) && row.drinks.length > 0
-                ? row.drinks
-                : unpacked.drinks.length > 0
-                ? unpacked.drinks
-                : row.drink_favorite && row.drink_favorite !== 'Fernet con Coca'
-                ? [row.drink_favorite]
-                : ['Fernet', 'Skyy'];
-            const musicPreferences =
-              Array.isArray(row.music_preferences) && row.music_preferences.length > 0
-                ? row.music_preferences
-                : unpacked.musicPreferences.length > 0
-                ? unpacked.musicPreferences
-                : ['Reggaeton', 'Cumbia', 'Cuarteto'];
-            const zodiacSign = row.zodiac_sign || unpacked.zodiacSign || undefined;
-
-            profiles.push({
-              userId: row.id,
-              fullName: row.full_name || row.nickname || 'Cachenguero',
-              nickname: row.nickname || row.full_name || 'Cachenguero',
-              age: Number(row.age) || 23,
-              avatarUrl: photos[0] || avatar,
-              photos: photos.length > 0 ? photos : [avatar],
-              bio: row.bio || '¡Disfrutando de la noche en Cachengueoo!',
-              interests: unpacked.plainInterests.length > 0 ? unpacked.plainInterests : drinks,
-              drinkFavorite: drinks.length > 0 ? drinks.join(' & ') : row.drink_favorite || 'Fernet con Coca',
-              drinks,
-              zodiacSign,
-              musicPreferences,
-              verifiedInVenue: Boolean(row.is_verified_in_venue ?? true),
-              lastPresenceCheck: row.updated_at || new Date().toISOString(),
-              instagram: row.instagram || undefined,
-              gender: row.gender || undefined,
-            });
-          });
-        }
-      } catch (e) {
-        console.warn('Error fetching profiles for incoming likes:', e);
+    for (const senderId of pendingSenderIds) {
+      const fallback = embeddedSenders.get(senderId);
+      const resolved = await this.resolveMatchProfile(senderId, fallback);
+      if (resolved) {
+        profiles.push(resolved);
       }
     }
 
     return profiles;
+  },
+
+  // Suscripción reactiva en tiempo real a likes entrantes vía Firestore (aparece de inmediato en Conectá)
+  subscribeToIncomingLikes(
+    currentUserId: string,
+    onLikesChange: (profiles: MatchProfile[]) => void
+  ): () => void {
+    if (!currentUserId) return () => {};
+
+    const qLikes = query(collection(db, 'likes'), where('toUserId', '==', currentUserId));
+    const unsubscribe = onSnapshot(
+      qLikes,
+      async () => {
+        try {
+          const fresh = await this.fetchIncomingLikes(currentUserId);
+          onLikesChange(fresh);
+        } catch (e) {
+          console.warn('Error in subscribeToIncomingLikes snapshot listener:', e);
+        }
+      },
+      (error) => {
+        console.warn('Error listening to incoming likes onSnapshot:', error);
+      }
+    );
+
+    return unsubscribe;
   },
 
   async fetchUserMatches(currentUserId: string): Promise<MatchPair[]> {
@@ -692,54 +835,28 @@ export const matchService = {
           .order('matched_at', { ascending: false });
 
         if (!error && Array.isArray(data) && data.length > 0) {
-          const partnerIds = data.map((m: any) =>
-            m.user_a_id === currentUserId ? m.user_b_id : m.user_a_id
-          );
-
-          const { data: profilesData } = await client
-            .from('profiles')
-            .select('*')
-            .in('id', partnerIds);
-
-          const profilesMap = new Map<string, any>();
-          if (profilesData) {
-            profilesData.forEach((p: any) => profilesMap.set(p.id, p));
-          }
-
-          data.forEach((m: any) => {
+          for (const m of data) {
             const partnerId = m.user_a_id === currentUserId ? m.user_b_id : m.user_a_id;
-            const p = profilesMap.get(partnerId);
-            const avatar = cleanAvatarUrl(p?.avatar_url, p?.full_name || p?.nickname);
-            const rawPhotos = Array.isArray(p?.photos) && p.photos.length > 0 ? p.photos : [avatar];
-            const photos = rawPhotos.filter((ph: string) => !ph.includes('images.unsplash.com'));
-            const partnerProfile: MatchProfile = {
-              userId: partnerId,
-              fullName: p?.full_name || p?.nickname || 'Cachenguero',
-              nickname: p?.nickname || p?.full_name || 'Cachenguero',
-              age: Number(p?.age) || 23,
-              avatarUrl: photos[0] || avatar,
-              photos: photos.length > 0 ? photos : [avatar],
-              bio: p?.bio || '',
-              interests: [],
-              drinkFavorite: p?.drink_favorite || 'Fernet & Skyy',
-              instagram: p?.instagram || undefined,
-              verifiedInVenue: true,
-              lastPresenceCheck: new Date().toISOString(),
-            };
-
             const existingLocal = map.get(m.id);
-            map.set(m.id, {
-              id: m.id,
-              userAId: m.user_a_id,
-              userBId: m.user_b_id,
-              eventId: m.event_id || 'evt_01',
-              eventTitle: 'CACHENGUEOO NIGHT',
-              matchedAt: m.matched_at || m.created_at || new Date().toISOString(),
-              lastMessageSnippet: existingLocal?.lastMessageSnippet || '¡Hicieron Match!',
-              lastMessageAt: existingLocal?.lastMessageAt || 'Recién',
-              partnerProfile: existingLocal?.partnerProfile || partnerProfile,
-            });
-          });
+            const resolvedPartner = await this.resolveMatchProfile(
+              partnerId,
+              existingLocal?.partnerProfile
+            );
+
+            if (resolvedPartner) {
+              map.set(m.id, {
+                id: m.id,
+                userAId: m.user_a_id,
+                userBId: m.user_b_id,
+                eventId: m.event_id || 'evt_01',
+                eventTitle: 'CACHENGUEOO NIGHT',
+                matchedAt: m.matched_at || m.created_at || new Date().toISOString(),
+                lastMessageSnippet: existingLocal?.lastMessageSnippet || '¡Hicieron Match!',
+                lastMessageAt: existingLocal?.lastMessageAt || 'Recién',
+                partnerProfile: resolvedPartner,
+              });
+            }
+          }
         }
       } catch (e) {
         console.warn('Error fetching matches from Supabase:', e);
@@ -755,23 +872,13 @@ export const matchService = {
 
       for (const d of fsMatches) {
         const m = d.data();
-        if (!map.has(d.id)) {
-          const partnerId = m.userAId === currentUserId ? m.userBId : m.userAId;
-          const defaultAvatar = cleanAvatarUrl(null, 'Cachenguero');
-          const partnerProfile: MatchProfile = m.partnerProfile || {
-            userId: partnerId,
-            fullName: 'Cachenguero',
-            nickname: 'Cachenguero',
-            age: 23,
-            avatarUrl: defaultAvatar,
-            photos: [defaultAvatar],
-            bio: '',
-            interests: [],
-            drinkFavorite: 'Fernet',
-            verifiedInVenue: true,
-            lastPresenceCheck: new Date().toISOString(),
-          };
+        const partnerId = m.userAId === currentUserId ? m.userBId : m.userAId;
+        const embeddedPartner =
+          m.userAId === currentUserId ? m.userBProfile : m.userAProfile || m.partnerProfile;
 
+        const resolvedPartner = await this.resolveMatchProfile(partnerId, embeddedPartner);
+        if (resolvedPartner) {
+          const existingLocal = map.get(d.id);
           map.set(d.id, {
             id: d.id,
             userAId: m.userAId,
@@ -779,9 +886,9 @@ export const matchService = {
             eventId: m.eventId || 'evt_tonight',
             eventTitle: m.eventTitle || 'CACHENGUEOO NIGHT',
             matchedAt: m.matchedAt || new Date().toISOString(),
-            lastMessageSnippet: '¡Hicieron Match!',
-            lastMessageAt: 'Recién',
-            partnerProfile,
+            lastMessageSnippet: existingLocal?.lastMessageSnippet || '¡Hicieron Match!',
+            lastMessageAt: existingLocal?.lastMessageAt || 'Recién',
+            partnerProfile: resolvedPartner,
           });
         }
       }
@@ -794,6 +901,39 @@ export const matchService = {
     );
     this.saveMatches(merged, currentUserId);
     return merged;
+  },
+
+  // Suscripción reactiva en tiempo real a matches del usuario vía Firestore
+  subscribeToUserMatches(
+    currentUserId: string,
+    onMatchesChange: (matches: MatchPair[]) => void
+  ): () => void {
+    if (!currentUserId) return () => {};
+
+    const qA = query(collection(db, 'matches'), where('userAId', '==', currentUserId));
+    const qB = query(collection(db, 'matches'), where('userBId', '==', currentUserId));
+
+    let isDisposed = false;
+    const handleChange = async () => {
+      if (isDisposed) return;
+      try {
+        const fresh = await this.fetchUserMatches(currentUserId);
+        if (!isDisposed) {
+          onMatchesChange(fresh);
+        }
+      } catch (e) {
+        console.warn('Error in subscribeToUserMatches handler:', e);
+      }
+    };
+
+    const unsubA = onSnapshot(qA, handleChange, (err) => console.warn(err));
+    const unsubB = onSnapshot(qB, handleChange, (err) => console.warn(err));
+
+    return () => {
+      isDisposed = true;
+      unsubA();
+      unsubB();
+    };
   },
 
   getMessages(matchId: string, currentUserId?: string, partnerId?: string): ChatMessage[] {

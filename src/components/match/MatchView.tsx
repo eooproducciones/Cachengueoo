@@ -21,6 +21,7 @@ import {
   Music,
   Ban,
   Flame,
+  Camera,
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { ChatMessage, MatchPair, MatchProfile, UserProfile } from '../../types';
@@ -128,11 +129,15 @@ export const MatchView: React.FC<MatchViewProps> = ({
       setProfiles(filtered);
     });
 
-    // 2. Cargar personas que dieron corazón (Conectá) y Matches mutuos
+    // 2. Cargar personas que dieron corazón (Conectá) y Matches mutuos en tiempo real
+    let unsubLikes: (() => void) | null = null;
+    let unsubMatches: (() => void) | null = null;
     let pollInterval: ReturnType<typeof setInterval> | null = null;
+
     if (currentUser?.id) {
       setMatches(matchService.getMatches(currentUser.id));
       setLoadingConecta(true);
+
       const refreshConectaAndMatches = () => {
         Promise.all([
           matchService.fetchIncomingLikes(currentUser.id),
@@ -155,11 +160,25 @@ export const MatchView: React.FC<MatchViewProps> = ({
       };
 
       refreshConectaAndMatches();
-      // Sondeo reactivo cada 4 segundos para detectar likes dados por otros usuarios en tiempo real
-      pollInterval = setInterval(refreshConectaAndMatches, 4000);
+
+      // Suscripción reactiva instantánea a likes entrantes vía Firestore onSnapshot (aparece de inmediato)
+      unsubLikes = matchService.subscribeToIncomingLikes(currentUser.id, (incoming) => {
+        setConectaProfiles(incoming || []);
+        setLoadingConecta(false);
+      });
+
+      // Suscripción reactiva instantánea a matches mutuos vía Firestore onSnapshot
+      unsubMatches = matchService.subscribeToUserMatches(currentUser.id, (userMatches) => {
+        setMatches(userMatches || []);
+      });
+
+      // Intervalo de respaldo periódico
+      pollInterval = setInterval(refreshConectaAndMatches, 6000);
     }
 
     return () => {
+      if (unsubLikes) unsubLikes();
+      if (unsubMatches) unsubMatches();
       if (pollInterval) clearInterval(pollInterval);
     };
   }, [matchSubTab, currentUser?.id, currentUser?.preference]);
@@ -932,13 +951,25 @@ export const MatchView: React.FC<MatchViewProps> = ({
                   ❤️
                 </div>
 
-                <div className="relative">
+                <div
+                  onClick={() => {
+                    if (celebrationMatch.partnerProfile) {
+                      setExpandedPhotoIndex(0);
+                      setExpandedProfile(celebrationMatch.partnerProfile);
+                    }
+                  }}
+                  className="relative cursor-pointer group/cel hover:scale-105 transition-transform"
+                  title="Tocá para ver sus fotos y perfil"
+                >
                   <img
                     src={celebrationMatch.partnerProfile.avatarUrl}
                     alt={celebrationMatch.partnerProfile.fullName}
-                    className="w-20 h-20 rounded-full object-cover border-3 border-[#F39200] shadow-[0_0_20px_rgba(243,146,0,0.4)]"
+                    className="w-20 h-20 rounded-full object-cover border-3 border-[#F39200] shadow-[0_0_20px_rgba(243,146,0,0.4)] group-hover/cel:ring-2 ring-white/50"
                     referrerPolicy="no-referrer"
                   />
+                  <div className="absolute inset-0 rounded-full bg-black/35 opacity-0 group-hover/cel:opacity-100 flex items-center justify-center transition-opacity">
+                    <Camera className="w-5 h-5 text-white drop-shadow" />
+                  </div>
                   <span className="absolute bottom-0 right-0 w-4 h-4 rounded-full bg-emerald-500 border-2 border-black" />
                 </div>
               </div>
@@ -956,6 +987,21 @@ export const MatchView: React.FC<MatchViewProps> = ({
                     Están en la misma fiesta esta noche
                   </p>
                 )}
+                <div className="pt-1">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (celebrationMatch.partnerProfile) {
+                        setExpandedPhotoIndex(0);
+                        setExpandedProfile(celebrationMatch.partnerProfile);
+                      }
+                    }}
+                    className="inline-flex items-center gap-1.5 text-xs text-[#F39200] hover:text-amber-300 font-bold transition-colors cursor-pointer"
+                  >
+                    <Camera className="w-3.5 h-3.5" />
+                    <span>Ver fotos y perfil completo 👀</span>
+                  </button>
+                </div>
               </div>
 
               <div className="space-y-2 pt-2">
@@ -1574,20 +1620,32 @@ export const MatchView: React.FC<MatchViewProps> = ({
                 ❤️
               </div>
 
-              <div className="relative">
+              <div
+                onClick={() => {
+                  if (celebrationMatch.partnerProfile) {
+                    setExpandedPhotoIndex(0);
+                    setExpandedProfile(celebrationMatch.partnerProfile);
+                  }
+                }}
+                className="relative cursor-pointer group/cel hover:scale-105 transition-transform"
+                title="Tocá para ver sus fotos y perfil"
+              >
                 <img
                   src={celebrationMatch.partnerProfile.avatarUrl}
                   alt={celebrationMatch.partnerProfile.fullName}
-                  className="w-20 h-20 rounded-full object-cover border-3 border-[#F39200] shadow-[0_0_20px_rgba(243,146,0,0.4)]"
+                  className="w-20 h-20 rounded-full object-cover border-3 border-[#F39200] shadow-[0_0_20px_rgba(243,146,0,0.4)] group-hover/cel:ring-2 ring-white/50"
                   referrerPolicy="no-referrer"
                 />
+                <div className="absolute inset-0 rounded-full bg-black/35 opacity-0 group-hover/cel:opacity-100 flex items-center justify-center transition-opacity">
+                  <Camera className="w-5 h-5 text-white drop-shadow" />
+                </div>
                 <span className="absolute bottom-0 right-0 w-4 h-4 rounded-full bg-emerald-500 border-2 border-black" />
               </div>
             </div>
 
             <div className="space-y-1 text-center">
               <p className="text-sm font-extrabold text-white font-display">
-                Vos y {celebrationMatch.partnerProfile.nickname} se gustaron
+                ¡Conectaste con {celebrationMatch.partnerProfile.nickname}!
               </p>
               {celebrationMatch.partnerProfile.drinkFavorite ? (
                 <p className="text-[11px] text-zinc-300">
@@ -1598,6 +1656,21 @@ export const MatchView: React.FC<MatchViewProps> = ({
                   Están en la misma fiesta esta noche
                 </p>
               )}
+              <div className="pt-1">
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (celebrationMatch.partnerProfile) {
+                      setExpandedPhotoIndex(0);
+                      setExpandedProfile(celebrationMatch.partnerProfile);
+                    }
+                  }}
+                  className="inline-flex items-center gap-1.5 text-xs text-[#F39200] hover:text-amber-300 font-bold transition-colors cursor-pointer"
+                >
+                  <Camera className="w-3.5 h-3.5" />
+                  <span>Ver fotos y perfil completo 👀</span>
+                </button>
+              </div>
             </div>
 
             <div className="space-y-2 pt-2">
