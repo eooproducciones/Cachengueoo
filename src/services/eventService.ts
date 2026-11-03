@@ -1,63 +1,9 @@
 import { ClubEvent, ValidationMode } from '../types';
 import { getSupabaseClient } from './supabaseClient';
-import { db, auth } from './firebaseClient';
-import {
-  collection,
-  doc,
-  setDoc,
-  deleteDoc,
-  getDocs,
-  onSnapshot,
-} from 'firebase/firestore';
+import { db } from './firebaseClient';
+import { doc, setDoc, deleteDoc } from 'firebase/firestore';
 
 const EVENTS_STORAGE_KEY = 'cachengueoo_events_list';
-
-enum OperationType {
-  CREATE = 'create',
-  UPDATE = 'update',
-  DELETE = 'delete',
-  LIST = 'list',
-  GET = 'get',
-  WRITE = 'write',
-}
-
-interface FirestoreErrorInfo {
-  error: string;
-  operationType: OperationType;
-  path: string | null;
-  authInfo: {
-    userId?: string | null;
-    email?: string | null;
-    emailVerified?: boolean | null;
-    isAnonymous?: boolean | null;
-    tenantId?: string | null;
-    providerInfo?: {
-      providerId?: string | null;
-      email?: string | null;
-    }[];
-  };
-}
-
-function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null) {
-  const errInfo: FirestoreErrorInfo = {
-    error: error instanceof Error ? error.message : String(error),
-    authInfo: {
-      userId: auth.currentUser?.uid,
-      email: auth.currentUser?.email,
-      emailVerified: auth.currentUser?.emailVerified,
-      isAnonymous: auth.currentUser?.isAnonymous,
-      tenantId: auth.currentUser?.tenantId,
-      providerInfo:
-        auth.currentUser?.providerData?.map((provider) => ({
-          providerId: provider.providerId,
-          email: provider.email,
-        })) || [],
-    },
-    operationType,
-    path,
-  };
-  console.warn('Firestore Event Error:', JSON.stringify(errInfo));
-}
 
 /**
  * Determina si el evento corresponde a la noche actual (hoy o madrugada en curso).
@@ -122,8 +68,59 @@ export function isEventExpired(event: ClubEvent): boolean {
 }
 
 let lastEventsSyncTime = 0;
-const EVENTS_SYNC_COOLDOWN_MS = 15 * 1000; // 15 segundos de cooldown entre llamadas forzadas
-let isSubscribedToFirestore = false;
+const EVENTS_SYNC_COOLDOWN_MS = 10 * 1000;
+let realtimeChannel: any = null;
+
+/**
+ * Guarda o actualiza de manera segura un evento en Supabase con auto-recuperación de ID
+ */
+async function syncSingleEventToSupabase(event: ClubEvent): Promise<string | null> {
+  const supabase = getSupabaseClient();
+  if (!supabase) return null;
+
+  const payload: Record<string, any> = {
+    title: event.title,
+    subtitle: event.subtitle || '',
+    date_str: event.dateStr,
+    date_iso: event.dateIso,
+    time_range: event.timeRange,
+    location_name: event.locationName,
+    description: event.description || '',
+    flyer_url: event.flyerUrl || null,
+    is_active_tonight: event.isActiveTonight,
+    validation_mode: event.validationMode || 'GPS_OR_QR',
+    djs: event.djs || [],
+    passline_url: event.passlineUrl || 'https://www.passline.com',
+  };
+
+  if (event.isFeatured !== undefined) payload.is_featured = Boolean(event.isFeatured);
+  if (event.isAvailableForRp !== undefined) payload.is_available_for_rp = event.isAvailableForRp;
+
+  if (event.id) {
+    payload.id = event.id;
+  }
+
+  try {
+    const { data, error } = await supabase
+      .from('events')
+      .upsert(payload, { onConflict: 'id' })
+      .select('*');
+
+    if (error) {
+      console.warn('Upsert event con ID falló en Supabase, reintentando inserción directa:', error.message);
+      delete payload.id;
+      const res2 = await supabase.from('events').insert(payload).select('*');
+      if (res2.data && res2.data[0]) {
+        return String(res2.data[0].id);
+      }
+    } else if (data && data[0]) {
+      return String(data[0].id);
+    }
+  } catch (err) {
+    console.warn('Error al guardar evento en Supabase:', err);
+  }
+  return null;
+}
 
 export const eventService = {
   invalidateSyncCache(): void {
@@ -255,60 +252,29 @@ export const eventService = {
       id: eventId,
       isActiveTonight: isToday,
     };
+    
+    // Guardar inmediatamente de forma síncrona en local para 0ms de respuesta visual
     this.saveEvents([created, ...events]);
 
-    // 1. Sincronizar en Firebase Firestore (Permanente y en tiempo real)
+    // 1. Guardar de forma autoritativa en Supabase
+    syncSingleEventToSupabase(created).then((assignedId) => {
+      if (assignedId && assignedId !== created.id) {
+        // Actualizar el ID asignado por la base de datos si fue serial
+        const currentList = this.getEvents();
+        const updatedList = currentList.map((e) =>
+          e.id === created.id ? { ...e, id: assignedId } : e
+        );
+        this.saveEvents(updatedList);
+      }
+    });
+
+    // 2. Respaldo silencioso en Firestore
     try {
-      const payload = {
-        id: created.id,
-        title: created.title,
-        subtitle: created.subtitle || '',
-        dateStr: created.dateStr,
-        dateIso: created.dateIso,
-        timeRange: created.timeRange,
-        locationName: created.locationName,
-        description: created.description || '',
-        flyerUrl: created.flyerUrl || '',
-        isActiveTonight: created.isActiveTonight,
-        isFeatured: Boolean(created.isFeatured),
-        validationMode: created.validationMode || 'GPS_OR_QR',
-        djs: created.djs || [],
-        passlineUrl: created.passlineUrl || 'https://www.passline.com',
-        isAvailableForRp: created.isAvailableForRp ?? true,
+      setDoc(doc(db, 'events', created.id), {
+        ...created,
         createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-      };
-
-      setDoc(doc(db, 'events', created.id), payload).catch((err) => {
-        handleFirestoreError(err, OperationType.CREATE, `events/${created.id}`);
-      });
-    } catch (e) {
-      console.warn('Firestore setDoc exception:', e);
-    }
-
-    // 2. Sincronizar creación en Supabase (Respaldo)
-    const supabase = getSupabaseClient();
-    if (supabase) {
-      Promise.resolve(
-        supabase.from('events').insert({
-          id: created.id,
-          title: created.title,
-          subtitle: created.subtitle || '',
-          date_str: created.dateStr,
-          date_iso: created.dateIso,
-          time_range: created.timeRange,
-          location_name: created.locationName,
-          description: created.description || '',
-          flyer_url: created.flyerUrl || null,
-          is_active_tonight: created.isActiveTonight,
-          validation_mode: created.validationMode || 'GPS_OR_QR',
-          djs: created.djs || [],
-          passline_url: created.passlineUrl || 'https://www.passline.com',
-        })
-      ).catch((err) => {
-        console.warn('Error syncing created event to Supabase:', err);
-      });
-    }
+      }, { merge: true }).catch(() => {});
+    } catch {}
 
     return created;
   },
@@ -332,52 +298,16 @@ export const eventService = {
     events[index] = updated;
     this.saveEvents([...events]);
 
-    // 1. Sincronizar en Firebase Firestore
+    // Sincronizar en Supabase
+    syncSingleEventToSupabase(updated);
+
+    // Respaldo silencioso en Firestore
     try {
-      const firestoreUpdates: Record<string, any> = {
+      setDoc(doc(db, 'events', eventId), {
+        ...updates,
         updatedAt: new Date().toISOString(),
-      };
-      if (updates.title !== undefined) firestoreUpdates.title = updates.title;
-      if (updates.subtitle !== undefined) firestoreUpdates.subtitle = updates.subtitle;
-      if (updates.dateStr !== undefined) firestoreUpdates.dateStr = updates.dateStr;
-      if (updates.dateIso !== undefined) firestoreUpdates.dateIso = updates.dateIso;
-      if (updates.timeRange !== undefined) firestoreUpdates.timeRange = updates.timeRange;
-      if (updates.locationName !== undefined) firestoreUpdates.locationName = updates.locationName;
-      if (updates.description !== undefined) firestoreUpdates.description = updates.description;
-      if (updates.flyerUrl !== undefined) firestoreUpdates.flyerUrl = updates.flyerUrl;
-      if (updates.validationMode !== undefined) firestoreUpdates.validationMode = updates.validationMode;
-      if (updates.djs !== undefined) firestoreUpdates.djs = updates.djs;
-      if (updates.passlineUrl !== undefined) firestoreUpdates.passlineUrl = updates.passlineUrl;
-      if (updates.isFeatured !== undefined) firestoreUpdates.isFeatured = updates.isFeatured;
-      if (updates.isAvailableForRp !== undefined) firestoreUpdates.isAvailableForRp = updates.isAvailableForRp;
-
-      setDoc(doc(db, 'events', eventId), firestoreUpdates, { merge: true }).catch((err) => {
-        handleFirestoreError(err, OperationType.UPDATE, `events/${eventId}`);
-      });
-    } catch (e) {
-      console.warn('Firestore updateDoc exception:', e);
-    }
-
-    // 2. Sincronizar en Supabase
-    const supabase = getSupabaseClient();
-    if (supabase) {
-      const dbRecord: Record<string, any> = {};
-      if (updates.title !== undefined) dbRecord.title = updates.title;
-      if (updates.subtitle !== undefined) dbRecord.subtitle = updates.subtitle;
-      if (updates.dateStr !== undefined) dbRecord.date_str = updates.dateStr;
-      if (updates.dateIso !== undefined) dbRecord.date_iso = updates.dateIso;
-      if (updates.timeRange !== undefined) dbRecord.time_range = updates.timeRange;
-      if (updates.locationName !== undefined) dbRecord.location_name = updates.locationName;
-      if (updates.description !== undefined) dbRecord.description = updates.description;
-      if (updates.flyerUrl !== undefined) dbRecord.flyer_url = updates.flyerUrl;
-      if (updates.validationMode !== undefined) dbRecord.validation_mode = updates.validationMode;
-      if (updates.djs !== undefined) dbRecord.djs = updates.djs;
-      if (updates.passlineUrl !== undefined) dbRecord.passline_url = updates.passlineUrl;
-
-      Promise.resolve(supabase.from('events').update(dbRecord).eq('id', eventId)).catch((err) => {
-        console.warn('Error updating event in Supabase:', err);
-      });
-    }
+      }, { merge: true }).catch(() => {});
+    } catch {}
 
     return updated;
   },
@@ -389,16 +319,7 @@ export const eventService = {
     const updated = events.filter((e) => e.id !== eventId);
     this.saveEvents(updated);
 
-    // 1. Borrar en Firebase Firestore
-    try {
-      deleteDoc(doc(db, 'events', eventId)).catch((err) => {
-        handleFirestoreError(err, OperationType.DELETE, `events/${eventId}`);
-      });
-    } catch (e) {
-      console.warn('Firestore deleteDoc exception:', e);
-    }
-
-    // 2. Borrar en Supabase
+    // 1. Borrar en Supabase
     const supabase = getSupabaseClient();
     if (supabase) {
       Promise.resolve(supabase.from('events').delete().eq('id', eventId)).catch(() => {});
@@ -412,62 +333,54 @@ export const eventService = {
         ).catch(() => {});
       }
     }
+
+    // 2. Borrar en Firestore
+    try {
+      deleteDoc(doc(db, 'events', eventId)).catch(() => {});
+    } catch {}
   },
 
   /**
-   * Suscribe en tiempo real a la colección de eventos de Firestore
+   * Suscribe en tiempo real a los cambios de Supabase
    */
   subscribeToEvents(callback?: (events: ClubEvent[]) => void): () => void {
-    try {
-      const unsub = onSnapshot(
-        collection(db, 'events'),
-        (snapshot) => {
-          if (!snapshot.empty) {
-            const firestoreEvents: ClubEvent[] = [];
-            snapshot.docs.forEach((docSnap) => {
-              const d = docSnap.data();
-              if (d && d.title && d.dateIso) {
-                firestoreEvents.push({
-                  id: d.id || docSnap.id,
-                  title: d.title,
-                  subtitle: d.subtitle || '',
-                  dateStr: d.dateStr || d.date_str || '',
-                  dateIso: d.dateIso || d.date_iso || '',
-                  timeRange: d.timeRange || d.time_range || '23:00 — 06:00 hs',
-                  locationName: d.locationName || d.location_name || 'Cachengueoo Boliche · Mendoza',
-                  description: d.description || '',
-                  flyerUrl: d.flyerUrl || d.flyer_url || '',
-                  isActiveTonight: isEventToday({ ...d, dateIso: d.dateIso || d.date_iso } as any),
-                  isFeatured: Boolean(d.isFeatured),
-                  validationMode: d.validationMode || d.validation_mode || 'GPS_OR_QR',
-                  djs: Array.isArray(d.djs) ? d.djs : [],
-                  passlineUrl: d.passlineUrl || d.passline_url || 'https://www.passline.com',
-                  ticketTypes: [],
-                  isAvailableForRp: d.isAvailableForRp !== false,
-                });
-              }
-            });
+    const supabase = getSupabaseClient();
+    if (!supabase) return () => {};
 
-            const clean = firestoreEvents.filter((e) => !isEventPast(e));
-            this.saveEvents(clean);
-            if (callback) callback(clean);
+    if (realtimeChannel) {
+      return () => {};
+    }
+
+    try {
+      realtimeChannel = supabase
+        .channel('realtime:events')
+        .on(
+          'postgres_changes',
+          { event: '*', schema: 'public', table: 'events' },
+          () => {
+            this.syncEventsFromCloud(true).then((evts) => {
+              if (callback) callback(evts);
+            });
           }
-        },
-        (error) => {
-          handleFirestoreError(error, OperationType.LIST, 'events');
+        )
+        .subscribe();
+
+      return () => {
+        if (realtimeChannel && supabase) {
+          supabase.removeChannel(realtimeChannel);
+          realtimeChannel = null;
         }
-      );
-      isSubscribedToFirestore = true;
-      return unsub;
+      };
     } catch (e) {
-      console.warn('Could not subscribe to events onSnapshot:', e);
+      console.warn('Notice setting up Supabase realtime channel for events:', e);
       return () => {};
     }
   },
 
   /**
-   * Sincronizar eventos con la nube (Firestore primero, con Supabase como respaldo)
-   * Mantiene compatibilidad con la función anterior syncEventsFromSupabase
+   * Sincroniza eventos desde Supabase con MERGE NO-DESTRUCTIVO:
+   * Los eventos creados localmente que aún no estén en la nube NUNCA se borran,
+   * sino que se preservan y se suben a Supabase.
    */
   async syncEventsFromSupabase(force = false): Promise<ClubEvent[]> {
     return this.syncEventsFromCloud(force);
@@ -480,67 +393,14 @@ export const eventService = {
     }
     lastEventsSyncTime = now;
 
-    // Conectar suscripción en tiempo real si aún no está activa
-    if (!isSubscribedToFirestore && typeof window !== 'undefined') {
+    // Asegurar suscripción a cambios en tiempo real
+    if (!realtimeChannel && typeof window !== 'undefined') {
       this.subscribeToEvents();
     }
 
-    // 1. Intentar Firestore primero (Base de datos principal)
-    try {
-      const snap = await getDocs(collection(db, 'events'));
-      if (!snap.empty) {
-        const firestoreEvents: ClubEvent[] = [];
-        snap.docs.forEach((docSnap) => {
-          const d = docSnap.data();
-          if (d && d.title && d.dateIso) {
-            firestoreEvents.push({
-              id: d.id || docSnap.id,
-              title: d.title,
-              subtitle: d.subtitle || '',
-              dateStr: d.dateStr || d.date_str || '',
-              dateIso: d.dateIso || d.date_iso || '',
-              timeRange: d.timeRange || d.time_range || '23:00 — 06:00 hs',
-              locationName: d.locationName || d.location_name || 'Cachengueoo Boliche · Mendoza',
-              description: d.description || '',
-              flyerUrl: d.flyerUrl || d.flyer_url || '',
-              isActiveTonight: isEventToday({ ...d, dateIso: d.dateIso || d.date_iso } as any),
-              isFeatured: Boolean(d.isFeatured),
-              validationMode: d.validationMode || d.validation_mode || 'GPS_OR_QR',
-              djs: Array.isArray(d.djs) ? d.djs : [],
-              passlineUrl: d.passlineUrl || d.passline_url || 'https://www.passline.com',
-              ticketTypes: [],
-              isAvailableForRp: d.isAvailableForRp !== false,
-            });
-          }
-        });
-
-        if (firestoreEvents.length > 0) {
-          const clean = firestoreEvents.filter((e) => !isEventPast(e));
-          this.saveEvents(clean);
-          return clean;
-        }
-      } else {
-        // Si Firestore está vacío pero este dispositivo tiene eventos locales
-        // (por ejemplo, el evento recién cargado por el admin en la macbook),
-        // subirlo a Firestore para que esté disponible de inmediato en todos los celulares!
-        const localList = this.getEvents();
-        if (localList.length > 0) {
-          for (const ev of localList) {
-            setDoc(doc(db, 'events', ev.id), {
-              ...ev,
-              createdAt: new Date().toISOString(),
-              updatedAt: new Date().toISOString(),
-            }).catch(() => {});
-          }
-          return localList;
-        }
-      }
-    } catch (e) {
-      console.warn('Firestore events fetch notice:', e);
-    }
-
-    // 2. Respaldo secundario: Supabase
+    const localEvents = this.getEvents();
     const supabase = getSupabaseClient();
+
     if (supabase) {
       try {
         const { data, error } = await supabase
@@ -548,44 +408,62 @@ export const eventService = {
           .select('*')
           .order('date_iso', { ascending: true });
 
-        if (!error && Array.isArray(data) && data.length > 0) {
-          const mapped: ClubEvent[] = data.map((d: any) => ({
+        if (!error && Array.isArray(data)) {
+          const remoteEvents: ClubEvent[] = data.map((d: any) => ({
             id: String(d.id),
             title: d.title,
             subtitle: d.subtitle || '',
-            dateStr: d.date_str,
-            dateIso: d.date_iso,
-            timeRange: d.time_range,
-            locationName: d.location_name,
+            dateStr: d.date_str || d.dateStr || '',
+            dateIso: d.date_iso || d.dateIso || '',
+            timeRange: d.time_range || d.timeRange || '23:00 — 06:00 hs',
+            locationName: d.location_name || d.locationName || 'Cachengueoo Boliche · Mendoza',
             description: d.description || '',
-            flyerUrl: d.flyer_url || '',
-            isActiveTonight: isEventToday({ ...d, dateIso: d.date_iso } as any),
-            isFeatured: Boolean(d.is_featured),
-            validationMode: d.validation_mode || 'GPS_OR_QR',
+            flyerUrl: d.flyer_url || d.flyerUrl || '',
+            isActiveTonight: isEventToday({ ...d, dateIso: d.date_iso || d.dateIso } as any),
+            isFeatured: Boolean(d.is_featured ?? d.isFeatured),
+            validationMode: d.validation_mode || d.validationMode || 'GPS_OR_QR',
             djs: Array.isArray(d.djs) ? d.djs : [],
-            passlineUrl: d.passline_url || 'https://www.passline.com',
+            passlineUrl: d.passline_url || d.passlineUrl || 'https://www.passline.com',
             ticketTypes: [],
-            isAvailableForRp: d.is_available_for_rp !== false,
+            isAvailableForRp: d.is_available_for_rp !== false && d.isAvailableForRp !== false,
           }));
 
-          const clean = mapped.filter((e) => !isEventPast(e));
-          this.saveEvents(clean);
+          // MERGE INTELIGENTE NO DESTRUCTIVO:
+          const mergedMap = new Map<string, ClubEvent>();
 
-          // Subir a Firestore como espejo si estaba vacío
-          for (const ev of clean) {
-            setDoc(doc(db, 'events', ev.id), {
-              ...ev,
-              createdAt: new Date().toISOString(),
-            }).catch(() => {});
-          }
+          // 1. Añadir eventos remotos de Supabase
+          remoteEvents.forEach((re) => {
+            mergedMap.set(re.id, re);
+            if (re.title && re.dateIso) {
+              mergedMap.set(`${re.title.trim().toLowerCase()}_${re.dateIso}`, re);
+            }
+          });
 
-          return clean;
+          // 2. Preservar eventos locales que no hayan pasado y subirlos si faltan
+          localEvents.forEach((localEv) => {
+            const compositeKey = `${localEv.title.trim().toLowerCase()}_${localEv.dateIso}`;
+            const existsInRemote = mergedMap.has(localEv.id) || (compositeKey && mergedMap.has(compositeKey));
+
+            if (!existsInRemote && !isEventPast(localEv) && !isEventExpired(localEv)) {
+              // Mantener en el estado local para que JAMÁS se borre
+              mergedMap.set(localEv.id, localEv);
+              // Ponerlo en Supabase para persistirlo en la nube
+              syncSingleEventToSupabase(localEv);
+            }
+          });
+
+          const finalEvents = Array.from(mergedMap.values())
+            .filter((e, idx, arr) => arr.findIndex((x) => x.id === e.id) === idx)
+            .filter((e) => !isEventPast(e) && !isEventExpired(e));
+
+          this.saveEvents(finalEvents);
+          return finalEvents;
         }
-      } catch {
-        // Fallback a almacenamiento local
+      } catch (err) {
+        console.warn('Notice querying Supabase events:', err);
       }
     }
 
-    return this.getEvents();
+    return localEvents;
   },
 };
