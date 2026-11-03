@@ -79,10 +79,37 @@ export const RPProfileSection: React.FC<RPProfileSectionProps> = ({
   // Link copy state
   const [hasCopiedLink, setHasCopiedLink] = useState(false);
 
-  // Events & RP Links - Carga síncrona inmediata
+  // Events & RP Links - Carga síncrona inmediata con respaldo de todos los eventos del club
   const [events, setEvents] = useState<ClubEvent[]>(() => {
-    return eventService.getEvents().filter((e) => e.isAvailableForRp !== false);
+    const list = eventService.getEvents();
+    const available = list.filter((e) => e.isAvailableForRp !== false);
+    return available.length > 0 ? available : list;
   });
+
+  // Listener en tiempo real y sincronización de eventos de la nube
+  useEffect(() => {
+    const handleEventsChange = () => {
+      const allEvents = eventService.getEvents();
+      const filtered = allEvents.filter((e) => e.isAvailableForRp !== false);
+      setEvents(filtered.length > 0 ? filtered : allEvents);
+    };
+
+    window.addEventListener('cachengueoo_events_updated', handleEventsChange);
+    window.addEventListener('storage', handleEventsChange);
+
+    // Sincronizar desde la nube de inmediato al entrar al panel de RP
+    eventService.syncEventsFromCloud(true).then((cloudEvents) => {
+      if (cloudEvents && cloudEvents.length > 0) {
+        const filtered = cloudEvents.filter((e) => e.isAvailableForRp !== false);
+        setEvents(filtered.length > 0 ? filtered : cloudEvents);
+      }
+    });
+
+    return () => {
+      window.removeEventListener('cachengueoo_events_updated', handleEventsChange);
+      window.removeEventListener('storage', handleEventsChange);
+    };
+  }, []);
   const [eventLinks, setEventLinks] = useState<Record<string, string>>(() => {
     try {
       const targetId = cachedProfile?.id || `rp_${currentUser.id}`;
@@ -416,11 +443,22 @@ export const RPProfileSection: React.FC<RPProfileSectionProps> = ({
         </div>
 
         {events.length === 0 ? (
-          <div className="p-6 rounded-2xl bg-zinc-900/50 border border-zinc-800 text-center space-y-2">
+          <div className="p-6 rounded-2xl bg-zinc-900/50 border border-zinc-800 text-center space-y-3">
             <Calendar className="w-6 h-6 text-zinc-600 mx-auto" />
             <p className="text-xs text-zinc-400">
               No hay eventos habilitados para promoción en este momento.
             </p>
+            <button
+              type="button"
+              onClick={() => {
+                eventService.syncEventsFromCloud(true).then((evts) => {
+                  if (evts) setEvents(evts);
+                });
+              }}
+              className="px-4 py-2 rounded-xl bg-zinc-900 hover:bg-zinc-800 border border-zinc-700 hover:border-[#F39200] text-xs text-white font-bold cursor-pointer transition-all inline-flex items-center gap-2"
+            >
+              <span>🔄</span> Recargar eventos de Cachengueoo
+            </button>
           </div>
         ) : (
           <div className="space-y-4">

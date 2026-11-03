@@ -113,6 +113,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onExitAdmin, onL
     'https://images.unsplash.com/photo-1492684223066-81342ee5ff30?auto=format&fit=crop&w=1200&q=80'
   );
   const [newEventIsFeatured, setNewEventIsFeatured] = useState(false);
+  const [newEventIsAvailableForRp, setNewEventIsAvailableForRp] = useState(true);
 
   // Benefits state
   const [benefits, setBenefits] = useState<ClubBenefit[]>(() => benefitService.getBenefits());
@@ -458,6 +459,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onExitAdmin, onL
       'https://images.unsplash.com/photo-1492684223066-81342ee5ff30?auto=format&fit=crop&w=1200&q=80'
     );
     setNewEventIsFeatured(false);
+    setNewEventIsAvailableForRp(true);
     setShowNewEventModal(true);
   };
 
@@ -474,6 +476,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onExitAdmin, onL
         'https://images.unsplash.com/photo-1492684223066-81342ee5ff30?auto=format&fit=crop&w=1200&q=80'
     );
     setNewEventIsFeatured(Boolean(evt.isFeatured));
+    setNewEventIsAvailableForRp(evt.isAvailableForRp !== false);
     setShowNewEventModal(true);
   };
 
@@ -505,6 +508,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onExitAdmin, onL
         timeRange: timeToUse,
         flyerUrl: newEventFlyerUrl,
         isFeatured: newEventIsFeatured,
+        isAvailableForRp: newEventIsAvailableForRp,
         djs: djsArray,
         passlineUrl: passlineFormatted,
       });
@@ -521,6 +525,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onExitAdmin, onL
         flyerUrl: newEventFlyerUrl,
         isActiveTonight: false,
         isFeatured: newEventIsFeatured,
+        isAvailableForRp: newEventIsAvailableForRp,
         validationMode: 'GPS_OR_QR',
         djs: djsArray,
         ticketTypes: [],
@@ -539,6 +544,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onExitAdmin, onL
     setNewEventLineup('');
     setNewEventLink('');
     setNewEventIsFeatured(false);
+    setNewEventIsAvailableForRp(true);
   };
 
   // Eliminar evento
@@ -2271,6 +2277,22 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onExitAdmin, onL
                     className="text-zinc-200 text-xs font-semibold cursor-pointer select-none"
                   >
                     ⭐ Destacar esta fecha en la pantalla de Inicio
+                  </label>
+                </div>
+
+                <div className="flex items-center gap-2.5">
+                  <input
+                    type="checkbox"
+                    id="setAvailableForRp"
+                    checked={newEventIsAvailableForRp}
+                    onChange={(e) => setNewEventIsAvailableForRp(e.target.checked)}
+                    className="rounded bg-zinc-900 border-zinc-700 text-[#F39200] focus:ring-0 cursor-pointer w-4 h-4"
+                  />
+                  <label
+                    htmlFor="setAvailableForRp"
+                    className="text-zinc-200 text-xs font-semibold cursor-pointer select-none"
+                  >
+                    🏷️ Habilitar evento para Relaciones Públicas (RP) para cargar su link de Passline
                   </label>
                 </div>
 
