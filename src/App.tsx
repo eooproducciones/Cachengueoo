@@ -27,6 +27,8 @@ import { CheckCircle2, MapPin, Sparkles, X } from 'lucide-react';
 import { OutOfRangeModal } from './components/presence/OutOfRangeModal';
 import { purgeMockData } from './utils/cleanMockData';
 import { getSupabaseClient } from './services/supabaseClient';
+import { db } from './services/firebaseClient';
+import { doc, setDoc } from 'firebase/firestore';
 
 export default function App() {
   const [currentTab, setCurrentTab] = useState<string>('inicio');
@@ -37,6 +39,7 @@ export default function App() {
   const [isQrScannerOpen, setIsQrScannerOpen] = useState<boolean>(false);
   const [isAuthModalOpen, setIsAuthModalOpen] = useState<boolean>(false);
   const [isCheckingGpsLocation, setIsCheckingGpsLocation] = useState<boolean>(false);
+  const [pendingMatchIntent, setPendingMatchIntent] = useState<boolean>(false);
   const [authModalMode, setAuthModalMode] = useState<
     'login' | 'register' | 'choice' | 'verify' | 'register_step_1'
   >('choice');
@@ -123,29 +126,27 @@ export default function App() {
     const handleOpenWizard = () => {
       const currentUser = authService.getCurrentUser();
       const cacheIdCreated = localStorage.getItem('cachengueoo_cache_id_created') === 'true';
-      if (!currentUser || !cacheIdCreated) {
-        setAuthModalMode('register_step_1');
-        setIsAuthModalOpen(true);
+      // Si el usuario ya existe o ya tiene Cache ID, asegurar flags y salir inmediatamente
+      if ((currentUser && (currentUser.fullName || currentUser.nickname)) || cacheIdCreated) {
+        localStorage.setItem('cachengueoo_cache_id_created', 'true');
+        sessionStorage.removeItem('cachengueoo_flow_intent');
+        localStorage.removeItem('cachengueoo_flow_intent');
+        return;
       }
+      setAuthModalMode('register_step_1');
+      setIsAuthModalOpen(true);
     };
 
     window.addEventListener('cachengueoo_open_cache_id_wizard', handleOpenWizard);
 
-    // Al recargar la página: si el usuario ya está dentro o ya tiene Cache ID, NUNCA abrir el modal
+    // Al iniciar la app: si el usuario ya está guardado o ya creó su Cache ID, limpiar cualquier intent previo
     const currentUser = authService.getCurrentUser();
     const cacheIdCreated = localStorage.getItem('cachengueoo_cache_id_created') === 'true';
 
-    if (currentUser && (cacheIdCreated || (currentUser.fullName && currentUser.avatarUrl))) {
+    if (currentUser || cacheIdCreated) {
+      localStorage.setItem('cachengueoo_cache_id_created', 'true');
       sessionStorage.removeItem('cachengueoo_flow_intent');
       localStorage.removeItem('cachengueoo_flow_intent');
-    } else {
-      const flowIntent =
-        sessionStorage.getItem('cachengueoo_flow_intent') ||
-        localStorage.getItem('cachengueoo_flow_intent');
-      if (flowIntent === 'configure_cache_id' && !currentUser) {
-        setAuthModalMode('register_step_1');
-        setIsAuthModalOpen(true);
-      }
     }
 
     return () => {
@@ -173,14 +174,26 @@ export default function App() {
   const handleAuthSuccess = (loggedUser: UserProfile) => {
     setUser(loggedUser);
     showToast(`¡Bienvenido, ${loggedUser.nickname}! Sesión activa en Cachengueoo.`);
+    
     if (loggedUser.isAdmin || loggedUser.role === 'admin') {
       setIsAdminView(true);
       setIsAuthModalOpen(false);
-    } else {
-      setIsAdminView(false);
-      if (currentTab === 'perfil' || currentTab === 'match_perfil') {
-        setCurrentTab('perfil');
-      }
+      setPendingMatchIntent(false);
+      return;
+    }
+
+    setIsAdminView(false);
+    setIsAuthModalOpen(false);
+
+    // Si el usuario tocó Match para registrarse o iniciar sesión, corroborar inmediatamente si está en el boliche
+    if (pendingMatchIntent) {
+      setPendingMatchIntent(false);
+      handleAutoGpsAndOpenMatch('match_pista');
+      return;
+    }
+
+    if (currentTab === 'perfil' || currentTab === 'match_perfil') {
+      setCurrentTab('perfil');
     }
   };
 
@@ -213,13 +226,15 @@ export default function App() {
       tab === 'match_notitas' ||
       tab === 'match_matches'
     ) {
+      // 1. Si no está logueado, primero pedir que inicie sesión o cree cuenta
       if (!activeUser) {
+        setPendingMatchIntent(true);
         setAuthModalMode('choice');
         setIsAuthModalOpen(true);
         return;
       }
 
-      // Si no está verificado adentro, o si la presencia ya expiró, ejecutar verificación GPS obligatoria
+      // 2. Si ya está logueado, corroborar que esté en alguna zona configurada desde admin
       const targetSub =
         tab === 'match_notitas'
           ? 'match_notitas'
@@ -227,13 +242,7 @@ export default function App() {
           ? 'match_matches'
           : 'match_pista';
 
-      if (!isInside) {
-        handleAutoGpsAndOpenMatch(targetSub);
-        return;
-      }
-
-      setIsAdminView(false);
-      setCurrentTab(targetSub);
+      handleAutoGpsAndOpenMatch(targetSub);
       return;
     }
 
@@ -241,36 +250,18 @@ export default function App() {
     setCurrentTab(tab);
   };
 
-  // Activación obligatoria de Match por GPS en tiempo real
+  // Activación de Match: Corrobora ubicación en tiempo real en zonas de admin
   const handleAutoGpsAndOpenMatch = async (targetTab: string = 'match_pista') => {
     const activeUser = user || authService.getCurrentUser();
+    // Si no está logueado, abrir primero el modal para iniciar sesión o registrarse
     if (!activeUser) {
+      setPendingMatchIntent(true);
       setAuthModalMode('choice');
       setIsAuthModalOpen(true);
       return;
     }
 
-    // Si la presencia ya está validada y activa durante la noche, ingresar directo sin volver a pedir GPS
-    const currentStored = presenceService.getStoredPresence();
-    if (currentStored.isInside) {
-      const client = getSupabaseClient();
-      if (client && activeUser?.id) {
-        Promise.resolve(
-          client
-            .from('profiles')
-            .update({
-              is_verified_in_venue: true,
-              updated_at: new Date().toISOString(),
-            })
-            .eq('id', activeUser.id)
-        ).catch(() => {});
-      }
-      setIsAdminView(false);
-      setCurrentTab(targetTab);
-      return;
-    }
-
-    // Activar inmediatamente el cartel y modal de comprobación de ubicación
+    // Activar cartel de comprobación de ubicación
     setIsCheckingGpsLocation(true);
 
     try {
@@ -294,7 +285,7 @@ export default function App() {
         presenceService.saveStoredPresence(updated);
         window.dispatchEvent(new Event('storage'));
 
-        // Sincronizar en Supabase para que este perfil aparezca activo a los demás usuarios por 8 horas
+        // 1. Sincronizar en Supabase para que este perfil aparezca activo a los demás usuarios adentro del boliche
         const client = getSupabaseClient();
         if (client && activeUser?.id) {
           Promise.resolve(
@@ -308,6 +299,33 @@ export default function App() {
           ).catch(() => {});
         }
 
+        // 2. Sincronizar en Firestore
+        try {
+          if (activeUser?.id) {
+            setDoc(
+              doc(db, 'profiles', activeUser.id),
+              {
+                is_verified_in_venue: true,
+                verified_in_venue_at: new Date().toISOString(),
+                updated_at: new Date().toISOString(),
+              },
+              { merge: true }
+            ).catch(() => {});
+          }
+        } catch {}
+
+        // 3. Sincronizar en lista local
+        try {
+          const registered = JSON.parse(localStorage.getItem('cachengueoo_registered_users') || '[]');
+          const idx = registered.findIndex((u: any) => u.id === activeUser?.id);
+          if (idx >= 0) {
+            registered[idx].isVerifiedInVenue = true;
+            registered[idx].is_verified_in_venue = true;
+            registered[idx].verifiedAt = new Date().toISOString();
+            localStorage.setItem('cachengueoo_registered_users', JSON.stringify(registered));
+          }
+        } catch {}
+
         showToast(
           `¡Estás en ${gpsResult.matchedLocationName || 'Cachengueoo'}! Cachengueoo Match activado 🔥`
         );
@@ -316,6 +334,33 @@ export default function App() {
       } else {
         presenceService.clearPresence();
         window.dispatchEvent(new Event('storage'));
+
+        // Desactivar en Supabase y Firestore para que NO aparezca en match a los demás
+        const client = getSupabaseClient();
+        if (client && activeUser?.id) {
+          Promise.resolve(
+            client
+              .from('profiles')
+              .update({
+                is_verified_in_venue: false,
+                updated_at: new Date().toISOString(),
+              })
+              .eq('id', activeUser.id)
+          ).catch(() => {});
+        }
+        try {
+          if (activeUser?.id) {
+            setDoc(
+              doc(db, 'profiles', activeUser.id),
+              {
+                is_verified_in_venue: false,
+                updated_at: new Date().toISOString(),
+              },
+              { merge: true }
+            ).catch(() => {});
+          }
+        } catch {}
+
         const refLoc = activeLocations[0] || currentVenue.locations?.[0];
         setOutOfRangeDetails({
           distanceMeters: gpsResult.distanceMeters,
@@ -346,6 +391,14 @@ export default function App() {
   };
 
   const handleActivateMatch = () => {
+    const activeUser = user || authService.getCurrentUser();
+    if (!activeUser) {
+      setPendingMatchIntent(true);
+      setAuthModalMode('choice');
+      setIsAuthModalOpen(true);
+      return;
+    }
+    // Si ya está logueado, corroborar que esté en alguna zona configurada desde admin
     handleAutoGpsAndOpenMatch('match_pista');
   };
 
@@ -540,13 +593,9 @@ export default function App() {
           await handleAutoGpsAndOpenMatch();
         }}
         onProceedToMatch={() => {
-          const current = presenceService.getStoredPresence();
-          if (current.isInside) {
-            setCurrentTab('match_pista');
-            showToast('🔥 ¡Acceso a Cachengueoo Match!');
-          } else {
-            handleAutoGpsAndOpenMatch();
-          }
+          setPendingMatchIntent(false);
+          setIsAuthModalOpen(false);
+          handleAutoGpsAndOpenMatch('match_pista');
         }}
       />
 

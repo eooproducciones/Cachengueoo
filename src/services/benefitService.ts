@@ -3,7 +3,13 @@ import { getSupabaseClient } from './supabaseClient';
 
 const BENEFITS_STORAGE_KEY = 'cachengueoo_benefits_list';
 
+let lastBenefitsSyncTime = 0;
+const BENEFITS_SYNC_COOLDOWN_MS = 5 * 60 * 1000; // 5 minutos de cooldown
+
 export const benefitService = {
+  invalidateSyncCache(): void {
+    lastBenefitsSyncTime = 0;
+  },
   getBenefits(): ClubBenefit[] {
     try {
       const saved = localStorage.getItem(BENEFITS_STORAGE_KEY);
@@ -119,12 +125,18 @@ export const benefitService = {
     }
   },
 
-  async syncBenefitsFromSupabase(): Promise<ClubBenefit[]> {
+  async syncBenefitsFromSupabase(force = false): Promise<ClubBenefit[]> {
+    const now = Date.now();
+    if (!force && now - lastBenefitsSyncTime < BENEFITS_SYNC_COOLDOWN_MS) {
+      return this.getBenefits();
+    }
+
     const supabase = getSupabaseClient();
     if (!supabase) return this.getBenefits();
 
     try {
       const { data, error } = await supabase.from('benefits').select('*');
+      lastBenefitsSyncTime = Date.now();
       if (!error && Array.isArray(data)) {
         if (data.length === 0) {
           this.saveBenefits([]);

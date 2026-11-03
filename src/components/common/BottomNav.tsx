@@ -143,37 +143,40 @@ export const BottomNav: React.FC<BottomNavProps> = ({
             isActive = currentTab === tab.id;
           }
 
-          // BOTÓN ESPECIAL CENTRAL: MATCH (Llama de fuego naranja/dorada)
+          // BOTÓN ESPECIAL CENTRAL: MATCH (Luz titilante, halo neón pulsante ultra llamativo)
           if (tab.isSpecial) {
             return (
               <button
                 key={tab.id}
                 onClick={tab.action}
-                className="relative flex flex-col items-center justify-center min-h-[44px] min-w-[44px] cursor-pointer group -mt-5"
+                className="relative flex flex-col items-center justify-center min-h-[48px] min-w-[48px] cursor-pointer group -mt-6 active:scale-95 transition-transform"
                 aria-label="Cachengueoo Match"
               >
+                {/* 1. Halo luminoso exterior titilando con efecto pulso expansivo */}
+                <div className="absolute -inset-1.5 rounded-full bg-gradient-to-r from-amber-500 via-[#F39200] to-rose-500 opacity-80 blur-md animate-pulse pointer-events-none" />
+                <div className="absolute -inset-1 rounded-full bg-[#F39200]/40 blur-sm animate-ping opacity-50 pointer-events-none" />
+
+                {/* 2. Botón principal esférico con gradiente ardiente y destello */}
                 <div
-                  className={`relative w-12 h-12 rounded-full flex items-center justify-center transition-all duration-300 shadow-xl ${
+                  className={`relative w-13 h-13 rounded-full flex items-center justify-center transition-all duration-300 shadow-2xl overflow-hidden ring-4 ring-[#0a0714] ${
                     isActive
-                      ? 'bg-gradient-to-tr from-[#EA580C] to-[#F39200] text-black shadow-lg shadow-[#F39200]/50 scale-105 ring-4 ring-[#0a0714]'
-                      : isInsideVenue
-                      ? 'bg-gradient-to-tr from-[#EA580C] to-[#F39200] text-black ring-4 ring-[#0a0714]'
-                      : 'bg-zinc-800 text-zinc-300 hover:text-white ring-4 ring-[#09090b]'
+                      ? 'bg-gradient-to-tr from-[#FF3B00] via-[#F39200] to-[#FFD700] text-black shadow-[0_0_25px_rgba(243,146,0,0.8)] scale-105'
+                      : 'bg-gradient-to-tr from-[#EA580C] via-[#F39200] to-[#FBBF24] text-black shadow-[0_0_20px_rgba(243,146,0,0.6)] group-hover:scale-105'
                   }`}
                 >
-                  <Icon className="w-6 h-6 stroke-[2.4]" />
-                  {/* Indicador en vivo si está adentro y NO estamos en modo match (para no duplicar el círculo titilando) */}
-                  {isInsideVenue && !isInMatchMode && (
-                    <span className="absolute -top-1 -right-1 flex h-3.5 w-3.5">
-                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                      <span className="relative inline-flex rounded-full h-3.5 w-3.5 bg-emerald-500 border-2 border-black"></span>
-                    </span>
-                  )}
+                  {/* Resplandor reflectivo interior diagonal */}
+                  <div className="absolute inset-0 bg-gradient-to-tr from-white/30 via-transparent to-transparent pointer-events-none" />
+
+                  {/* Icono de fuego con pulso rítmico que invita a tocarlo */}
+                  <Icon className="w-7 h-7 fill-black stroke-black drop-shadow-sm animate-pulse" />
+
+                  {/* Destello de luz blanca titilando en la esquina superior */}
+                  <span className="absolute top-1 right-2 w-2 h-2 rounded-full bg-white/90 blur-[1px] animate-ping opacity-90" />
                 </div>
+
+                {/* 3. Etiqueta con brillo dorado neón */}
                 <span
-                  className={`text-[10px] font-bold tracking-tight mt-1 transition-colors ${
-                    isActive ? 'text-[#F39200]' : 'text-zinc-400'
-                  }`}
+                  className="text-[10px] font-black tracking-wider uppercase mt-1 transition-all text-transparent bg-clip-text bg-gradient-to-r from-amber-300 via-orange-400 to-amber-200 drop-shadow-[0_0_6px_rgba(243,146,0,0.7)]"
                 >
                   {tab.label}
                 </span>

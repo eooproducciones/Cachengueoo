@@ -65,7 +65,13 @@ export function isEventExpired(event: ClubEvent): boolean {
   return isEventPast(event);
 }
 
+let lastEventsSyncTime = 0;
+const EVENTS_SYNC_COOLDOWN_MS = 5 * 60 * 1000; // 5 minutos de caché para no saturar Supabase
+
 export const eventService = {
+  invalidateSyncCache(): void {
+    lastEventsSyncTime = 0;
+  },
   getEvents(): ClubEvent[] {
     let list: ClubEvent[] = [];
     try {
@@ -177,6 +183,7 @@ export const eventService = {
   },
 
   createEvent(newEvent: Omit<ClubEvent, 'id'>): ClubEvent {
+    this.invalidateSyncCache();
     const events = this.getEvents();
     const isToday = isEventToday({ ...newEvent, id: '' } as ClubEvent);
     const eventId = typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `evt_${Date.now()}`;
@@ -218,6 +225,7 @@ export const eventService = {
   },
 
   updateEvent(eventId: string, updates: Partial<ClubEvent>): ClubEvent | null {
+    this.invalidateSyncCache();
     const events = this.getEvents();
     const index = events.findIndex((e) => e.id === eventId);
     if (index === -1) return null;
@@ -259,6 +267,7 @@ export const eventService = {
   },
 
   deleteEvent(eventId: string): void {
+    this.invalidateSyncCache();
     const events = this.getEvents();
     const toDelete = events.find((e) => e.id === eventId);
     const updated = events.filter((e) => e.id !== eventId);
@@ -283,7 +292,12 @@ export const eventService = {
   /**
    * Sincronizar eventos con Supabase al abrir la aplicación y entre pestañas
    */
-  async syncEventsFromSupabase(): Promise<ClubEvent[]> {
+  async syncEventsFromSupabase(force = false): Promise<ClubEvent[]> {
+    const now = Date.now();
+    if (!force && now - lastEventsSyncTime < EVENTS_SYNC_COOLDOWN_MS) {
+      return this.getEvents();
+    }
+
     const supabase = getSupabaseClient();
     if (!supabase) return this.getEvents();
 
@@ -292,6 +306,8 @@ export const eventService = {
         .from('events')
         .select('*')
         .order('date_iso', { ascending: true });
+
+      lastEventsSyncTime = Date.now();
 
       if (!error && Array.isArray(data)) {
         if (data.length === 0) {

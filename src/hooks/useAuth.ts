@@ -22,31 +22,13 @@ export function useAuth() {
             .or(`id.eq.${authUser.id},email.eq.${authUser.email}`)
             .maybeSingle();
 
-          const isPlaceholderAvatar = (url?: string | null) => {
-            if (!url) return true;
-            if (url.includes('images.unsplash.com')) return true;
-            return false;
-          };
-
-          const isPlaceholderBirthDate = (date?: string | null) => {
-            if (!date) return true;
-            if (date === '2001-01-01' || date === '2000-01-01') return true;
-            return false;
-          };
-
+          // Un usuario está configurado si tiene nombre real (no depende de fechas o avatares específicos)
           const isAlreadyConfigured = Boolean(
-            profileData &&
-            profileData.full_name &&
-            !isPlaceholderBirthDate(profileData.birth_date) &&
-            !isPlaceholderAvatar(profileData.avatar_url) &&
-            (
-              (Array.isArray(profileData.drinks) && profileData.drinks.length > 0) ||
-              profileData.zodiac_sign ||
-              (Array.isArray(profileData.interests) && profileData.interests.length > 0)
-            )
+            (profileData && (profileData.full_name || profileData.nickname)) ||
+            (authUser.user_metadata?.full_name || authUser.user_metadata?.name)
           );
 
-          // Si el usuario ingresó por Google y aún no tiene fila en profiles, crearla automáticamente
+          // Si el usuario ingresó por Google y aún no tiene fila en profiles, crearla automáticamente con sus datos
           if (!profileData && authUser.email) {
             const googleName =
               authUser.user_metadata?.full_name ||
@@ -62,13 +44,14 @@ export function useAuth() {
               email: authUser.email,
               full_name: googleName,
               nickname: googleName.split(' ')[0] || googleName,
-              avatar_url: isPlaceholderAvatar(googleAvatar) ? '' : googleAvatar,
+              avatar_url: googleAvatar,
               gender: 'hombre',
               preference: 'todos',
               birth_date: '2001-01-01',
               age: 23,
               bio: '',
-              drink_favorite: '',
+              drink_favorite: 'Fernet con Coca',
+              drinks: ['Fernet'],
               instagram: '',
               interests: [],
               updated_at: new Date().toISOString(),
@@ -93,18 +76,15 @@ export function useAuth() {
           sessionStorage.setItem('cachengueoo_current_user', JSON.stringify(mergedUser));
           notifyAuthChange();
 
+          // Un usuario que ya tiene perfil o ya inició sesión NUNCA debe ver el wizard de registro
           const cacheIdAlreadyCreated = Boolean(
-            (localStorage.getItem('cachengueoo_cache_id_created') === 'true' &&
-              currentLocal &&
-              currentLocal.fullName &&
-              !isPlaceholderAvatar(currentLocal.avatarUrl)) ||
-            (profileData &&
-              profileData.full_name &&
-              !isPlaceholderAvatar(profileData.avatar_url) &&
-              isAlreadyConfigured)
+            localStorage.getItem('cachengueoo_cache_id_created') === 'true' ||
+            (mergedUser && (mergedUser.fullName || mergedUser.nickname)) ||
+            (profileData && (profileData.full_name || profileData.nickname)) ||
+            isAlreadyConfigured
           );
 
-          // Si el usuario ya tiene su Cache ID o perfil configurado, limpiar flags y NO abrir el wizard al recargar
+          // Si el usuario ya tiene su Cache ID o perfil configurado, asegurar flags y NUNCA abrir el wizard
           if (cacheIdAlreadyCreated) {
             localStorage.setItem('cachengueoo_cache_id_created', 'true');
             sessionStorage.removeItem('cachengueoo_flow_intent');
@@ -112,12 +92,11 @@ export function useAuth() {
             return;
           }
 
-          // Solo guiar al wizard si viene explícitamente de Google OAuth por primera vez sin Cache ID
-          const flowIntent =
-            sessionStorage.getItem('cachengueoo_flow_intent') ||
-            localStorage.getItem('cachengueoo_flow_intent');
-
-          if (flowIntent === 'configure_cache_id' && !cacheIdAlreadyCreated) {
+          // Solo guiar al wizard si viene explícitamente con flow_intent activo en sessionStorage y sin perfil
+          const flowIntent = sessionStorage.getItem('cachengueoo_flow_intent');
+          if (flowIntent === 'configure_cache_id') {
+            sessionStorage.removeItem('cachengueoo_flow_intent');
+            localStorage.removeItem('cachengueoo_flow_intent');
             window.dispatchEvent(new CustomEvent('cachengueoo_open_cache_id_wizard'));
           }
         } catch (err) {

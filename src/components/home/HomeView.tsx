@@ -38,72 +38,53 @@ export const HomeView: React.FC<HomeViewProps> = ({
 }) => {
   return (
     <div className="max-w-xl mx-auto px-4 py-4 space-y-6">
-      {/* SECTION 1: PRESENCE HERO BANNER */}
-      {Boolean(currentUser) && presence.isInside ? (
-        /* DENTRO DE CACHENGUEOO -> MATCH CALL TO ACTION SOBRIO */
-        <div className="bg-[#121217] border border-[#F39200]/40 rounded-3xl p-5 shadow-xl relative overflow-hidden animate-in fade-in duration-300">
-          <div className="flex items-center justify-between mb-2">
-            <span className="flex items-center gap-1.5 text-xs font-bold text-emerald-400 bg-emerald-950/60 px-2.5 py-1 rounded-full border border-emerald-500/30">
+      {/* SECTION 1: HERO CACHENGUEOO MATCH (Simple, directo y con botón titilando que invita a tocarlo) */}
+      <div className="bg-[#121217] border border-[#F39200]/30 hover:border-[#F39200]/60 rounded-3xl p-5 shadow-2xl relative overflow-hidden transition-all">
+        {/* Glow de fondo ambiental */}
+        <div className="absolute -top-12 -right-12 w-48 h-48 bg-[#F39200]/15 rounded-full blur-3xl pointer-events-none" />
+        <div className="absolute -bottom-12 -left-12 w-48 h-48 bg-rose-500/10 rounded-full blur-3xl pointer-events-none" />
+
+        <div className="flex items-center justify-between mb-2">
+          {Boolean(currentUser) && presence.isInside ? (
+            <span className="flex items-center gap-1.5 text-xs font-bold text-emerald-400 bg-emerald-950/60 px-3 py-1 rounded-full border border-emerald-500/30">
               <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping"></span>
               ESTÁS EN CACHENGUEOO 🔥
             </span>
-          </div>
-
-          <h2 className="text-xl sm:text-2xl font-black text-white font-display uppercase tracking-tight mt-1">
-            CONOCÉ QUIÉN ESTÁ <span className="text-[#F39200]">ESTA NOCHE</span>
-          </h2>
-          <p className="text-xs text-zinc-300 mt-1 max-w-sm leading-relaxed">
-            Hay cientos de personas en el boliche ahora mismo. Mira sus perfiles en tiempo real, hace amigos y tomen algo.
-          </p>
-
-          <div className="mt-4">
-            <button
-              onClick={onActivateMatch || (() => onNavigateTab('match'))}
-              className="w-full h-12 rounded-xl bg-[#F39200] hover:bg-[#E08400] text-black font-extrabold text-xs flex items-center justify-center gap-2 cursor-pointer shadow-lg shadow-[#F39200]/25 active:scale-[0.98] transition-all"
-            >
-              <Flame className="w-4 h-4 fill-black" />
-              ACTIVAR CACHENGUEOO MATCH
-            </button>
-          </div>
-        </div>
-      ) : (
-        /* FUERA DE CACHENGUEOO -> VALIDACIÓN GPS O QR */
-        <div className="bg-[#121217] border border-zinc-800 rounded-3xl p-5 shadow-xl relative overflow-hidden">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-[10px] uppercase font-bold tracking-widest text-[#F39200] flex items-center gap-1.5">
-              <MapPin className="w-3.5 h-3.5 text-[#F39200]" />
-              MENDOZA NIGHTLIFE
+          ) : (
+            <span className="flex items-center gap-1.5 text-xs font-black tracking-wider uppercase text-amber-300 bg-amber-950/50 px-3 py-1 rounded-full border border-amber-500/30">
+              <span className="w-2 h-2 rounded-full bg-amber-400 animate-ping"></span>
+              EN VIVO EN LA PISTA 🔥
             </span>
-            <span className="text-[10px] text-zinc-500">Mendoza · Argentina</span>
-          </div>
-
-          <h2 className="text-lg font-black text-white font-display uppercase tracking-tight">
-            ¿LLEGASTE A <span className="text-[#F39200]">CACHENGUEOO</span>?
-          </h2>
-          <p className="text-xs text-zinc-400 mt-1 max-w-sm leading-relaxed">
-            Validá tu presencia mediante GPS para desbloquear{' '}
-            <strong className="text-white">Cachengueoo Match</strong> y conectar con gente esta noche.
-          </p>
-
-          <div className="mt-4 space-y-2">
-            <button
-              onClick={onActivateMatch || (() => onNavigateTab('match'))}
-              className="w-full h-12 rounded-xl bg-[#F39200] hover:bg-[#E08400] text-black font-extrabold text-xs flex items-center justify-center gap-2 cursor-pointer shadow-lg shadow-[#F39200]/25 active:scale-[0.98] transition-all"
-            >
-              <Flame className="w-4 h-4 fill-black" />
-              ACTIVAR CACHENGUEOO MATCH (GPS)
-            </button>
-
-            <button
-              onClick={onOpenPresenceModal}
-              className="w-full h-10 rounded-xl bg-zinc-900 border border-zinc-700 hover:border-zinc-500 text-white font-bold text-xs flex items-center justify-center gap-1.5 cursor-pointer active:scale-95 transition-all"
-            >
-              <MapPin className="w-3.5 h-3.5 text-[#F39200]" />
-              Comprobar ubicación por GPS
-            </button>
-          </div>
+          )}
+          <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider">Cachengueoo Mendoza</span>
         </div>
-      )}
+
+        <h2 className="text-xl sm:text-2xl font-black text-white font-display uppercase tracking-tight mt-1">
+          CONECTÁ CON QUIÉN ESTÁ <span className="text-[#F39200]">ESTA NOCHE</span>
+        </h2>
+        <p className="text-xs text-zinc-300 mt-1 max-w-sm leading-relaxed">
+          Mirá los perfiles de la gente en el boliche, hacé match en tiempo real y compartan una copa.
+        </p>
+
+        {/* Botón de Match Titilando y Luminoso */}
+        <div className="mt-4 relative group">
+          {/* Halos de luz titilante expansivos */}
+          <div className="absolute -inset-1 rounded-2xl bg-gradient-to-r from-amber-500 via-[#F39200] to-rose-500 opacity-70 blur-md group-hover:opacity-100 animate-pulse transition duration-500 pointer-events-none" />
+          <div className="absolute -inset-0.5 rounded-2xl bg-white/20 blur-sm animate-ping opacity-40 pointer-events-none" />
+
+          <button
+            onClick={onActivateMatch || (() => onNavigateTab('match'))}
+            className="relative w-full h-13 rounded-2xl bg-gradient-to-r from-[#EA580C] via-[#F39200] to-[#FBBF24] hover:brightness-110 text-black font-black text-xs sm:text-sm uppercase tracking-wide flex items-center justify-center gap-2.5 cursor-pointer shadow-xl shadow-[#F39200]/30 active:scale-[0.98] transition-all overflow-hidden"
+          >
+            {/* Destello de luz pasando */}
+            <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/30 to-transparent -translate-x-full group-hover:translate-x-full transition-transform duration-1000 ease-out pointer-events-none" />
+            
+            <Flame className="w-5 h-5 fill-black stroke-black animate-pulse" />
+            <span>ENTRAR A MATCH</span>
+            <span className="text-xs bg-black/20 px-2 py-0.5 rounded-full font-bold">EN VIVO</span>
+          </button>
+        </div>
+      </div>
 
       {/* SECTION 2: PRÓXIMAS FECHAS */}
       {(() => {

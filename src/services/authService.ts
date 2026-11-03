@@ -258,6 +258,9 @@ export const authService = {
         const u = { ...DEFAULT_ADMIN_USER, email: cleanEmail };
         localStorage.setItem(USER_STORAGE_KEY, JSON.stringify(u));
         sessionStorage.setItem(USER_STORAGE_KEY, JSON.stringify(u));
+        localStorage.setItem('cachengueoo_cache_id_created', 'true');
+        sessionStorage.removeItem('cachengueoo_flow_intent');
+        localStorage.removeItem('cachengueoo_flow_intent');
         notifyAuthChange();
         return { success: true, user: u };
       }
@@ -302,6 +305,9 @@ export const authService = {
 
         localStorage.setItem(USER_STORAGE_KEY, JSON.stringify(u));
         sessionStorage.setItem(USER_STORAGE_KEY, JSON.stringify(u));
+        localStorage.setItem('cachengueoo_cache_id_created', 'true');
+        sessionStorage.removeItem('cachengueoo_flow_intent');
+        localStorage.removeItem('cachengueoo_flow_intent');
         notifyAuthChange();
         return { success: true, user: u };
       }
@@ -314,6 +320,9 @@ export const authService = {
     if (matchedLocal) {
       localStorage.setItem(USER_STORAGE_KEY, JSON.stringify(matchedLocal));
       sessionStorage.setItem(USER_STORAGE_KEY, JSON.stringify(matchedLocal));
+      localStorage.setItem('cachengueoo_cache_id_created', 'true');
+      sessionStorage.removeItem('cachengueoo_flow_intent');
+      localStorage.removeItem('cachengueoo_flow_intent');
       notifyAuthChange();
       return { success: true, user: matchedLocal };
     }
@@ -450,6 +459,9 @@ export const authService = {
 
         localStorage.setItem(USER_STORAGE_KEY, JSON.stringify(registeredProfile));
         sessionStorage.setItem(USER_STORAGE_KEY, JSON.stringify(registeredProfile));
+        localStorage.setItem('cachengueoo_cache_id_created', 'true');
+        sessionStorage.removeItem('cachengueoo_flow_intent');
+        localStorage.removeItem('cachengueoo_flow_intent');
 
         const allUsers = this.getAllUsers().filter((u) => u.id !== registeredProfile.id && u.email !== registeredProfile.email);
         allUsers.unshift(registeredProfile);
@@ -469,6 +481,9 @@ export const authService = {
     };
     localStorage.setItem(USER_STORAGE_KEY, JSON.stringify(localUser));
     sessionStorage.setItem(USER_STORAGE_KEY, JSON.stringify(localUser));
+    localStorage.setItem('cachengueoo_cache_id_created', 'true');
+    sessionStorage.removeItem('cachengueoo_flow_intent');
+    localStorage.removeItem('cachengueoo_flow_intent');
 
     const allUsers = this.getAllUsers().filter((u) => u.id !== localUser.id && u.email !== localUser.email);
     allUsers.unshift(localUser);
@@ -491,18 +506,6 @@ export const authService = {
     const cleanEmail = email.trim().toLowerCase();
     if (!cleanEmail) return { exists: false, isConfigured: false };
 
-    const isPlaceholderAvatar = (url?: string | null) => {
-      if (!url) return true;
-      if (url.includes('images.unsplash.com')) return true;
-      return false;
-    };
-
-    const isPlaceholderBirthDate = (date?: string | null) => {
-      if (!date) return true;
-      if (date === '2001-01-01' || date === '2000-01-01') return true;
-      return false;
-    };
-
     // 1. Consultar en Supabase profiles
     const client = getSupabaseClient();
     if (client) {
@@ -518,16 +521,7 @@ export const authService = {
             return { exists: false, isConfigured: false };
           }
 
-          const isConfigured = Boolean(
-            data.full_name &&
-            !isPlaceholderBirthDate(data.birth_date) &&
-            !isPlaceholderAvatar(data.avatar_url) &&
-            (
-              (Array.isArray(data.drinks) && data.drinks.length > 0) ||
-              data.zodiac_sign ||
-              (Array.isArray(data.interests) && data.interests.length > 0)
-            )
-          );
+          const isConfigured = Boolean((data.full_name && data.full_name.trim()) || (data.nickname && data.nickname.trim()));
 
           const profile: UserProfile = {
             id: data.id,
@@ -561,11 +555,7 @@ export const authService = {
         const docData = snap.docs[0].data();
         const docId = snap.docs[0].id;
         if (!excludeUserId || docId !== excludeUserId) {
-          const isConfigured = Boolean(
-            docData.full_name &&
-            !isPlaceholderBirthDate(docData.birth_date) &&
-            !isPlaceholderAvatar(docData.avatar_url)
-          );
+          const isConfigured = Boolean((docData.full_name && docData.full_name.trim()) || (docData.nickname && docData.nickname.trim()));
           const fsProfile: UserProfile = {
             id: docId,
             email: docData.email || cleanEmail,
@@ -595,11 +585,7 @@ export const authService = {
         (!excludeUserId || u.id !== excludeUserId)
     );
     if (local) {
-      const isConfigured = Boolean(
-        local.fullName &&
-        !isPlaceholderBirthDate(local.birthDate) &&
-        !isPlaceholderAvatar(local.avatarUrl)
-      );
+      const isConfigured = Boolean((local.fullName && local.fullName.trim()) || (local.nickname && local.nickname.trim()));
       return { exists: true, profile: local, isConfigured };
     }
 

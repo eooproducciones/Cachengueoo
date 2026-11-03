@@ -42,6 +42,7 @@ export function getVenueConfig(): VenueConfig {
  */
 export function saveVenueConfig(config: VenueConfig): void {
   try {
+    invalidateVenueSyncCache();
     localStorage.setItem(VENUE_STORAGE_KEY, JSON.stringify(config));
     
     // Al modificar locaciones o radio, invalidar presencia previa para forzar re-evaluación
@@ -156,10 +157,22 @@ export async function deleteVenueLocationFromSupabase(id: string): Promise<void>
   }
 }
 
+let lastVenueSyncTime = 0;
+const VENUE_SYNC_COOLDOWN_MS = 5 * 60 * 1000; // 5 minutos de cooldown
+
+export function invalidateVenueSyncCache(): void {
+  lastVenueSyncTime = 0;
+}
+
 /**
  * Descarga las locaciones activas desde Supabase (o Firestore) y actualiza el estado local
  */
-export async function syncVenueLocationsFromSupabase(): Promise<VenueLocation[] | null> {
+export async function syncVenueLocationsFromSupabase(force = false): Promise<VenueLocation[] | null> {
+  const now = Date.now();
+  if (!force && now - lastVenueSyncTime < VENUE_SYNC_COOLDOWN_MS) {
+    return getVenueConfig().locations || [];
+  }
+
   const supabase = getSupabaseClient();
   let dbRows: any[] = [];
 
@@ -169,6 +182,8 @@ export async function syncVenueLocationsFromSupabase(): Promise<VenueLocation[] 
       const { data, error } = await supabase
         .from('venue_locations')
         .select('*');
+
+      lastVenueSyncTime = Date.now();
 
       if (!error && Array.isArray(data)) {
         dbRows = data;

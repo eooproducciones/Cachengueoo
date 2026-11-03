@@ -42,6 +42,10 @@ export function cleanAvatarUrl(url?: string | null, name?: string): string {
   return "https://api.dicebear.com/7.x/initials/svg?seed=" + seed + "&backgroundColor=f39200&textColor=000000";
 }
 
+// Caché en memoria para optimizar rendimiento y evitar llamadas innecesarias a Supabase y Firestore
+const profileResolutionCache = new Map<string, { profile: MatchProfile; expiresAt: number }>();
+let cachedAvailableProfiles: { list: MatchProfile[]; timestamp: number; userId?: string } | null = null;
+
 export const matchService = {
   getDismissedProfileIds(currentUserId?: string): string[] {
     try {
@@ -72,6 +76,17 @@ export const matchService = {
   },
 
   async fetchAvailableProfiles(currentUserId?: string): Promise<MatchProfile[]> {
+    // Si ya consultamos los perfiles en los últimos 30 segundos, devolver de memoria inmediatamente
+    const now = Date.now();
+    if (
+      cachedAvailableProfiles &&
+      cachedAvailableProfiles.userId === currentUserId &&
+      now - cachedAvailableProfiles.timestamp < 30000 &&
+      cachedAvailableProfiles.list.length > 0
+    ) {
+      return cachedAvailableProfiles.list;
+    }
+
     const dismissed = this.getDismissedProfileIds(currentUserId);
     let blockedList: string[] = [];
     try {
@@ -126,10 +141,18 @@ export const matchService = {
                 : ['Reggaeton', 'Cumbia', 'Cuarteto'];
             const zodiacSign = row.zodiac_sign || unpacked.zodiacSign || undefined;
 
-            // Vigencia en Match de 8 horas:
-            const updatedAtMs = row.updated_at ? new Date(row.updated_at).getTime() : Date.now();
-            const isWithin8Hours = Date.now() - updatedAtMs <= 8 * 60 * 60 * 1000;
-            const isVerified = row.is_verified_in_venue === true || isWithin8Hours;
+            // Estricta presencia en Cachengueoo: solo usuarios verificados adentro del evento en las últimas 8 horas
+            const isVerifiedInVenue = row.is_verified_in_venue === true;
+            const verifiedTimeMs = row.verified_in_venue_at
+              ? new Date(row.verified_in_venue_at).getTime()
+              : row.updated_at
+              ? new Date(row.updated_at).getTime()
+              : 0;
+            const isWithin8Hours = Date.now() - verifiedTimeMs <= 8 * 60 * 60 * 1000;
+
+            if (!isVerifiedInVenue || !isWithin8Hours) {
+              return; // Si no está adentro del boliche esta noche, NUNCA debe salir en match
+            }
 
             loadedProfiles.push({
               userId: row.id,
@@ -144,7 +167,7 @@ export const matchService = {
               drinks,
               zodiacSign,
               musicPreferences,
-              verifiedInVenue: Boolean(isVerified),
+              verifiedInVenue: true,
               lastPresenceCheck: row.updated_at || new Date().toISOString(),
               instagram: row.instagram || undefined,
               gender: row.gender || undefined,
@@ -170,6 +193,19 @@ export const matchService = {
           if (dismissed.includes(docId) || (row.id && dismissed.includes(row.id))) return;
           if (blockedList.includes(docId) || (row.id && blockedList.includes(row.id))) return;
           if (row.email && blockedList.includes(row.email.toLowerCase())) return;
+
+          // Solo usuarios verificados adentro del boliche
+          const isVerifiedInVenue = row.is_verified_in_venue === true;
+          const verifiedTimeMs = row.verified_in_venue_at
+            ? new Date(row.verified_in_venue_at).getTime()
+            : row.updated_at
+            ? new Date(row.updated_at).getTime()
+            : 0;
+          const isWithin8Hours = Date.now() - verifiedTimeMs <= 8 * 60 * 60 * 1000;
+
+          if (!isVerifiedInVenue || !isWithin8Hours) {
+            return;
+          }
 
           seenUserIds.add(docId);
           if (row.id) seenUserIds.add(row.id);
@@ -220,8 +256,7 @@ export const matchService = {
       console.warn('Notice fetching profiles from Firestore:', e);
     }
 
-    // 2. Fusionar con perfiles registrados localmente para garantizar que usuarios creados
-    // recientemente en la fiesta aparezcan de inmediato durante al menos 8 horas
+    // 2. Fusionar con perfiles registrados localmente que hayan validado presencia en el boliche
     try {
       const savedUsers = localStorage.getItem('cachengueoo_registered_users');
       if (savedUsers) {
@@ -236,17 +271,29 @@ export const matchService = {
             if (u.email && blockedList.includes(u.email.toLowerCase())) continue;
             if (u.isAdmin || u.role === 'admin') continue;
 
+            const isVerifiedInVenue = u.isVerifiedInVenue === true || u.is_verified_in_venue === true;
+            const verifiedTimeMs = u.verifiedAt
+              ? new Date(u.verifiedAt).getTime()
+              : u.lastPresenceCheck
+              ? new Date(u.lastPresenceCheck).getTime()
+              : 0;
+            const isWithin8Hours = Date.now() - verifiedTimeMs <= 8 * 60 * 60 * 1000;
+
+            if (!isVerifiedInVenue || !isWithin8Hours) {
+              continue;
+            }
+
             seenUserIds.add(u.id);
             if (u.email) seenUserIds.add(u.email.toLowerCase());
 
             const avatar =
               u.avatarUrl ||
               (u.photos && u.photos[0]) ||
-              'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=500&auto=format&fit=crop&q=80';
+              '';
             const photos =
               Array.isArray(u.photos) && u.photos.length > 0
                 ? u.photos.slice(0, 3)
-                : [avatar];
+                : [avatar].filter(Boolean);
             const drinks =
               u.drinks && u.drinks.length > 0
                 ? u.drinks
@@ -283,6 +330,12 @@ export const matchService = {
     } catch (e) {
       console.warn('Error reading local registered users for match:', e);
     }
+
+    cachedAvailableProfiles = {
+      list: loadedProfiles,
+      timestamp: Date.now(),
+      userId: currentUserId,
+    };
 
     return loadedProfiles;
   },
@@ -365,14 +418,54 @@ export const matchService = {
   ): Promise<MatchProfile | null> {
     if (!userId) return null;
 
-    // 1. Usuarios registrados locales
+    // 1. Caché en memoria inmediato (TTL 5 minutos): Cero latencia y cero llamadas de red repetidas
+    const cached = profileResolutionCache.get(userId);
+    if (cached && Date.now() < cached.expiresAt) {
+      return cached.profile;
+    }
+
+    // 2. Si embeddedFallback ya contiene el perfil completo, resolverlo de inmediato sin consultar la DB
+    if (embeddedFallback && embeddedFallback.fullName && (embeddedFallback.avatarUrl || (embeddedFallback.photos && embeddedFallback.photos.length > 0))) {
+      const av = cleanAvatarUrl(embeddedFallback.avatarUrl, embeddedFallback.fullName);
+      const photos = embeddedFallback.photos && embeddedFallback.photos.length > 0
+        ? embeddedFallback.photos.filter((p: string) => !p.includes('images.unsplash.com'))
+        : [av];
+      const drinks = embeddedFallback.drinks && embeddedFallback.drinks.length > 0
+        ? embeddedFallback.drinks
+        : embeddedFallback.drinkFavorite ? [embeddedFallback.drinkFavorite] : ['Fernet'];
+
+      const resolvedEmbedded: MatchProfile = {
+        userId,
+        fullName: embeddedFallback.fullName,
+        nickname: embeddedFallback.nickname || embeddedFallback.fullName,
+        age: Number(embeddedFallback.age) || 23,
+        avatarUrl: photos[0] || av,
+        photos: photos.length > 0 ? photos : [av],
+        bio: embeddedFallback.bio || '',
+        interests: embeddedFallback.interests || drinks,
+        drinkFavorite: embeddedFallback.drinkFavorite || drinks.join(' & '),
+        drinks,
+        zodiacSign: embeddedFallback.zodiacSign,
+        musicPreferences: embeddedFallback.musicPreferences || ['Reggaeton', 'Cumbia'],
+        verifiedInVenue: true,
+        lastPresenceCheck: embeddedFallback.lastPresenceCheck || new Date().toISOString(),
+        instagram: embeddedFallback.instagram,
+        gender: embeddedFallback.gender,
+        nightNote: embeddedFallback.nightNote,
+      };
+
+      profileResolutionCache.set(userId, { profile: resolvedEmbedded, expiresAt: Date.now() + 5 * 60 * 1000 });
+      return resolvedEmbedded;
+    }
+
+    // 3. Usuarios registrados locales
     let localData: any = null;
     try {
       const all: any[] = JSON.parse(localStorage.getItem('cachengueoo_registered_users') || '[]');
       localData = all.find((u) => u.id === userId || (u.email && u.email === userId));
     } catch {}
 
-    // 2. Base de datos Supabase
+    // 4. Base de datos Supabase
     let supaData: any = null;
     const client = getSupabaseClient();
     if (client) {
@@ -382,7 +475,7 @@ export const matchService = {
       } catch {}
     }
 
-    // 3. Base de datos Firestore
+    // 5. Base de datos Firestore
     let fsData: any = null;
     try {
       const snap = await getDoc(doc(db, 'profiles', userId));
@@ -438,7 +531,7 @@ export const matchService = {
         ? source.musicPreferences
         : embeddedFallback?.musicPreferences || ['Reggaeton', 'Cumbia'];
 
-    return {
+    const result: MatchProfile = {
       userId,
       fullName,
       nickname,
@@ -457,6 +550,9 @@ export const matchService = {
       gender: source.gender || embeddedFallback?.gender,
       nightNote: source.nightNote || source.night_note,
     };
+
+    profileResolutionCache.set(userId, { profile: result, expiresAt: Date.now() + 5 * 60 * 1000 });
+    return result;
   },
 
   async registerSwipe(

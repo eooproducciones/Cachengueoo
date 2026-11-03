@@ -300,16 +300,18 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     }, 6000);
 
     try {
-      // Registrar la intención de configurar el Cache ID al retornar
+      // Registrar la intención temporal únicamente en sessionStorage para esta pestaña
       sessionStorage.setItem('cachengueoo_flow_intent', 'configure_cache_id');
-      localStorage.setItem('cachengueoo_flow_intent', 'configure_cache_id');
+      localStorage.removeItem('cachengueoo_flow_intent');
       const res = await authService.signInWithGoogle();
       if (!res.success) {
+        sessionStorage.removeItem('cachengueoo_flow_intent');
         clearTimeout(safetyTimeout);
         setErrorMessage(res.message || 'Error al conectar con Google.');
         setIsSubmitting(false);
       }
     } catch (err: unknown) {
+      sessionStorage.removeItem('cachengueoo_flow_intent');
       clearTimeout(safetyTimeout);
       setErrorMessage(err instanceof Error ? err.message : 'Error al conectar con Google');
       setIsSubmitting(false);
@@ -574,6 +576,9 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     try {
       const result = await authService.loginWithCredentials(loginEmail, loginPassword);
       if (result.success && result.user) {
+        localStorage.setItem('cachengueoo_cache_id_created', 'true');
+        sessionStorage.removeItem('cachengueoo_flow_intent');
+        localStorage.removeItem('cachengueoo_flow_intent');
         onAuthSuccess(result.user);
         setRegisteredUser(result.user);
         onClose();
