@@ -17,7 +17,8 @@ import {
   Wine,
   Cake,
   ShieldCheck,
-  CheckCircle2
+  CheckCircle2,
+  Flame,
 } from 'lucide-react';
 import { RPProfile, ClubEvent, UserProfile } from '../../types';
 import {
@@ -36,11 +37,13 @@ import { eventService } from '../../services/eventService';
 interface RPProfileSectionProps {
   currentUser: UserProfile;
   onRefreshUser?: () => void;
+  onSwitchToMatchProfile?: () => void;
 }
 
 export const RPProfileSection: React.FC<RPProfileSectionProps> = ({
   currentUser,
   onRefreshUser,
+  onSwitchToMatchProfile,
 }) => {
   const [rpProfile, setRpProfile] = useState<RPProfile | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -186,15 +189,29 @@ export const RPProfileSection: React.FC<RPProfileSectionProps> = ({
   };
 
   const handleSaveEventLink = async (eventId: string) => {
-    if (!rpProfile) {
-      setProfileErrorMsg('Debes guardar primero tu perfil de RP antes de configurar enlaces.');
-      return;
+    let currentRp = rpProfile;
+    if (!currentRp) {
+      const initSlug = sanitizeSlug(slug || currentUser.fullName || 'rp');
+      const cleanPhone = sanitizeWhatsApp(whatsapp || currentUser.phone || '2615651192');
+      const createRes = await updateRPProfile(currentUser.id, {
+        publicName: publicName || currentUser.fullName || 'Promotor Oficial',
+        slug: initSlug || `rp-${currentUser.id.substring(0, 5)}`,
+        whatsapp: cleanPhone || '5492615651192',
+        instagram: instagram || undefined,
+      });
+      if (createRes.success && createRes.rpProfile) {
+        currentRp = createRes.rpProfile;
+        setRpProfile(currentRp);
+      } else {
+        setProfileErrorMsg(createRes.error || 'Por favor completá tus datos de promotor antes de guardar enlaces.');
+        return;
+      }
     }
 
     const urlToSave = (eventLinks[eventId] || '').trim();
     setSavingEventId(eventId);
     try {
-      const res = await saveRPEventLink(rpProfile.id, eventId, urlToSave);
+      const res = await saveRPEventLink(currentRp.id, eventId, urlToSave);
       if (res.success) {
         setEventSuccessMsg((prev) => ({ ...prev, [eventId]: true }));
         setTimeout(() => {
@@ -244,9 +261,22 @@ export const RPProfileSection: React.FC<RPProfileSectionProps> = ({
             </div>
           </div>
 
-          <div className="text-left sm:text-right">
-            <span className="text-[10px] text-zinc-400 block font-semibold">Estado de afiliado</span>
-            <span className="text-xs font-bold text-white">Activo y Generando Ventas</span>
+          <div className="flex flex-wrap items-center gap-3">
+            {onSwitchToMatchProfile && (
+              <button
+                type="button"
+                onClick={onSwitchToMatchProfile}
+                className="h-10 px-3.5 rounded-xl bg-zinc-900 border border-zinc-700/80 hover:border-[#F39200] text-zinc-200 hover:text-white text-xs font-bold flex items-center gap-1.5 cursor-pointer transition-all shadow-sm active:scale-95"
+              >
+                <Flame className="w-4 h-4 text-[#F39200]" />
+                <span>Ver Mi Perfil Match</span>
+              </button>
+            )}
+
+            <div className="text-left sm:text-right">
+              <span className="text-[10px] text-zinc-400 block font-semibold">Estado de afiliado</span>
+              <span className="text-xs font-bold text-white">Activo y Generando Ventas</span>
+            </div>
           </div>
         </div>
 

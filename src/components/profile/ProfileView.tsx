@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { RPApplicationModal } from './RPApplicationModal';
 import { RPProfileSection } from './RPProfileSection';
-import { getUserRPApplication } from '../../services/rpService';
+import { getUserRPApplication, getRPProfileByUserId } from '../../services/rpService';
+import { RPProfile } from '../../types';
 import {
   User,
   Cake,
@@ -98,55 +99,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
   }
 
   // ==========================================================
-  // PERFIL ADMINISTRADOR (PASA DIRECTO AL PANEL DE ADMINISTRADOR)
-  // ==========================================================
-  if (currentUser.isAdmin || currentUser.role === 'admin') {
-    return (
-      <div className="max-w-xl mx-auto px-4 py-8 space-y-6">
-        <div className="bg-[#121217] border border-amber-500/40 rounded-3xl p-6 sm:p-8 shadow-2xl text-center space-y-5">
-          <div className="w-16 h-16 rounded-3xl bg-amber-500/15 border border-amber-500/40 flex items-center justify-center mx-auto text-amber-400 shadow-lg shadow-amber-500/20">
-            <ShieldCheck className="w-8 h-8" />
-          </div>
-
-          <div className="space-y-2">
-            <span className="text-[10px] uppercase font-bold text-[#F39200] tracking-widest block">
-              CUENTA STAFF
-            </span>
-            <h2 className="text-xl sm:text-2xl font-black text-white font-display uppercase tracking-tight">
-              PERFIL DE <span className="text-[#F39200]">ADMINISTRADOR</span>
-            </h2>
-            <p className="text-xs text-zinc-400 max-w-sm mx-auto leading-relaxed">
-              Esta cuenta es de administrador. Pasa directamente al panel de control para crear eventos, alianzas de beneficios y control del boliche.
-            </p>
-          </div>
-
-          <div className="space-y-3 pt-2">
-            <button
-              type="button"
-              onClick={() => {
-                if (onEnterAdmin) onEnterAdmin();
-                else window.location.hash = '#admin';
-              }}
-              className="w-full h-12 rounded-2xl bg-[#F39200] hover:bg-[#E08400] text-black font-extrabold text-xs sm:text-sm flex items-center justify-center gap-2 cursor-pointer shadow-lg shadow-[#F39200]/25 active:scale-[0.98] transition-all"
-            >
-              <KeyRound className="w-4 h-4" />
-              <span>Abrir Panel de Administrador</span>
-            </button>
-            <button
-              type="button"
-              onClick={onLogout}
-              className="w-full h-10 rounded-xl bg-zinc-900 border border-zinc-800 hover:border-zinc-700 text-zinc-400 hover:text-white text-xs font-bold cursor-pointer transition-colors"
-            >
-              Cerrar Sesión de Administrador
-            </button>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  // ==========================================================
-  // ESTADO LOGUEADO (USUARIO COMÚN)
+  // ESTADO LOGUEADO (USUARIO COMÚN, RP O ADMINISTRADOR)
   // ==========================================================
   const userPhotos =
     currentUser.photos && currentUser.photos.length > 0
@@ -160,20 +113,34 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
       ? currentUser.drinkFavorite.split(/ & | y |, /).filter(Boolean)
       : ['Fernet', 'Skyy'];
 
-  const isRpUser = currentUser.role === 'rp' || currentUser.isRp === true || currentUser.rpStatus === 'approved';
-  const [activeProfileTab, setActiveProfileTab] = useState<'match' | 'publica'>('match');
+  const [rpProfile, setRpProfile] = useState<RPProfile | null>(null);
+  const [activeProfileTab, setActiveProfileTab] = useState<'match' | 'promotor'>('match');
   const [showRPApplicationModal, setShowRPApplicationModal] = useState(false);
   const [rpAppStatus, setRpAppStatus] = useState<string | null>(currentUser.rpStatus || null);
 
   useEffect(() => {
-    if (!isRpUser && currentUser.id) {
+    if (currentUser?.id) {
+      getRPProfileByUserId(currentUser.id).then((prof) => {
+        if (prof) {
+          setRpProfile(prof);
+        }
+      });
       getUserRPApplication(currentUser.id).then((app) => {
         if (app) {
           setRpAppStatus(app.status);
         }
       });
     }
-  }, [currentUser.id, isRpUser]);
+  }, [currentUser?.id]);
+
+  const isRpUser = Boolean(
+    currentUser.role === 'rp' ||
+    currentUser.isRp === true ||
+    currentUser.rpStatus === 'approved' ||
+    rpProfile?.status === 'approved' ||
+    currentUser.isAdmin ||
+    currentUser.role === 'admin'
+  );
 
   const [isEditing, setIsEditing] = useState(false);
   const [showMatchPreview, setShowMatchPreview] = useState(false);
@@ -324,39 +291,130 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
 
   return (
     <div className="max-w-xl mx-auto px-4 py-4 space-y-5">
-      {/* Pestañas de Perfil para Relaciones Públicas */}
-      {isRpUser && (
-        <div className="flex items-center p-1.5 rounded-2xl bg-[#121217] border border-amber-500/30 shadow-xl gap-1">
+      {/* Banner de Acceso a Administrador (si la cuenta es staff) */}
+      {(currentUser.isAdmin || currentUser.role === 'admin') && (
+        <div className="p-3.5 rounded-2xl bg-gradient-to-r from-amber-500/15 via-[#F39200]/20 to-amber-500/10 border border-[#F39200]/50 flex items-center justify-between gap-3 shadow-lg shadow-[#F39200]/10">
+          <div className="flex items-center gap-2.5">
+            <div className="w-8 h-8 rounded-xl bg-[#F39200] text-black flex items-center justify-center font-black shrink-0">
+              <ShieldCheck className="w-4 h-4" />
+            </div>
+            <div>
+              <span className="text-[10px] uppercase font-bold text-[#F39200] tracking-wider block">
+                Cuenta Staff Administrador
+              </span>
+              <span className="text-xs font-bold text-white block">
+                Tenés control total del club
+              </span>
+            </div>
+          </div>
           <button
             type="button"
-            onClick={() => setActiveProfileTab('match')}
-            className={`flex-1 py-2.5 rounded-xl font-display uppercase tracking-wider text-xs font-black transition-all cursor-pointer ${
-              activeProfileTab === 'match'
-                ? 'bg-[#F39200] text-black shadow-lg shadow-[#F39200]/25'
-                : 'text-zinc-400 hover:text-white hover:bg-zinc-900/60'
-            }`}
+            onClick={() => {
+              if (onEnterAdmin) onEnterAdmin();
+              else window.location.hash = '#admin';
+            }}
+            className="px-3.5 py-1.5 rounded-xl bg-[#F39200] hover:bg-[#E08400] text-black font-extrabold text-xs flex items-center gap-1.5 cursor-pointer shadow-md transition-all active:scale-95 shrink-0"
           >
-            1. Perfil Match
-          </button>
-          <button
-            type="button"
-            onClick={() => setActiveProfileTab('publica')}
-            className={`flex-1 py-2.5 rounded-xl font-display uppercase tracking-wider text-xs font-black transition-all cursor-pointer ${
-              activeProfileTab === 'publica'
-                ? 'bg-[#F39200] text-black shadow-lg shadow-[#F39200]/25'
-                : 'text-zinc-400 hover:text-white hover:bg-zinc-900/60'
-            }`}
-          >
-            2. Perfil Pública (RP)
+            <KeyRound className="w-3.5 h-3.5" />
+            <span>Panel Admin</span>
           </button>
         </div>
       )}
 
-      {/* Si es RP y seleccionó Perfil Pública, mostrar el panel de RP */}
-      {isRpUser && activeProfileTab === 'publica' ? (
+      {/* Selector Principal de Opciones: Mi Perfil Match vs Panel de Promotor */}
+      {isRpUser && (
+        <div className="space-y-2">
+          <span className="text-[10px] uppercase font-bold text-zinc-400 tracking-widest px-1 block">
+            Elegí una sección para gestionar:
+          </span>
+          <div className="grid grid-cols-2 gap-3">
+            {/* OPCIÓN 1: MI PERFIL MATCH */}
+            <button
+              type="button"
+              onClick={() => setActiveProfileTab('match')}
+              className={`p-4 rounded-3xl border transition-all text-left flex flex-col justify-between cursor-pointer relative overflow-hidden group ${
+                activeProfileTab === 'match'
+                  ? 'bg-gradient-to-br from-zinc-900 to-[#121217] border-[#F39200] shadow-lg shadow-[#F39200]/20 ring-2 ring-[#F39200]'
+                  : 'bg-[#121217] border-zinc-800 hover:border-zinc-700 opacity-70 hover:opacity-100'
+              }`}
+            >
+              <div className="flex items-center justify-between mb-3">
+                <div
+                  className={`w-10 h-10 rounded-2xl flex items-center justify-center ${
+                    activeProfileTab === 'match'
+                      ? 'bg-[#F39200] text-black shadow-md'
+                      : 'bg-zinc-800 text-zinc-400'
+                  }`}
+                >
+                  <Flame className="w-5 h-5 fill-current" />
+                </div>
+                {activeProfileTab === 'match' && (
+                  <span className="px-2 py-0.5 rounded-full bg-[#F39200] text-black text-[9px] font-black uppercase">
+                    Viendo
+                  </span>
+                )}
+              </div>
+              <div>
+                <span className="text-[10px] uppercase font-bold text-[#F39200] tracking-wider block">
+                  OPCIÓN 1
+                </span>
+                <h3 className="text-sm sm:text-base font-black text-white uppercase font-display tracking-tight">
+                  Mi Perfil Match
+                </h3>
+                <p className="text-[10px] text-zinc-400 mt-0.5 leading-snug">
+                  Fotos, tragos y gustos de fiesta
+                </p>
+              </div>
+            </button>
+
+            {/* OPCIÓN 2: PANEL DE PROMOTOR */}
+            <button
+              type="button"
+              onClick={() => setActiveProfileTab('promotor')}
+              className={`p-4 rounded-3xl border transition-all text-left flex flex-col justify-between cursor-pointer relative overflow-hidden group ${
+                activeProfileTab === 'promotor'
+                  ? 'bg-gradient-to-br from-zinc-900 to-[#121217] border-amber-400 shadow-lg shadow-amber-500/20 ring-2 ring-amber-400'
+                  : 'bg-[#121217] border-zinc-800 hover:border-zinc-700 opacity-70 hover:opacity-100'
+              }`}
+            >
+              <div className="flex items-center justify-between mb-3">
+                <div
+                  className={`w-10 h-10 rounded-2xl flex items-center justify-center ${
+                    activeProfileTab === 'promotor'
+                      ? 'bg-amber-400 text-black shadow-md'
+                      : 'bg-zinc-800 text-zinc-400'
+                  }`}
+                >
+                  <Sparkles className="w-5 h-5" />
+                </div>
+                {activeProfileTab === 'promotor' && (
+                  <span className="px-2 py-0.5 rounded-full bg-amber-400 text-black text-[9px] font-black uppercase">
+                    Viendo
+                  </span>
+                )}
+              </div>
+              <div>
+                <span className="text-[10px] uppercase font-bold text-amber-400 tracking-wider block">
+                  OPCIÓN 2
+                </span>
+                <h3 className="text-sm sm:text-base font-black text-white uppercase font-display tracking-tight">
+                  Panel de Promotor
+                </h3>
+                <p className="text-[10px] text-zinc-400 mt-0.5 leading-snug">
+                  Passline, WhatsApp y Métricas
+                </p>
+              </div>
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Si seleccionó Panel de Promotor, mostrar el panel de RP completo */}
+      {isRpUser && activeProfileTab === 'promotor' ? (
         <RPProfileSection
           currentUser={currentUser}
           onRefreshUser={() => onUpdateProfile({})}
+          onSwitchToMatchProfile={() => setActiveProfileTab('match')}
         />
       ) : (
         <>
@@ -638,6 +696,32 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
               <span className="text-[#F39200] font-black text-sm">→</span>
             </button>
           )
+        )}
+
+        {/* Acceso directo al Panel de Promotor para usuarios RP y administradores */}
+        {isRpUser && (
+          <button
+            type="button"
+            onClick={() => setActiveProfileTab('promotor')}
+            className="w-full p-4 rounded-2xl bg-gradient-to-r from-amber-500/15 via-[#F39200]/20 to-amber-500/10 border border-amber-400/60 hover:border-amber-400 flex items-center justify-between text-xs text-white cursor-pointer transition-all shadow-md group"
+          >
+            <div className="flex items-center gap-2.5">
+              <div className="w-8 h-8 rounded-xl bg-amber-400 text-black flex items-center justify-center font-black group-hover:scale-105 transition-transform">
+                <Sparkles className="w-4 h-4" />
+              </div>
+              <div className="text-left">
+                <span className="font-black text-white uppercase tracking-wider block">
+                  Panel de Promotor (RP)
+                </span>
+                <span className="text-[11px] text-zinc-300">
+                  Links Passline, WhatsApp, URL personalizada y métricas
+                </span>
+              </div>
+            </div>
+            <span className="text-amber-400 font-black text-xs px-2.5 py-1 rounded-lg bg-amber-400/20 group-hover:bg-amber-400 group-hover:text-black transition-all">
+              Abrir Panel →
+            </span>
+          </button>
         )}
 
         {/* Solo para administradores: en perfil de usuario NO estará habilitado */}
