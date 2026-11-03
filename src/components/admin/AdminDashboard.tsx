@@ -324,8 +324,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onExitAdmin, onL
   }, [adminTab]);
 
   React.useEffect(() => {
-    eventService.syncEventsFromSupabase().then(setEvents).catch(() => {});
-    benefitService.syncBenefitsFromSupabase().then(setBenefits).catch(() => {});
+    eventService.syncEventsFromCloud(true).then(setEvents).catch(() => {});
+    benefitService.syncBenefitsFromCloud(true).then(setBenefits).catch(() => {});
 
     const handleEventsChange = () => setEvents(eventService.getEvents());
     const handleBenefitsChange = () => setBenefits(benefitService.getBenefits());

@@ -29,9 +29,11 @@ export const TicketsView: React.FC<TicketsViewProps> = ({ currentUser }) => {
     window.addEventListener('cachengueoo_events_updated', handleEventsChange);
     window.addEventListener('storage', handleEventsChange);
 
-    eventService.syncEventsFromSupabase().then(setRawEvents).catch(() => {});
+    const unsub = eventService.subscribeToEvents((evts) => setRawEvents(evts));
+    eventService.syncEventsFromCloud(true).then(setRawEvents).catch(() => {});
 
     return () => {
+      unsub();
       window.removeEventListener('cachengueoo_events_updated', handleEventsChange);
       window.removeEventListener('storage', handleEventsChange);
     };

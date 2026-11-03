@@ -95,6 +95,26 @@
         "expiresAt": { "type": "string", "format": "date-time" }
       },
       "required": ["id", "userId", "userName", "mediaUrl", "mediaType"]
+    },
+    "ClubBenefit": {
+      "title": "ClubBenefit",
+      "description": "Club partner benefits and promotions",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string", "maxLength": 100 },
+        "partnerName": { "type": "string", "maxLength": 100 },
+        "highlightBadge": { "type": "string", "maxLength": 50 },
+        "description": { "type": "string", "maxLength": 500 },
+        "promoCode": { "type": "string", "maxLength": 50 },
+        "actionUrl": { "type": "string" },
+        "actionType": { "type": "string", "enum": ["whatsapp", "web"] },
+        "actionLabel": { "type": "string", "maxLength": 50 },
+        "category": { "type": "string" },
+        "imageUrl": { "type": "string" },
+        "active": { "type": "boolean" }
+      },
+      "required": ["id", "title", "actionUrl"]
     }
   },
   "firestore": {
@@ -105,6 +125,10 @@
     "/events/{eventId}": {
       "schema": "ClubEvent",
       "description": "Party events and schedules"
+    },
+    "/benefits/{benefitId}": {
+      "schema": "ClubBenefit",
+      "description": "Club benefits and promotions"
     },
     "/venue_locations/{locationId}": {
       "schema": "VenueLocation",

@@ -88,5 +88,10 @@ service cloud.firestore {
     match /rp_activity_logs/{logId} {
       allow read, write: if true;
     }
+
+    // 9. Club Benefits
+    match /benefits/{benefitId} {
+      allow read, write: if true;
+    }
   }
 }

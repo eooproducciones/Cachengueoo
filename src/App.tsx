@@ -88,8 +88,11 @@ export default function App() {
     window.addEventListener('storage', handleEventsChange);
     window.addEventListener('storage', handleBenefitsChange);
 
-    eventService.syncEventsFromSupabase().then(setEvents).catch(() => {});
-    benefitService.syncBenefitsFromSupabase().then(setBenefits).catch(() => {});
+    const unsubEvents = eventService.subscribeToEvents((evts) => setEvents(evts));
+    const unsubBenefits = benefitService.subscribeToBenefits((bens) => setBenefits(bens));
+
+    eventService.syncEventsFromCloud(true).then(setEvents).catch(() => {});
+    benefitService.syncBenefitsFromCloud(true).then(setBenefits).catch(() => {});
 
     const handleToast = (e: any) => {
       if (e.detail) showToast(e.detail);
@@ -97,6 +100,8 @@ export default function App() {
     window.addEventListener('cachengueoo_show_toast', handleToast);
 
     return () => {
+      unsubEvents();
+      unsubBenefits();
       window.removeEventListener('cachengueoo_events_updated', handleEventsChange);
       window.removeEventListener('cachengueoo_benefits_updated', handleBenefitsChange);
       window.removeEventListener('storage', handleEventsChange);
