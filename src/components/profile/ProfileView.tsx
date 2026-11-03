@@ -1,4 +1,7 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
+import { RPApplicationModal } from './RPApplicationModal';
+import { RPProfileSection } from './RPProfileSection';
+import { getUserRPApplication } from '../../services/rpService';
 import {
   User,
   Cake,
@@ -157,6 +160,21 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
       ? currentUser.drinkFavorite.split(/ & | y |, /).filter(Boolean)
       : ['Fernet', 'Skyy'];
 
+  const isRpUser = currentUser.role === 'rp' || currentUser.isRp === true || currentUser.rpStatus === 'approved';
+  const [activeProfileTab, setActiveProfileTab] = useState<'match' | 'publica'>('match');
+  const [showRPApplicationModal, setShowRPApplicationModal] = useState(false);
+  const [rpAppStatus, setRpAppStatus] = useState<string | null>(currentUser.rpStatus || null);
+
+  useEffect(() => {
+    if (!isRpUser && currentUser.id) {
+      getUserRPApplication(currentUser.id).then((app) => {
+        if (app) {
+          setRpAppStatus(app.status);
+        }
+      });
+    }
+  }, [currentUser.id, isRpUser]);
+
   const [isEditing, setIsEditing] = useState(false);
   const [showMatchPreview, setShowMatchPreview] = useState(false);
   const [previewPhotoIndex, setPreviewPhotoIndex] = useState(0);
@@ -306,10 +324,46 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
 
   return (
     <div className="max-w-xl mx-auto px-4 py-4 space-y-5">
-      {/* Profile Header Card */}
-      <div className="bg-[#121217] border border-zinc-800 rounded-3xl p-5 sm:p-6 shadow-xl relative overflow-hidden">
-        {/* Subtle orange aura */}
-        <div className="absolute top-0 right-0 w-36 h-36 bg-[#F39200]/10 rounded-full blur-2xl pointer-events-none" />
+      {/* Pestañas de Perfil para Relaciones Públicas */}
+      {isRpUser && (
+        <div className="flex items-center p-1.5 rounded-2xl bg-[#121217] border border-amber-500/30 shadow-xl gap-1">
+          <button
+            type="button"
+            onClick={() => setActiveProfileTab('match')}
+            className={`flex-1 py-2.5 rounded-xl font-display uppercase tracking-wider text-xs font-black transition-all cursor-pointer ${
+              activeProfileTab === 'match'
+                ? 'bg-[#F39200] text-black shadow-lg shadow-[#F39200]/25'
+                : 'text-zinc-400 hover:text-white hover:bg-zinc-900/60'
+            }`}
+          >
+            1. Perfil Match
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveProfileTab('publica')}
+            className={`flex-1 py-2.5 rounded-xl font-display uppercase tracking-wider text-xs font-black transition-all cursor-pointer ${
+              activeProfileTab === 'publica'
+                ? 'bg-[#F39200] text-black shadow-lg shadow-[#F39200]/25'
+                : 'text-zinc-400 hover:text-white hover:bg-zinc-900/60'
+            }`}
+          >
+            2. Perfil Pública (RP)
+          </button>
+        </div>
+      )}
+
+      {/* Si es RP y seleccionó Perfil Pública, mostrar el panel de RP */}
+      {isRpUser && activeProfileTab === 'publica' ? (
+        <RPProfileSection
+          currentUser={currentUser}
+          onRefreshUser={() => onUpdateProfile({})}
+        />
+      ) : (
+        <>
+          {/* Profile Header Card */}
+          <div className="bg-[#121217] border border-zinc-800 rounded-3xl p-5 sm:p-6 shadow-xl relative overflow-hidden">
+            {/* Subtle orange aura */}
+            <div className="absolute top-0 right-0 w-36 h-36 bg-[#F39200]/10 rounded-full blur-2xl pointer-events-none" />
 
         <div className="flex items-start justify-between gap-3">
           <div className="flex items-center gap-4">
@@ -544,6 +598,47 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
           </span>
           <span className="text-zinc-500">→</span>
         </button>
+
+        {/* Sección QUIERO SER RELACIÓN PÚBLICA (para usuarios no RP) */}
+        {!isRpUser && (
+          rpAppStatus === 'pending' ? (
+            <div className="p-4 rounded-2xl bg-amber-500/10 border border-amber-500/30 flex items-start gap-3">
+              <div className="w-8 h-8 rounded-xl bg-amber-500/20 text-[#F39200] flex items-center justify-center shrink-0 mt-0.5">
+                <Sparkles className="w-4 h-4" />
+              </div>
+              <div>
+                <span className="text-[10px] font-bold uppercase tracking-wider text-amber-400 block">
+                  POSTULACIÓN EN REVISIÓN
+                </span>
+                <h4 className="text-xs font-bold text-white">Solicitud de RP pendiente de aprobación</h4>
+                <p className="text-[11px] text-zinc-400 mt-0.5 leading-relaxed">
+                  El equipo de administración de Cachengueoo está revisando tus datos. En cuanto sea aprobada, se activará tu pestaña de Perfil Pública.
+                </p>
+              </div>
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setShowRPApplicationModal(true)}
+              className="w-full p-4 rounded-2xl bg-gradient-to-r from-amber-500/15 via-[#F39200]/20 to-amber-500/10 border border-[#F39200]/50 hover:border-[#F39200] flex items-center justify-between text-xs text-white cursor-pointer transition-all shadow-lg shadow-[#F39200]/10 group"
+            >
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-xl bg-[#F39200] text-black flex items-center justify-center font-black group-hover:scale-105 transition-transform">
+                  <Sparkles className="w-4 h-4" />
+                </div>
+                <div className="text-left">
+                  <span className="font-black text-white uppercase tracking-wider block">
+                    QUIERO SER RELACIÓN PÚBLICA
+                  </span>
+                  <span className="text-[11px] text-zinc-300">
+                    Obtené tu enlace propio, vendé con Passline y recibí consultas
+                  </span>
+                </div>
+              </div>
+              <span className="text-[#F39200] font-black text-sm">→</span>
+            </button>
+          )
+        )}
 
         {/* Solo para administradores: en perfil de usuario NO estará habilitado */}
         {currentUser.isAdmin && (
@@ -1084,6 +1179,21 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
             </div>
           </div>
         </div>
+      )}
+        </>
+      )}
+
+      {/* Modal para postularse como Relación Pública */}
+      {showRPApplicationModal && (
+        <RPApplicationModal
+          currentUser={currentUser}
+          isOpen={showRPApplicationModal}
+          onClose={() => setShowRPApplicationModal(false)}
+          onApplicationSubmitted={(app) => {
+            setRpAppStatus('pending');
+            setShowRPApplicationModal(false);
+          }}
+        />
       )}
     </div>
   );

@@ -14,6 +14,7 @@ import {
   PartyPopper,
 } from 'lucide-react';
 import { UserProfile } from '../../types';
+import { getActiveRPAttribution, logRPActivity } from '../../services/rpService';
 
 interface TableReservationViewProps {
   currentUser: UserProfile | null;
@@ -69,8 +70,44 @@ Mujeres +23 | Hombres +25 | General menores de 45 años
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
 
-    const msg = buildWhatsAppMessage();
-    const waUrl = `https://wa.me/5492615651192?text=${encodeURIComponent(msg)}`;
+    const activeRP = getActiveRPAttribution();
+    const phone = activeRP?.whatsapp || '5492615651192';
+    if (activeRP) {
+      logRPActivity(activeRP.rpId, 'reservation_click');
+    }
+
+    const greeting = activeRP
+      ? `¡Hola ${activeRP.publicName}! Quiero hacer una reserva de mesa en Cache.`
+      : `¡Hola! Quiero hacer una reserva de mesa en Cache.`;
+
+    const igHandle = formData.instagram.trim()
+      ? formData.instagram.startsWith('@')
+        ? formData.instagram.trim()
+        : `@${formData.instagram.trim()}`
+      : 'No especificado';
+
+    const msg = `${greeting}
+
+👥 Mínimo: 5 personas
+🍕 1 pizza cada 5 personas (máximo 4)
+🍾 1 combo a elección
+🍷 Degustación de vinos: 23:00 a 00:00 hs
+💰 Valor: $15.000 por persona
+
+🕙 Viernes: apertura 22:00 hs
+🕘 Sábados: apertura 21:00 hs
+🎟️ QR válido hasta las 23:30 hs. Luego de ese horario se abona diferencia en taquilla.
+
+Mujeres +23 | Hombres +25 | General menores de 45 años
+
+📲 Mis datos:
+•  Nombre: ${formData.name.trim()}
+•  Instagram: ${igHandle}
+•  Fecha: ${formData.date}
+•  Somos: ${formData.guestCount} personas
+•  Mail: ${formData.email.trim()}${activeRP ? `\n•  Promotor Oficial: ${activeRP.publicName} (/${activeRP.slug})` : ''}`;
+
+    const waUrl = `https://wa.me/${phone}?text=${encodeURIComponent(msg)}`;
     setWhatsappSentUrl(waUrl);
     setSubmittedSuccess(true);
 

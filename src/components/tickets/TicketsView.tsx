@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 import { ClubEvent, UserProfile } from '../../types';
 import { eventService, isEventToday } from '../../services/eventService';
+import { getActiveRPAttribution, logRPActivity } from '../../services/rpService';
 
 interface TicketsViewProps {
   currentUser: UserProfile | null;
@@ -188,15 +189,30 @@ export const TicketsView: React.FC<TicketsViewProps> = ({ currentUser }) => {
 
                 {/* Único botón: Comprar entradas hacia Passline */}
                 <div className="pt-1">
-                  <a
-                    href={event.passlineUrl || 'https://www.passline.com'}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="w-full h-12 rounded-xl bg-[#F39200] hover:bg-[#E08400] text-black font-extrabold text-xs flex items-center justify-center gap-2 cursor-pointer transition-all shadow-md shadow-[#F39200]/20 active:scale-[0.99]"
-                  >
-                    <ExternalLink className="w-4 h-4" />
-                    Comprar entradas
-                  </a>
+                  {(() => {
+                    const activeRP = getActiveRPAttribution();
+                    const passlineLink =
+                      (activeRP?.eventLinks && activeRP.eventLinks[event.id]) ||
+                      event.passlineUrl ||
+                      'https://www.passline.com';
+
+                    return (
+                      <a
+                        href={passlineLink}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        onClick={() => {
+                          if (activeRP) {
+                            logRPActivity(activeRP.rpId, 'ticket_click', event.id);
+                          }
+                        }}
+                        className="w-full h-12 rounded-xl bg-[#F39200] hover:bg-[#E08400] text-black font-extrabold text-xs flex items-center justify-center gap-2 cursor-pointer transition-all shadow-md shadow-[#F39200]/20 active:scale-[0.99]"
+                      >
+                        <ExternalLink className="w-4 h-4" />
+                        Comprar entradas
+                      </a>
+                    );
+                  })()}
                 </div>
               </div>
             </div>

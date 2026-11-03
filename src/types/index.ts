@@ -43,7 +43,10 @@ export interface UserProfile {
   authProvider?: 'gmail' | 'instagram' | 'phone' | 'email';
   password?: string;
   isAdmin?: boolean;
-  role?: 'admin' | 'user';
+  role?: 'admin' | 'user' | 'rp';
+  isRp?: boolean;
+  rpStatus?: RPStatus;
+  rpSlug?: string;
   createdAt: string;
   membershipPlanId?: string;
   nightNote?: NightNote;
@@ -92,6 +95,7 @@ export interface ClubEvent {
   djs: string[];
   ticketTypes: TicketType[];
   passlineUrl?: string;
+  isAvailableForRp?: boolean;
   expiresAtIso?: string; // 12 horas después de la finalización del evento
 }
 
@@ -258,4 +262,69 @@ export interface PresenceState {
   statusMessage: string;
   lastChecked?: string;
   requiresQrFallback: boolean;
+}
+
+export type RPStatus = 'pending' | 'approved' | 'rejected' | 'suspended';
+
+export interface RPProfile {
+  id: string;
+  userId: string;
+  publicName: string;
+  slug: string;
+  whatsapp: string;
+  instagram?: string;
+  status: RPStatus;
+  approvedBy?: string;
+  approvedAt?: string;
+  createdAt: string;
+  updatedAt: string;
+  totalClicks?: number;
+  totalVisits?: number;
+  configuredEventsCount?: number;
+}
+
+export interface RPApplication {
+  id: string;
+  userId: string;
+  userEmail?: string;
+  fullName: string;
+  whatsapp: string;
+  instagram?: string;
+  notes?: string;
+  status: RPStatus;
+  reviewedBy?: string;
+  reviewedAt?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface RPEventLink {
+  id: string;
+  rpId: string;
+  eventId: string;
+  passlineUrl: string;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type RPActivityAction = 'visit' | 'ticket_click' | 'birthday_click' | 'reservation_click';
+
+export interface RPActivityLog {
+  id: string;
+  rpId: string;
+  eventId?: string;
+  actionType: RPActivityAction;
+  sessionId?: string;
+  createdAt: string;
+}
+
+export interface ActiveRPAttribution {
+  rpId: string;
+  slug: string;
+  publicName: string;
+  whatsapp: string;
+  instagram?: string;
+  attributedAt: string;
+  eventLinks?: Record<string, string>; // eventId -> passlineUrl
 }

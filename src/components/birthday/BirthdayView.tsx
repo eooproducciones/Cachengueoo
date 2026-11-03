@@ -19,6 +19,7 @@ import {
 } from 'lucide-react';
 import { UserProfile } from '../../types';
 import { birthdayService } from '../../services/birthdayService';
+import { getActiveRPAttribution, logRPActivity } from '../../services/rpService';
 
 interface BirthdayViewProps {
   currentUser: UserProfile | null;
@@ -85,8 +86,46 @@ Mujeres +23 | Hombres +25 | General menores de 45 años
       guestCount: formData.guestCount,
     });
 
-    const msg = buildWhatsAppMessage();
-    const waUrl = `https://wa.me/5492615651192?text=${encodeURIComponent(msg)}`;
+    const activeRP = getActiveRPAttribution();
+    const phone = activeRP?.whatsapp || '5492615651192';
+    if (activeRP) {
+      logRPActivity(activeRP.rpId, 'birthday_click');
+    }
+
+    const greeting = activeRP
+      ? `🎉 ¡Hola ${activeRP.publicName}! Quiero festejar mi cumple en Cache!`
+      : `🎉 ¡Hola! Quiero festejar mi cumple en Cache!`;
+
+    const igHandle = formData.instagram.trim()
+      ? formData.instagram.startsWith('@')
+        ? formData.instagram.trim()
+        : `@${formData.instagram.trim()}`
+      : 'No especificado';
+
+    const msg = `${greeting}
+
+🎂 ¡El cumpleañero/a no paga!
+👥 Mínimo: 5 personas
+🍕 1 pizza cada 5 personas (máximo 4)
+🍾 1 combo a elección
+🥂 Champagne de regalo para el cumpleañero/a
+💰 Valor: $15.000 por persona
+
+🕙 Viernes: apertura 22:00 hs
+🕘 Sábados: apertura 21:00 hs
+🍷 Degustación de vinos: 23:00 a 00:00 hs
+🎟️ QR válido hasta las 23:30 hs. Luego de ese horario se abona diferencia en taquilla.
+
+Mujeres +23 | Hombres +25 | General menores de 45 años
+
+📲 Mis datos:
+•  Nombre: ${formData.name.trim()}
+•  Instagram: ${igHandle}
+•  Fecha: ${formData.date}
+•  Somos: ${formData.guestCount} personas
+•  Mail: ${formData.email.trim()}${activeRP ? `\n•  Promotor Oficial: ${activeRP.publicName} (/${activeRP.slug})` : ''}`;
+
+    const waUrl = `https://wa.me/${phone}?text=${encodeURIComponent(msg)}`;
     setWhatsappSentUrl(waUrl);
     setSubmittedSuccess(true);
 

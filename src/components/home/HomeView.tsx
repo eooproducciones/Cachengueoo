@@ -12,6 +12,7 @@ import {
 import { ClubBenefit, ClubEvent, UserProfile } from '../../types';
 import { PresenceStatus } from '../../services/presenceService';
 import { isEventToday, isEventPast } from '../../services/eventService';
+import { getActiveRPAttribution, logRPActivity } from '../../services/rpService';
 
 interface HomeViewProps {
   currentUser: UserProfile | null;
@@ -187,15 +188,30 @@ export const HomeView: React.FC<HomeViewProps> = ({
 
                         {/* Action button */}
                         <div className="pt-1">
-                          <a
-                            href={evt.passlineUrl || 'https://www.passline.com'}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="w-full h-11 rounded-xl bg-[#F39200] hover:bg-[#E08400] text-black font-bold text-xs flex items-center justify-center gap-1.5 cursor-pointer transition-all shadow-md shadow-[#F39200]/20 active:scale-[0.99]"
-                          >
-                            <Ticket className="w-4 h-4" />
-                            Comprar entrada
-                          </a>
+                          {(() => {
+                            const activeRP = getActiveRPAttribution();
+                            const passlineLink =
+                              (activeRP?.eventLinks && activeRP.eventLinks[evt.id]) ||
+                              evt.passlineUrl ||
+                              'https://www.passline.com';
+
+                            return (
+                              <a
+                                href={passlineLink}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                onClick={() => {
+                                  if (activeRP) {
+                                    logRPActivity(activeRP.rpId, 'ticket_click', evt.id);
+                                  }
+                                }}
+                                className="w-full h-11 rounded-xl bg-[#F39200] hover:bg-[#E08400] text-black font-bold text-xs flex items-center justify-center gap-1.5 cursor-pointer transition-all shadow-md shadow-[#F39200]/20 active:scale-[0.99]"
+                              >
+                                <Ticket className="w-4 h-4" />
+                                Comprar entrada
+                              </a>
+                            );
+                          })()}
                         </div>
                       </div>
                     </div>

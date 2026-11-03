@@ -71,5 +71,22 @@ service cloud.firestore {
     match /matches/{matchId} {
       allow read, write: if true;
     }
+
+    // 8. Relaciones Públicas (RP) & Affiliate Marketing
+    match /rp_profiles/{profileId} {
+      allow read, write: if true;
+    }
+
+    match /rp_applications/{appId} {
+      allow read, write: if true;
+    }
+
+    match /rp_event_links/{linkId} {
+      allow read, write: if true;
+    }
+
+    match /rp_activity_logs/{logId} {
+      allow read, write: if true;
+    }
   }
 }

@@ -53,6 +53,7 @@ import { collection, getDocs } from 'firebase/firestore';
 import { passlineParser, FOUR_PRESET_FLYERS } from '../../services/passlineParser';
 import { VenueMapEditor } from './VenueMapEditor';
 import { unpackProfileInterests } from '../../utils/profileMetadata';
+import { AdminRPManager } from './AdminRPManager';
 
 // Imágenes de alta resolución predeterminadas para aliados comerciales
 export const PRESET_BENEFIT_IMAGES = [
@@ -81,7 +82,7 @@ export interface AdminDashboardProps {
 
 export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onExitAdmin, onLogout }) => {
   const [adminTab, setAdminTab] = useState<
-    'eventos' | 'beneficios' | 'presencia' | 'entradas' | 'usuarios' | 'cumpleanos' | 'venue'
+    'eventos' | 'beneficios' | 'presencia' | 'entradas' | 'usuarios' | 'cumpleanos' | 'venue' | 'rp'
   >('eventos');
 
   // Events state
@@ -714,6 +715,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onExitAdmin, onL
           { id: 'usuarios', label: 'Usuarios', icon: Users },
           { id: 'cumpleanos', label: 'Cumpleaños', icon: Cake },
           { id: 'venue', label: 'Configuración Geográfica', icon: ScanLine },
+          { id: 'rp', label: 'Relaciones Públicas', icon: Sparkles },
         ].map((tab) => {
           const Icon = tab.icon;
           const isActive = adminTab === tab.id;
@@ -2063,6 +2065,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onExitAdmin, onL
             setVenueState(updated);
           }}
         />
+      )}
+
+      {/* TAB: RELACIONES PÚBLICAS (RP) */}
+      {adminTab === 'rp' && (
+        <AdminRPManager />
       )}
 
 

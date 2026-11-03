@@ -18,11 +18,18 @@ import { usePresence } from './hooks/usePresence';
 import { eventService } from './services/eventService';
 import { benefitService } from './services/benefitService';
 import { matchService } from './services/matchService';
-import { UserProfile, ClubEvent, ClubBenefit } from './types';
+import { UserProfile, ClubEvent, ClubBenefit, VenueLocation, ActiveRPAttribution } from './types';
 import { authService } from './services/authService';
 import { presenceService, PresenceStatus } from './services/presenceService';
 import { syncVenueLocationsFromSupabase, getVenueConfig } from './config/venue';
-import { VenueLocation } from './types';
+import {
+  getActiveRPAttribution,
+  setActiveRPAttribution,
+  clearActiveRPAttribution,
+  getRPProfileBySlug,
+  getRPEventLinks,
+  logRPActivity,
+} from './services/rpService';
 import { CheckCircle2, MapPin, Sparkles, X } from 'lucide-react';
 import { OutOfRangeModal } from './components/presence/OutOfRangeModal';
 import { purgeMockData } from './utils/cleanMockData';
@@ -44,6 +51,7 @@ export default function App() {
     'login' | 'register' | 'choice' | 'verify' | 'register_step_1'
   >('choice');
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [activeRP, setActiveRP] = useState<ActiveRPAttribution | null>(() => getActiveRPAttribution());
 
   // Modal OUCH! No estas dentro de Cache
   const [isOutOfRangeModalOpen, setIsOutOfRangeModalOpen] = useState<boolean>(false);
@@ -119,6 +127,47 @@ export default function App() {
     };
     window.addEventListener('hashchange', handleHash);
     return () => window.removeEventListener('hashchange', handleHash);
+  }, []);
+
+  // Detección y Atribución de Relaciones Públicas por URL personalizada (e.g. /nachovichi o ?rp=nachovichi)
+  useEffect(() => {
+    const resolveRPAttribution = async () => {
+      try {
+        const rawPath = window.location.pathname.replace(/^\/+|\/+$/g, '');
+        const params = new URLSearchParams(window.location.search);
+        const rpParam = params.get('rp');
+
+        const reservedRoutes = [
+          'admin', 'match', 'perfil', 'entradas', 'beneficios', 'cumpleanos',
+          'reserva_mesa', 'membresia', 'login', 'registro', 'auth', 'api'
+        ];
+
+        const targetSlug =
+          rpParam ||
+          (rawPath && !reservedRoutes.includes(rawPath.toLowerCase()) ? rawPath : null);
+
+        if (targetSlug) {
+          const rp = await getRPProfileBySlug(targetSlug);
+          if (rp && rp.status === 'approved') {
+            const links = await getRPEventLinks(rp.id);
+            setActiveRPAttribution(rp, links);
+            const attribution = getActiveRPAttribution();
+            setActiveRP(attribution);
+            logRPActivity(rp.id, 'visit');
+            showToast(`¡Estás navegando con el enlace oficial de ${rp.publicName}!`);
+          }
+        } else {
+          const existing = getActiveRPAttribution();
+          if (existing) {
+            setActiveRP(existing);
+          }
+        }
+      } catch (err) {
+        console.warn('Error resolviendo slug de RP:', err);
+      }
+    };
+
+    resolveRPAttribution();
   }, []);
 
   // Escuchar evento para abrir wizard de configuración de Cache ID (tras registro con Google por primera vez)
@@ -440,6 +489,50 @@ export default function App() {
           onExitAdmin={handleExitAdmin}
           currentUser={user}
         />
+      )}
+
+      {/* Banner de Atribución de Relaciones Públicas */}
+      {activeRP && !isAdminView && !isMatchMode && (
+        <div className="max-w-xl mx-auto w-full px-4 pt-2">
+          <div className="p-2.5 rounded-2xl bg-gradient-to-r from-amber-500/20 via-zinc-900 to-amber-500/10 border border-[#F39200]/40 flex items-center justify-between gap-3 text-xs shadow-lg shadow-[#F39200]/10">
+            <div className="flex items-center gap-2.5 min-w-0">
+              <div className="w-7 h-7 rounded-lg bg-[#F39200] text-black flex items-center justify-center shrink-0 font-black shadow-sm">
+                <Sparkles className="w-3.5 h-3.5" />
+              </div>
+              <div className="min-w-0">
+                <span className="text-[10px] text-[#F39200] font-bold uppercase tracking-wider block">
+                  Promotor Oficial
+                </span>
+                <span className="text-white font-black truncate block text-xs">
+                  {activeRP.publicName}
+                </span>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-1.5 shrink-0">
+              <a
+                href={`https://wa.me/${activeRP.whatsapp}`}
+                target="_blank"
+                rel="noreferrer"
+                className="px-2.5 py-1 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-black font-extrabold text-[10px] flex items-center gap-1 transition-colors"
+              >
+                WhatsApp
+              </a>
+              <button
+                type="button"
+                onClick={() => {
+                  clearActiveRPAttribution();
+                  setActiveRP(null);
+                  showToast('Modo de navegación general activado');
+                }}
+                className="p-1 rounded-lg hover:bg-zinc-800 text-zinc-500 hover:text-zinc-300 transition-colors"
+                title="Cerrar atribución"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* Main Content Area */}
