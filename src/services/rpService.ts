@@ -29,6 +29,20 @@ const STORAGE_CACHED_APPLICATIONS = 'cachengueoo_cached_rp_apps';
 const STORAGE_CACHED_RP_PROFILES = 'cachengueoo_cached_rp_profiles';
 const STORAGE_CACHED_RP_LINKS = 'cachengueoo_cached_rp_links';
 
+// Fast in-memory caches to prevent database latency
+const rpProfileMemoryCache = new Map<string, { data: RPProfile; timestamp: number }>();
+const rpLinksMemoryCache = new Map<string, { data: Record<string, string>; timestamp: number }>();
+const rpAnalyticsMemoryCache = new Map<string, { data: RPAnalyticsSummary; timestamp: number }>();
+
+// Fast promise timeout to prevent slow network / database delay
+async function withTimeout<T>(promise: Promise<T>, timeoutMs = 1200, fallbackValue: T): Promise<T> {
+  let timer: any;
+  const timeoutPromise = new Promise<T>((resolve) => {
+    timer = setTimeout(() => resolve(fallbackValue), timeoutMs);
+  });
+  return Promise.race([promise, timeoutPromise]).finally(() => clearTimeout(timer));
+}
+
 // Helper: Sanitize string to URL slug
 export function sanitizeSlug(input: string): string {
   return input
@@ -501,18 +515,51 @@ export async function checkSlugTaken(slug: string, excludeUserId?: string): Prom
 }
 
 export async function getRPProfileByUserId(userId: string): Promise<RPProfile | null> {
-  // 1. Supabase
+  // 1. Memoria rápida (< 60s)
+  const cachedMem = rpProfileMemoryCache.get(userId);
+  if (cachedMem && Date.now() - cachedMem.timestamp < 60000) {
+    return cachedMem.data;
+  }
+
+  // 2. LocalStorage inmediato (0 ms)
+  try {
+    const stored = localStorage.getItem(STORAGE_CACHED_RP_PROFILES);
+    if (stored) {
+      const list: RPProfile[] = JSON.parse(stored);
+      const found = list.find(p => p.userId === userId);
+      if (found) {
+        rpProfileMemoryCache.set(userId, { data: found, timestamp: Date.now() });
+        // Sincronizar en segundo plano sin demorar la respuesta
+        fetchProfileFromNetwork(userId).catch(() => {});
+        return found;
+      }
+    }
+  } catch (e) {
+    // ignore
+  }
+
+  return await fetchProfileFromNetwork(userId);
+}
+
+async function fetchProfileFromNetwork(userId: string): Promise<RPProfile | null> {
+  // 1. Supabase con timeout de 1 segundo
   const supabase = getSupabaseClient();
   if (supabase) {
     try {
-      const { data, error } = await supabase
+      const queryPromise = supabase
         .from('rp_profiles')
         .select('*')
         .eq('user_id', userId)
         .maybeSingle();
 
+      const { data, error } = await withTimeout<{ data: any; error: any }>(
+        queryPromise as any,
+        1000,
+        { data: null, error: null }
+      );
+
       if (!error && data) {
-        return {
+        const profile: RPProfile = {
           id: data.id,
           userId: data.user_id,
           publicName: data.public_name,
@@ -525,37 +572,33 @@ export async function getRPProfileByUserId(userId: string): Promise<RPProfile | 
           createdAt: data.created_at,
           updatedAt: data.updated_at,
         };
+        rpProfileMemoryCache.set(userId, { data: profile, timestamp: Date.now() });
+        return profile;
       }
     } catch (e) {
-      console.warn('Supabase getRPProfileByUserId fallback:', e);
+      // fallback
     }
   }
 
-  // 2. Firestore
+  // 2. Firestore con timeout de 1 segundo
   try {
     const q = query(
       collection(db, 'rp_profiles'),
       where('userId', '==', userId),
       limit(1)
     );
-    const snap = await getDocs(q);
-    if (!snap.empty) {
-      return snap.docs[0].data() as RPProfile;
+    const snap = await withTimeout(
+      getDocs(q),
+      1000,
+      { empty: true, docs: [] } as any
+    );
+    if (!snap.empty && snap.docs && snap.docs.length > 0) {
+      const profile = snap.docs[0].data() as RPProfile;
+      rpProfileMemoryCache.set(userId, { data: profile, timestamp: Date.now() });
+      return profile;
     }
   } catch (e) {
-    console.warn('Firestore getRPProfileByUserId error:', e);
-  }
-
-  // 3. LocalStorage
-  try {
-    const stored = localStorage.getItem(STORAGE_CACHED_RP_PROFILES);
-    if (stored) {
-      const list: RPProfile[] = JSON.parse(stored);
-      const found = list.find(p => p.userId === userId);
-      if (found) return found;
-    }
-  } catch (e) {
-    // ignore
+    // fallback
   }
 
   return null;
@@ -828,54 +871,89 @@ export async function getAllRPProfiles(): Promise<RPProfile[]> {
 // ==============================================================================
 
 export async function getRPEventLinks(rpId: string): Promise<Record<string, string>> {
+  // 1. Memoria rápida (< 60s)
+  const cachedMem = rpLinksMemoryCache.get(rpId);
+  if (cachedMem && Date.now() - cachedMem.timestamp < 60000) {
+    return cachedMem.data;
+  }
+
+  // 2. LocalStorage inmediato (0 ms)
+  try {
+    const stored = localStorage.getItem(`${STORAGE_CACHED_RP_LINKS}_${rpId}`);
+    if (stored) {
+      const parsed = JSON.parse(stored);
+      rpLinksMemoryCache.set(rpId, { data: parsed, timestamp: Date.now() });
+      fetchLinksFromNetwork(rpId).catch(() => {});
+      return parsed;
+    }
+  } catch (e) {
+    // ignore
+  }
+
+  return await fetchLinksFromNetwork(rpId);
+}
+
+async function fetchLinksFromNetwork(rpId: string): Promise<Record<string, string>> {
   const result: Record<string, string> = {};
 
-  // 1. Supabase
+  // 1. Supabase con timeout de 1 segundo
   const supabase = getSupabaseClient();
   if (supabase) {
     try {
-      const { data, error } = await supabase
+      const queryPromise = supabase
         .from('rp_event_links')
         .select('event_id, passline_url')
         .eq('rp_id', rpId)
         .eq('is_active', true);
 
-      if (!error && data) {
-        data.forEach(row => {
+      const { data, error } = await withTimeout<{ data: any; error: any }>(
+        queryPromise as any,
+        1000,
+        { data: null, error: null }
+      );
+
+      if (!error && data && Array.isArray(data)) {
+        data.forEach((row: any) => {
           result[row.event_id] = row.passline_url;
         });
-        return result;
+        if (Object.keys(result).length > 0) {
+          rpLinksMemoryCache.set(rpId, { data: result, timestamp: Date.now() });
+          try {
+            localStorage.setItem(`${STORAGE_CACHED_RP_LINKS}_${rpId}`, JSON.stringify(result));
+          } catch {}
+          return result;
+        }
       }
     } catch (e) {
-      console.warn('Supabase getRPEventLinks fallback:', e);
+      // fallback
     }
   }
 
-  // 2. Firestore
+  // 2. Firestore con timeout de 1 segundo
   try {
     const q = query(
       collection(db, 'rp_event_links'),
       where('rpId', '==', rpId),
       where('isActive', '==', true)
     );
-    const snap = await getDocs(q);
-    snap.docs.forEach(d => {
+    const snap = await withTimeout(
+      getDocs(q),
+      1000,
+      { empty: true, docs: [] } as any
+    );
+    snap.docs.forEach((d: any) => {
       const data = d.data() as RPEventLink;
       result[data.eventId] = data.passlineUrl;
     });
-    if (Object.keys(result).length > 0) return result;
-  } catch (e) {
-    console.warn('Firestore getRPEventLinks error:', e);
-  }
-
-  // 3. LocalStorage
-  try {
-    const stored = localStorage.getItem(`${STORAGE_CACHED_RP_LINKS}_${rpId}`);
-    if (stored) {
-      return JSON.parse(stored);
+    if (Object.keys(result).length > 0) {
+      rpLinksMemoryCache.set(rpId, { data: result, timestamp: Date.now() });
+      try {
+        localStorage.setItem(`${STORAGE_CACHED_RP_LINKS}_${rpId}`, JSON.stringify(result));
+      } catch {}
+      return result;
     }
   } catch (e) {
-    // ignore
+    // fallback
   }
 
   return result;
@@ -1066,6 +1144,12 @@ export interface RPAnalyticsSummary {
 }
 
 export async function getRPAnalytics(rpId: string): Promise<RPAnalyticsSummary> {
+  // 1. Memoria rápida (< 30s)
+  const cachedMem = rpAnalyticsMemoryCache.get(rpId);
+  if (cachedMem && Date.now() - cachedMem.timestamp < 30000) {
+    return cachedMem.data;
+  }
+
   const summary: RPAnalyticsSummary = {
     rpId,
     totalVisits: 0,
@@ -1075,39 +1159,50 @@ export async function getRPAnalytics(rpId: string): Promise<RPAnalyticsSummary> 
     totalActions: 0,
   };
 
-  // 1. Supabase
+  // 1. Supabase con timeout de 1 segundo
   const supabase = getSupabaseClient();
   if (supabase) {
     try {
-      const { data, error } = await supabase
+      const queryPromise = supabase
         .from('rp_activity_logs')
         .select('action_type')
         .eq('rp_id', rpId);
 
-      if (!error && data) {
-        data.forEach(item => {
+      const { data, error } = await withTimeout<{ data: any; error: any }>(
+        queryPromise as any,
+        1000,
+        { data: null, error: null }
+      );
+
+      if (!error && data && Array.isArray(data)) {
+        data.forEach((item: any) => {
           summary.totalActions++;
           if (item.action_type === 'visit') summary.totalVisits++;
           else if (item.action_type === 'ticket_click') summary.ticketClicks++;
           else if (item.action_type === 'birthday_click') summary.birthdayClicks++;
           else if (item.action_type === 'reservation_click') summary.reservationClicks++;
         });
+        rpAnalyticsMemoryCache.set(rpId, { data: summary, timestamp: Date.now() });
         return summary;
       }
     } catch (e) {
-      console.warn('Supabase getRPAnalytics fallback:', e);
+      // fallback
     }
   }
 
-  // 2. Firestore
+  // 2. Firestore con timeout de 1 segundo
   try {
     const q = query(
       collection(db, 'rp_activity_logs'),
       where('rpId', '==', rpId),
-      limit(500)
+      limit(200)
     );
-    const snap = await getDocs(q);
-    snap.docs.forEach(d => {
+    const snap = await withTimeout(
+      getDocs(q),
+      1000,
+      { empty: true, docs: [] } as any
+    );
+    snap.docs.forEach((d: any) => {
       const item = d.data() as RPActivityLog;
       summary.totalActions++;
       if (item.actionType === 'visit') summary.totalVisits++;
@@ -1115,8 +1210,9 @@ export async function getRPAnalytics(rpId: string): Promise<RPAnalyticsSummary> 
       else if (item.actionType === 'birthday_click') summary.birthdayClicks++;
       else if (item.actionType === 'reservation_click') summary.reservationClicks++;
     });
+    rpAnalyticsMemoryCache.set(rpId, { data: summary, timestamp: Date.now() });
   } catch (e) {
-    console.warn('Firestore getRPAnalytics error:', e);
+    // fallback
   }
 
   return summary;

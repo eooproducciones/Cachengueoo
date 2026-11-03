@@ -45,14 +45,33 @@ export const RPProfileSection: React.FC<RPProfileSectionProps> = ({
   onRefreshUser,
   onSwitchToMatchProfile,
 }) => {
-  const [rpProfile, setRpProfile] = useState<RPProfile | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
+  // Inicialización síncrona inmediata desde caché y usuario (0 ms de demora)
+  const cachedProfile = (() => {
+    try {
+      const stored = localStorage.getItem('cachengueoo_cached_rp_profiles');
+      if (stored) {
+        const list: RPProfile[] = JSON.parse(stored);
+        return list.find((p) => p.userId === currentUser.id) || null;
+      }
+    } catch {}
+    return null;
+  })();
 
-  // Form states
-  const [publicName, setPublicName] = useState('');
-  const [slug, setSlug] = useState('');
-  const [whatsapp, setWhatsapp] = useState('');
-  const [instagram, setInstagram] = useState('');
+  const initialSlug =
+    cachedProfile?.slug || currentUser.rpSlug || sanitizeSlug(currentUser.fullName || 'rp');
+  const initialName =
+    cachedProfile?.publicName || currentUser.fullName || 'Promotor Oficial';
+  const initialWhatsapp = cachedProfile?.whatsapp || currentUser.phone || '';
+  const initialInstagram =
+    cachedProfile?.instagram || currentUser.instagram?.replace(/^@/, '') || '';
+
+  const [rpProfile, setRpProfile] = useState<RPProfile | null>(cachedProfile);
+
+  // Form states con valores inmediatos
+  const [publicName, setPublicName] = useState(initialName);
+  const [slug, setSlug] = useState(initialSlug);
+  const [whatsapp, setWhatsapp] = useState(initialWhatsapp);
+  const [instagram, setInstagram] = useState(initialInstagram);
   const [isSavingProfile, setIsSavingProfile] = useState(false);
   const [profileSuccessMsg, setProfileSuccessMsg] = useState<string | null>(null);
   const [profileErrorMsg, setProfileErrorMsg] = useState<string | null>(null);
@@ -60,15 +79,25 @@ export const RPProfileSection: React.FC<RPProfileSectionProps> = ({
   // Link copy state
   const [hasCopiedLink, setHasCopiedLink] = useState(false);
 
-  // Events & RP Links
-  const [events, setEvents] = useState<ClubEvent[]>([]);
-  const [eventLinks, setEventLinks] = useState<Record<string, string>>({});
+  // Events & RP Links - Carga síncrona inmediata
+  const [events, setEvents] = useState<ClubEvent[]>(() => {
+    return eventService.getEvents().filter((e) => e.isAvailableForRp !== false);
+  });
+  const [eventLinks, setEventLinks] = useState<Record<string, string>>(() => {
+    try {
+      const targetId = cachedProfile?.id || `rp_${currentUser.id}`;
+      const stored = localStorage.getItem(`cachengueoo_cached_rp_links_${targetId}`);
+      return stored ? JSON.parse(stored) : {};
+    } catch {
+      return {};
+    }
+  });
   const [savingEventId, setSavingEventId] = useState<string | null>(null);
   const [eventSuccessMsg, setEventSuccessMsg] = useState<Record<string, boolean>>({});
 
-  // Analytics
+  // Analytics iniciales
   const [analytics, setAnalytics] = useState<RPAnalyticsSummary>({
-    rpId: '',
+    rpId: cachedProfile?.id || `rp_${currentUser.id}`,
     totalVisits: 0,
     ticketClicks: 0,
     birthdayClicks: 0,
@@ -76,12 +105,11 @@ export const RPProfileSection: React.FC<RPProfileSectionProps> = ({
     totalActions: 0,
   });
 
-  // Load initial data
+  // Sincronización en segundo plano sin bloquear la pantalla
   useEffect(() => {
     let mounted = true;
 
-    async function loadData() {
-      setIsLoading(true);
+    async function syncInBackground() {
       try {
         const profile = await getRPProfileByUserId(currentUser.id);
         if (!mounted) return;
@@ -93,39 +121,25 @@ export const RPProfileSection: React.FC<RPProfileSectionProps> = ({
           setWhatsapp(profile.whatsapp);
           setInstagram(profile.instagram || '');
 
-          // Load RP event links
-          const links = await getRPEventLinks(profile.id);
-          if (mounted) setEventLinks(links);
-
-          // Load analytics
-          const stats = await getRPAnalytics(profile.id);
-          if (mounted) setAnalytics(stats);
-        } else {
-          // Fallback if not yet initialized
-          const defaultSlug = sanitizeSlug(currentUser.fullName || 'rp');
-          setPublicName(currentUser.fullName || 'Promotor Oficial');
-          setSlug(defaultSlug);
-          setWhatsapp(currentUser.phone || '');
-          setInstagram(currentUser.instagram?.replace(/^@/, '') || '');
+          // Carga paralela de enlaces y métricas
+          const [links, stats] = await Promise.all([
+            getRPEventLinks(profile.id),
+            getRPAnalytics(profile.id),
+          ]);
+          if (!mounted) return;
+          if (links) setEventLinks(links);
+          if (stats) setAnalytics(stats);
         }
-
-        // Load active events
-        const allEvents = eventService.getEvents();
-        // Solo eventos habilitados para promoción (isAvailableForRp !== false)
-        const rpEvents = allEvents.filter(e => e.isAvailableForRp !== false);
-        if (mounted) setEvents(rpEvents);
       } catch (err) {
-        console.error('Error loading RP profile data:', err);
-      } finally {
-        if (mounted) setIsLoading(false);
+        console.warn('Error en sincronización de RP:', err);
       }
     }
 
-    loadData();
+    syncInBackground();
     return () => {
       mounted = false;
     };
-  }, [currentUser]);
+  }, [currentUser.id]);
 
   // Compute public vanity URL
   const baseUrl = window.location.origin;
@@ -224,15 +238,6 @@ export const RPProfileSection: React.FC<RPProfileSectionProps> = ({
       setSavingEventId(null);
     }
   };
-
-  if (isLoading) {
-    return (
-      <div className="py-12 text-center space-y-3">
-        <div className="w-8 h-8 border-2 border-[#F39200] border-t-transparent rounded-full animate-spin mx-auto" />
-        <p className="text-xs text-zinc-400">Cargando panel de Relaciones Públicas...</p>
-      </div>
-    );
-  }
 
   return (
     <div className="space-y-6">
