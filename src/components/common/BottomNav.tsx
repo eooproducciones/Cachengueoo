@@ -169,9 +169,6 @@ export const BottomNav: React.FC<BottomNavProps> = ({
 
                   {/* Icono de fuego con pulso rítmico que invita a tocarlo */}
                   <Icon className="w-7 h-7 fill-black stroke-black drop-shadow-sm animate-pulse" />
-
-                  {/* Destello de luz blanca titilando en la esquina superior */}
-                  <span className="absolute top-1 right-2 w-2 h-2 rounded-full bg-white/90 blur-[1px] animate-ping opacity-90" />
                 </div>
 
                 {/* 3. Etiqueta con brillo dorado neón */}

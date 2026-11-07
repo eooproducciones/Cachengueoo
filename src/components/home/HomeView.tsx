@@ -54,7 +54,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
           ) : (
             <span className="flex items-center gap-1.5 text-xs font-black tracking-wider uppercase text-amber-300 bg-amber-950/50 px-3 py-1 rounded-full border border-amber-500/30">
               <span className="w-2 h-2 rounded-full bg-amber-400 animate-ping"></span>
-              EN VIVO EN LA PISTA 🔥
+              EN VIVO
             </span>
           )}
           <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider">Cachengueoo Mendoza</span>
@@ -64,25 +64,17 @@ export const HomeView: React.FC<HomeViewProps> = ({
           CONECTÁ CON QUIÉN ESTÁ <span className="text-[#F39200]">ESTA NOCHE</span>
         </h2>
         <p className="text-xs text-zinc-300 mt-1 max-w-sm leading-relaxed">
-          Mirá los perfiles de la gente en el boliche, hacé match en tiempo real y compartan una copa.
+          Mirá los perfiles de la gente en el boliche, hacé match y peguen onda.
         </p>
 
-        {/* Botón de Match Titilando y Luminoso */}
-        <div className="mt-4 relative group">
-          {/* Halos de luz titilante expansivos */}
-          <div className="absolute -inset-1 rounded-2xl bg-gradient-to-r from-amber-500 via-[#F39200] to-rose-500 opacity-70 blur-md group-hover:opacity-100 animate-pulse transition duration-500 pointer-events-none" />
-          <div className="absolute -inset-0.5 rounded-2xl bg-white/20 blur-sm animate-ping opacity-40 pointer-events-none" />
-
+        {/* Botón de Match (sin efecto lumínico y sin etiqueta en vivo) */}
+        <div className="mt-4">
           <button
             onClick={onActivateMatch || (() => onNavigateTab('match'))}
-            className="relative w-full h-13 rounded-2xl bg-gradient-to-r from-[#EA580C] via-[#F39200] to-[#FBBF24] hover:brightness-110 text-black font-black text-xs sm:text-sm uppercase tracking-wide flex items-center justify-center gap-2.5 cursor-pointer shadow-xl shadow-[#F39200]/30 active:scale-[0.98] transition-all overflow-hidden"
+            className="w-full h-12 rounded-2xl bg-gradient-to-r from-[#EA580C] via-[#F39200] to-[#FBBF24] hover:brightness-105 text-black font-black text-xs sm:text-sm uppercase tracking-wide flex items-center justify-center gap-2 cursor-pointer shadow-md active:scale-[0.98] transition-all"
           >
-            {/* Destello de luz pasando */}
-            <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/30 to-transparent -translate-x-full group-hover:translate-x-full transition-transform duration-1000 ease-out pointer-events-none" />
-            
-            <Flame className="w-5 h-5 fill-black stroke-black animate-pulse" />
-            <span>ENTRAR A MATCH</span>
-            <span className="text-xs bg-black/20 px-2 py-0.5 rounded-full font-bold">EN VIVO</span>
+            <Flame className="w-5 h-5 fill-black stroke-black" />
+            <span>Entrar a Match</span>
           </button>
         </div>
       </div>
