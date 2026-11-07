@@ -22,11 +22,14 @@ export function useAuth() {
             .or(`id.eq.${authUser.id},email.eq.${authUser.email}`)
             .maybeSingle();
 
-          // Un usuario está configurado si tiene nombre real (no depende de fechas o avatares específicos)
-          const isAlreadyConfigured = Boolean(
-            (profileData && (profileData.full_name || profileData.nickname)) ||
-            (authUser.user_metadata?.full_name || authUser.user_metadata?.name)
-          );
+          // Helper: Determinar si la foto fue realmente subida por el usuario y no proviene de Google
+          const isRealUploadedPhoto = (url?: string | null) =>
+            Boolean(
+              url &&
+              !url.includes('images.unsplash.com') &&
+              !url.includes('googleusercontent.com') &&
+              !url.includes('ggpht.com')
+            );
 
           // Si el usuario ingresó por Google y aún no tiene fila en profiles, crearla automáticamente con sus datos
           if (!profileData && authUser.email) {
@@ -34,17 +37,14 @@ export function useAuth() {
               authUser.user_metadata?.full_name ||
               authUser.user_metadata?.name ||
               authUser.email.split('@')[0];
-            const googleAvatar =
-              authUser.user_metadata?.avatar_url ||
-              authUser.user_metadata?.picture ||
-              '';
 
+            // NUNCA tomar la foto de Google: el usuario debe subir sí o sí una foto propia
             const newProfileRecord = {
               id: authUser.id,
               email: authUser.email,
               full_name: googleName,
               nickname: googleName.split(' ')[0] || googleName,
-              avatar_url: googleAvatar,
+              avatar_url: '',
               gender: 'hombre',
               preference: 'todos',
               birth_date: '2001-01-01',
@@ -71,34 +71,32 @@ export function useAuth() {
             mergedUser.email = authUser.email;
           }
 
+          // Si el avatar guardado era de Google, limpiarlo para forzar que suba su foto real
+          if (mergedUser.avatarUrl && !isRealUploadedPhoto(mergedUser.avatarUrl)) {
+            mergedUser.avatarUrl = '';
+            mergedUser.photos = [];
+          }
+
           setUser(mergedUser);
           localStorage.setItem('cachengueoo_current_user', JSON.stringify(mergedUser));
           sessionStorage.setItem('cachengueoo_current_user', JSON.stringify(mergedUser));
           notifyAuthChange();
 
-          // Un usuario que ya tiene perfil o ya inició sesión NUNCA debe ver el wizard de registro
-          const cacheIdAlreadyCreated = Boolean(
-            localStorage.getItem('cachengueoo_cache_id_created') === 'true' ||
-            (mergedUser && (mergedUser.fullName || mergedUser.nickname)) ||
-            (profileData && (profileData.full_name || profileData.nickname)) ||
-            isAlreadyConfigured
-          );
+          // El usuario solo se considera configurado si TIENE FOTO PROPIA SUBIDA
+          const hasUploadedPhoto =
+            isRealUploadedPhoto(mergedUser?.avatarUrl) ||
+            isRealUploadedPhoto(profileData?.avatar_url);
 
-          // Si el usuario ya tiene su Cache ID o perfil configurado, asegurar flags y NUNCA abrir el wizard
-          if (cacheIdAlreadyCreated) {
-            localStorage.setItem('cachengueoo_cache_id_created', 'true');
-            sessionStorage.removeItem('cachengueoo_flow_intent');
-            localStorage.removeItem('cachengueoo_flow_intent');
+          if (!hasUploadedPhoto) {
+            // Si no subió foto propia, debe abrir el wizard para subirla obligatoriamente
+            localStorage.removeItem('cachengueoo_cache_id_created');
+            window.dispatchEvent(new CustomEvent('cachengueoo_open_cache_id_wizard'));
             return;
           }
 
-          // Solo guiar al wizard si viene explícitamente con flow_intent activo en sessionStorage y sin perfil
-          const flowIntent = sessionStorage.getItem('cachengueoo_flow_intent');
-          if (flowIntent === 'configure_cache_id') {
-            sessionStorage.removeItem('cachengueoo_flow_intent');
-            localStorage.removeItem('cachengueoo_flow_intent');
-            window.dispatchEvent(new CustomEvent('cachengueoo_open_cache_id_wizard'));
-          }
+          localStorage.setItem('cachengueoo_cache_id_created', 'true');
+          sessionStorage.removeItem('cachengueoo_flow_intent');
+          localStorage.removeItem('cachengueoo_flow_intent');
         } catch (err) {
           console.warn('Error fetching or creating Supabase profile in useAuth:', err);
         }

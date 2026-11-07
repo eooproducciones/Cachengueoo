@@ -152,7 +152,13 @@ export const AuthModal: React.FC<AuthModalProps> = ({
           }
           if (currentUser.gender) setRegGender(currentUser.gender);
           if (currentUser.instagram) setRegInstagram(currentUser.instagram);
-          if (currentUser.avatarUrl && regPhotos.length === 0) {
+          if (
+            currentUser.avatarUrl &&
+            !currentUser.avatarUrl.includes('googleusercontent.com') &&
+            !currentUser.avatarUrl.includes('ggpht.com') &&
+            !currentUser.avatarUrl.includes('images.unsplash.com') &&
+            regPhotos.length === 0
+          ) {
             setRegPhotos([currentUser.avatarUrl]);
           }
         }
@@ -187,6 +193,8 @@ export const AuthModal: React.FC<AuthModalProps> = ({
         if (
           u.avatarUrl &&
           !u.avatarUrl.includes('images.unsplash.com') &&
+          !u.avatarUrl.includes('googleusercontent.com') &&
+          !u.avatarUrl.includes('ggpht.com') &&
           regPhotos.length === 0
         ) {
           setRegPhotos([u.avatarUrl]);
@@ -495,8 +503,16 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     e.preventDefault();
     setErrorMessage(null);
 
-    if (!regPhotos || regPhotos.length === 0 || !regPhotos[0]) {
-      setErrorMessage('La foto principal de tu perfil es obligatoria. Por favor subí tu foto.');
+    const isInvalidPhoto = (url?: string | null) =>
+      Boolean(
+        !url ||
+        url.includes('images.unsplash.com') ||
+        url.includes('googleusercontent.com') ||
+        url.includes('ggpht.com')
+      );
+
+    if (!regPhotos || regPhotos.length === 0 || isInvalidPhoto(regPhotos[0])) {
+      setErrorMessage('Es obligatorio subir una foto tuya para crear tu perfil de Cachengueoo.');
       return;
     }
 
@@ -1345,7 +1361,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
             <div className="space-y-4 text-xs min-w-0 w-full">
               {/* Fotos (hasta 3 fotos) */}
               <div className="min-w-0 w-full">
-                <div className="flex items-center justify-between mb-1.5">
+                <div className="flex items-center justify-between mb-1">
                   <label className="text-zinc-300 font-bold flex items-center gap-1.5">
                     <Camera className="w-3.5 h-3.5 text-[#F39200]" />
                     <span>Fotos de tu perfil (foto 1 obligatoria) <span className="text-red-400">*</span></span>
@@ -1354,6 +1370,9 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                     {regPhotos.length}/3 fotos
                   </span>
                 </div>
+                <p className="text-[11px] text-zinc-400 mb-2.5 leading-relaxed">
+                  Seleccioná una foto tuya de la galería o cámara. No utilizamos la foto de tu cuenta de Google para garantizar que en Match todos tengan fotos reales de fiesta.
+                </p>
 
                 {/* Slots de fotos */}
                 <div className="grid grid-cols-3 gap-2 sm:gap-2.5 w-full min-w-0">

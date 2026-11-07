@@ -220,14 +220,19 @@ export const HomeView: React.FC<HomeViewProps> = ({
         {/* 1. Club Cachengueoo */}
         <div
           onClick={() => onNavigateTab('membresia')}
-          className="p-4 rounded-3xl bg-[#121217] border border-zinc-800 hover:border-zinc-700 transition-all cursor-pointer group flex sm:flex-col items-center sm:items-start gap-3.5 sm:gap-2.5"
+          className="p-4 rounded-3xl bg-[#121217] border border-zinc-800 hover:border-zinc-700 transition-all cursor-pointer group flex sm:flex-col items-center sm:items-start gap-3.5 sm:gap-2.5 relative overflow-hidden"
         >
           <div className="w-10 h-10 rounded-xl bg-zinc-900 border border-zinc-800 flex items-center justify-center shrink-0">
             <Crown className="w-5 h-5 text-[#F39200] group-hover:scale-110 transition-transform" />
           </div>
           <div className="flex-1 min-w-0">
-            <h4 className="text-sm font-bold text-white font-display">Cachengueoo Club</h4>
-            <p className="text-[11px] text-zinc-400 mt-0.5 leading-snug">Membresía mensual con entradas libres y VIP.</p>
+            <div className="flex items-center gap-2">
+              <h4 className="text-sm font-bold text-white font-display">Cachengueoo Club</h4>
+              <span className="px-1.5 py-0.5 rounded-md bg-amber-500/15 border border-amber-500/30 text-amber-400 font-extrabold text-[9px] uppercase tracking-wider">
+                Muy pronto
+              </span>
+            </div>
+            <p className="text-[11px] text-zinc-400 mt-0.5 leading-snug">Próximamente: membresía con entradas libres y VIP.</p>
           </div>
         </div>
 

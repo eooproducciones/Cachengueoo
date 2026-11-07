@@ -181,11 +181,21 @@ export default function App() {
 
   // Escuchar evento para abrir wizard de configuración de Cache ID (tras registro con Google por primera vez)
   useEffect(() => {
+    const isRealUploadedPhoto = (url?: string | null) =>
+      Boolean(
+        url &&
+        !url.includes('images.unsplash.com') &&
+        !url.includes('googleusercontent.com') &&
+        !url.includes('ggpht.com')
+      );
+
     const handleOpenWizard = () => {
       const currentUser = authService.getCurrentUser();
+      const hasRealPhoto = isRealUploadedPhoto(currentUser?.avatarUrl);
       const cacheIdCreated = localStorage.getItem('cachengueoo_cache_id_created') === 'true';
-      // Si el usuario ya existe o ya tiene Cache ID, asegurar flags y salir inmediatamente
-      if ((currentUser && (currentUser.fullName || currentUser.nickname)) || cacheIdCreated) {
+
+      // Si el usuario ya tiene nombre Y foto propia subida, salir
+      if (currentUser && (currentUser.fullName || currentUser.nickname) && hasRealPhoto && cacheIdCreated) {
         localStorage.setItem('cachengueoo_cache_id_created', 'true');
         sessionStorage.removeItem('cachengueoo_flow_intent');
         localStorage.removeItem('cachengueoo_flow_intent');
@@ -197,11 +207,12 @@ export default function App() {
 
     window.addEventListener('cachengueoo_open_cache_id_wizard', handleOpenWizard);
 
-    // Al iniciar la app: si el usuario ya está guardado o ya creó su Cache ID, limpiar cualquier intent previo
+    // Al iniciar la app: verificar si el usuario tiene foto real antes de marcarlo como completado
     const currentUser = authService.getCurrentUser();
+    const hasRealPhoto = isRealUploadedPhoto(currentUser?.avatarUrl);
     const cacheIdCreated = localStorage.getItem('cachengueoo_cache_id_created') === 'true';
 
-    if (currentUser || cacheIdCreated) {
+    if (currentUser && hasRealPhoto && cacheIdCreated) {
       localStorage.setItem('cachengueoo_cache_id_created', 'true');
       sessionStorage.removeItem('cachengueoo_flow_intent');
       localStorage.removeItem('cachengueoo_flow_intent');
@@ -315,6 +326,20 @@ export default function App() {
     if (!activeUser) {
       setPendingMatchIntent(true);
       setAuthModalMode('choice');
+      setIsAuthModalOpen(true);
+      return;
+    }
+
+    // Verificar que el usuario tenga sí o sí una foto propia subida
+    const hasRealPhoto = Boolean(
+      activeUser.avatarUrl &&
+      !activeUser.avatarUrl.includes('images.unsplash.com') &&
+      !activeUser.avatarUrl.includes('googleusercontent.com') &&
+      !activeUser.avatarUrl.includes('ggpht.com')
+    );
+    if (!hasRealPhoto) {
+      setPendingMatchIntent(true);
+      setAuthModalMode('register_step_1');
       setIsAuthModalOpen(true);
       return;
     }

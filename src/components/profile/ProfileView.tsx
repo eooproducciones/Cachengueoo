@@ -655,7 +655,10 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
         >
           <span className="flex items-center gap-2.5 font-bold">
             <Crown className="w-4 h-4 text-[#F39200]" />
-            Cachengueoo Club
+            <span>Cachengueoo Club</span>
+            <span className="px-1.5 py-0.5 rounded-md bg-amber-500/15 border border-amber-500/30 text-amber-400 font-extrabold text-[9px] uppercase tracking-wider">
+              Muy pronto
+            </span>
           </span>
           <span className="text-zinc-500">→</span>
         </button>

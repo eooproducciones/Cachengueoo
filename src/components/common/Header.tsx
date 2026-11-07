@@ -90,11 +90,14 @@ export const Header: React.FC<HeaderProps> = ({
           </button>
           <button
             onClick={() => onTabChange('membresia')}
-            className={`transition-colors cursor-pointer ${
+            className={`transition-colors cursor-pointer flex items-center gap-1.5 ${
               currentTab === 'membresia' ? 'text-white font-semibold' : 'text-zinc-400 hover:text-white'
             }`}
           >
-            Cachengueoo Club
+            <span>Cachengueoo Club</span>
+            <span className="px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-400 text-[8.5px] font-black uppercase border border-amber-500/30">
+              Muy pronto
+            </span>
           </button>
           <button
             onClick={() => onTabChange('cumpleanos')}

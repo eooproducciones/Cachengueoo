@@ -174,37 +174,39 @@ export function buildUserProfileFromSources(
 
   const age = Number(profileRow?.age || meta.age || localUser?.age || 23);
 
-  // Fotos (priorizar fotos reales)
+  // Helper: Detectar si una URL proviene de avatares automáticos de Google o fotos de stock
+  const isExcludedPhoto = (url?: string | null): boolean => {
+    if (!url || typeof url !== 'string') return true;
+    return (
+      url.includes('images.unsplash.com') ||
+      url.includes('googleusercontent.com') ||
+      url.includes('ggpht.com')
+    );
+  };
+
+  // Fotos (exclusivamente fotos subidas por el usuario, nunca de Google)
   let photos: string[] = [];
   if (Array.isArray(profileRow?.photos) && profileRow.photos.length > 0) {
-    photos = profileRow.photos.filter((p: string) => p && !p.includes('images.unsplash.com'));
+    photos = profileRow.photos.filter((p: string) => !isExcludedPhoto(p));
   }
   if (
     photos.length === 0 &&
-    (unpacked.extraPhotos.length > 0 ||
-      (profileRow?.avatar_url && !profileRow.avatar_url.includes('images.unsplash.com')))
+    (unpacked.extraPhotos.length > 0 || !isExcludedPhoto(profileRow?.avatar_url))
   ) {
     photos = [
-      profileRow?.avatar_url || meta.avatar_url,
+      profileRow?.avatar_url,
       ...unpacked.extraPhotos,
-    ].filter((p) => p && !p.includes('images.unsplash.com')) as string[];
+    ].filter((p) => !isExcludedPhoto(p)) as string[];
   }
   if (photos.length === 0 && Array.isArray(localUser?.photos) && localUser!.photos.length > 0) {
-    photos = localUser!.photos.filter((p) => p && !p.includes('images.unsplash.com'));
+    photos = localUser!.photos.filter((p) => !isExcludedPhoto(p));
   }
 
-  // Avatar principal
+  // Avatar principal (nunca heredar foto de Google)
   const avatarUrl =
-    (profileRow?.avatar_url && !profileRow.avatar_url.includes('images.unsplash.com')
-      ? profileRow.avatar_url
-      : null) ||
+    (!isExcludedPhoto(profileRow?.avatar_url) ? profileRow?.avatar_url : null) ||
     photos[0] ||
-    (localUser?.avatarUrl && !localUser.avatarUrl.includes('images.unsplash.com')
-      ? localUser.avatarUrl
-      : null) ||
-    (meta.avatar_url && !meta.avatar_url.includes('images.unsplash.com')
-      ? meta.avatar_url
-      : null) ||
+    (!isExcludedPhoto(localUser?.avatarUrl) ? localUser?.avatarUrl : null) ||
     '';
 
   if (photos.length === 0 && avatarUrl) {
