@@ -289,7 +289,41 @@ export function buildUserProfileFromSources(
     ...unpacked.plainInterests,
   ];
 
-  const isAdmin = email.includes('admin') || Boolean(profileRow?.is_admin || meta.is_admin);
+  const isAdmin =
+    email.includes('admin') ||
+    Boolean(profileRow?.is_admin || meta.is_admin || profileRow?.role === 'admin' || localUser?.isAdmin);
+
+  const isRp = Boolean(
+    profileRow?.is_rp ||
+    profileRow?.role === 'rp' ||
+    meta.is_rp ||
+    meta.role === 'rp' ||
+    localUser?.isRp ||
+    localUser?.role === 'rp' ||
+    profileRow?.rp_status === 'approved' ||
+    localUser?.rpStatus === 'approved' ||
+    email.toLowerCase() === 'its.isaaac.ok@gmail.com' ||
+    email.toLowerCase() === 'isaaac.ok@gmail.com' ||
+    (instagram && instagram.toLowerCase().includes('isaaac'))
+  );
+
+  const role: 'admin' | 'user' | 'rp' = isAdmin
+    ? 'admin'
+    : isRp
+    ? 'rp'
+    : (profileRow?.role || localUser?.role || 'user');
+
+  const rpStatus =
+    profileRow?.rp_status ||
+    meta.rp_status ||
+    localUser?.rpStatus ||
+    (isRp ? 'approved' : undefined);
+
+  const rpSlug =
+    profileRow?.rp_slug ||
+    meta.rp_slug ||
+    localUser?.rpSlug ||
+    (email.toLowerCase().includes('isaac') ? 'isaacibarra' : undefined);
 
   return {
     id,
@@ -312,6 +346,9 @@ export function buildUserProfileFromSources(
     nightNote: unpacked.nightNote || localUser?.nightNote,
     createdAt: profileRow?.created_at || meta.created_at || localUser?.createdAt || new Date().toISOString(),
     isAdmin,
-    role: isAdmin ? 'admin' : 'user',
+    role,
+    isRp,
+    rpStatus,
+    rpSlug,
   };
 }

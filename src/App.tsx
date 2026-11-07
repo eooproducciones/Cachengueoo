@@ -110,11 +110,15 @@ export default function App() {
     };
   }, []);
 
-  // Al cambiar de pestaña, asegura que la pantalla se desplace al principio absoluto
+  // Al cambiar de pestaña, asegura que la pantalla se desplace al principio de forma segura en todos los navegadores
   useEffect(() => {
-    window.scrollTo({ top: 0, left: 0, behavior: 'instant' });
-    document.documentElement.scrollTo({ top: 0, left: 0, behavior: 'instant' });
-    document.body.scrollTo({ top: 0, left: 0, behavior: 'instant' });
+    try {
+      window.scrollTo(0, 0);
+      if (document.documentElement) document.documentElement.scrollTop = 0;
+      if (document.body) document.body.scrollTop = 0;
+    } catch {
+      // Ignorar en entornos donde window no esté disponible
+    }
   }, [currentTab]);
 
   // Sincronizar locaciones activas desde Supabase al iniciar la app y purgar datos de prueba

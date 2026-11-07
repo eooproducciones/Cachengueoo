@@ -27,8 +27,6 @@ export function purgeMockData(): void {
       } catch {
         localStorage.removeItem('cachengueoo_events_list');
       }
-    } else {
-      localStorage.setItem('cachengueoo_events_list', JSON.stringify([]));
     }
 
     // 2. Limpiar beneficios de ejemplo guardados previamente
@@ -45,8 +43,6 @@ export function purgeMockData(): void {
       } catch {
         localStorage.removeItem('cachengueoo_benefits_list');
       }
-    } else {
-      localStorage.setItem('cachengueoo_benefits_list', JSON.stringify([]));
     }
 
     // 3. Limpiar matches, mensajes y swipes de prueba

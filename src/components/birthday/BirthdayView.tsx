@@ -38,9 +38,11 @@ export const BirthdayView: React.FC<BirthdayViewProps> = ({ currentUser }) => {
 
   // Asegura que al entrar la pantalla siempre comience desde arriba de todo
   useEffect(() => {
-    window.scrollTo({ top: 0, left: 0, behavior: 'instant' });
-    document.documentElement.scrollTo({ top: 0, left: 0, behavior: 'instant' });
-    document.body.scrollTo({ top: 0, left: 0, behavior: 'instant' });
+    try {
+      window.scrollTo(0, 0);
+      if (document.documentElement) document.documentElement.scrollTop = 0;
+      if (document.body) document.body.scrollTop = 0;
+    } catch {}
   }, []);
 
   const buildWhatsAppMessage = () => {

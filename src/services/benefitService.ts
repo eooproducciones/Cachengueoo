@@ -16,9 +16,14 @@ async function syncSingleBenefitToSupabase(ben: ClubBenefit): Promise<string | n
   const supabase = getSupabaseClient();
   if (!supabase) return null;
 
-  const payload: Record<string, any> = {
+  // Metadata pack para garantizar persistencia aunque las columnas dedicadas no existan aún en Supabase
+  const metaTag = `[CACHE_BEN_META:partner=${encodeURIComponent(ben.partnerName || '')};badge=${encodeURIComponent(ben.highlightBadge || '')};url=${encodeURIComponent(ben.actionUrl || '')};type=${ben.actionType || 'whatsapp'};lbl=${encodeURIComponent(ben.actionLabel || '')};cat=${encodeURIComponent(ben.category || '')};code=${encodeURIComponent(ben.promoCode || '')}]`;
+  const cleanDescription = (ben.description || '').replace(/\[CACHE_BEN_META:[^\]]+\]/g, '').trim();
+  const packedDescription = cleanDescription ? `${cleanDescription}\n${metaTag}` : metaTag;
+
+  const fullPayload: Record<string, any> = {
     title: ben.title,
-    description: ben.description || '',
+    description: packedDescription,
     condition: ben.condition || 'Válido presentando la app',
     expiry_time: ben.expiryTime || null,
     tag: ben.tag || 'BARRA',
@@ -28,32 +33,51 @@ async function syncSingleBenefitToSupabase(ben: ClubBenefit): Promise<string | n
     highlight_badge: ben.highlightBadge || 'PROMO',
     action_url: ben.actionUrl || '',
     promo_code: ben.promoCode || null,
+    partner_name: ben.partnerName || ben.title,
+    category: ben.category || 'Gimnasio & Salud',
+    image_url: ben.imageUrl || '',
+    action_type: ben.actionType || 'whatsapp',
   };
 
-  if (ben.partnerName) payload.partner_name = ben.partnerName;
-  if (ben.category) payload.category = ben.category;
-  if (ben.imageUrl) payload.image_url = ben.imageUrl;
-  if (ben.actionType) payload.action_type = ben.actionType;
-
   if (ben.id) {
-    payload.id = ben.id;
+    fullPayload.id = ben.id;
+  }
+
+  // Columnas base mínimas existentes en Supabase
+  const basePayload: Record<string, any> = {
+    title: ben.title,
+    description: packedDescription,
+    image_url: ben.imageUrl || '',
+  };
+  if (ben.id) {
+    basePayload.id = ben.id;
   }
 
   try {
+    // 1. Intentar con todas las columnas
     const { data, error } = await supabase
       .from('benefits')
-      .upsert(payload, { onConflict: 'id' })
+      .upsert(fullPayload, { onConflict: 'id' })
       .select('*');
 
-    if (error) {
-      console.warn('Upsert benefit con ID falló en Supabase, reintentando inserción sin ID custom:', error.message);
-      delete payload.id;
-      const res2 = await supabase.from('benefits').insert(payload).select('*');
-      if (res2.data && res2.data[0]) {
-        return String(res2.data[0].id);
-      }
-    } else if (data && data[0]) {
+    if (!error && data && data[0]) {
       return String(data[0].id);
+    }
+
+    // 2. Si falló por columnas faltantes, usar basePayload
+    const fallbackRes = await supabase
+      .from('benefits')
+      .upsert(basePayload, { onConflict: 'id' })
+      .select('*');
+
+    if (!fallbackRes.error && fallbackRes.data && fallbackRes.data[0]) {
+      return String(fallbackRes.data[0].id);
+    }
+
+    delete basePayload.id;
+    const res2 = await supabase.from('benefits').insert(basePayload).select('*');
+    if (res2.data && res2.data[0]) {
+      return String(res2.data[0].id);
     }
   } catch (err) {
     console.warn('Error al guardar beneficio en Supabase:', err);
@@ -95,7 +119,19 @@ export const benefitService = {
         window.dispatchEvent(new CustomEvent('cachengueoo_benefits_updated', { detail: benefits }));
       }
     } catch (e) {
-      console.error('Error saving benefits', e);
+      console.warn('Notice saving benefits to storage (retrying lightweight):', e);
+      try {
+        const lightweight = benefits.map((b) => ({
+          ...b,
+          imageUrl: b.imageUrl && b.imageUrl.length > 50000 ? '' : b.imageUrl,
+        }));
+        localStorage.setItem(BENEFITS_STORAGE_KEY, JSON.stringify(lightweight));
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new CustomEvent('cachengueoo_benefits_updated', { detail: benefits }));
+        }
+      } catch (innerErr) {
+        console.error('Critical localStorage save failure in benefits:', innerErr);
+      }
     }
   },
 
@@ -254,53 +290,55 @@ export const benefitService = {
           .order('id', { ascending: false });
 
         if (!error && Array.isArray(data)) {
-          const remoteBenefits: ClubBenefit[] = data.map((d: any) => ({
-            id: String(d.id),
-            title: d.title,
-            partnerName: d.partner_name || d.partnerName || d.title,
-            highlightBadge: d.highlight_badge || d.highlightBadge || 'PROMO',
-            description: d.description || '',
-            condition: d.condition || 'Válido presentando la app',
-            expiryTime: d.expiry_time || d.expiryTime,
-            tag: d.tag || 'BARRA',
-            onlyMembers: Boolean(d.only_members ?? d.onlyMembers),
-            active: d.active ?? true,
-            actionUrl: d.action_url || d.actionUrl || '',
-            actionLabel: d.action_label || d.actionLabel || 'Obtener beneficio',
-            actionType: d.action_type || d.actionType || 'whatsapp',
-            category: d.category || 'Gimnasio & Salud',
-            imageUrl: d.image_url || d.imageUrl || '',
-            promoCode: d.promo_code || d.promoCode,
-          }));
+          const remoteBenefits: ClubBenefit[] = data.map((d: any) => {
+            let partnerName = d.partner_name || d.partnerName || '';
+            let highlightBadge = d.highlight_badge || d.highlightBadge || 'PROMO';
+            let actionUrl = d.action_url || d.actionUrl || '';
+            let actionLabel = d.action_label || d.actionLabel || 'Obtener beneficio';
+            let actionType = d.action_type || d.actionType || 'whatsapp';
+            let category = d.category || 'Gimnasio & Salud';
+            let promoCode = d.promo_code || d.promoCode;
+            let rawDesc = d.description || '';
 
-          // MERGE INTELIGENTE NO DESTRUCTIVO:
-          const mergedMap = new Map<string, ClubBenefit>();
-
-          // 1. Agregar beneficios remotos de Supabase
-          remoteBenefits.forEach((rb) => {
-            mergedMap.set(rb.id, rb);
-            if (rb.title) {
-              mergedMap.set(rb.title.trim().toLowerCase(), rb);
+            const metaMatch = rawDesc.match(/\[CACHE_BEN_META:([^\]]+)\]/);
+            if (metaMatch) {
+              const metaStr = metaMatch[1];
+              metaStr.split(';').forEach((part: string) => {
+                const [k, v] = part.split('=');
+                if (k === 'partner' && v && !partnerName) partnerName = decodeURIComponent(v);
+                if (k === 'badge' && v) highlightBadge = decodeURIComponent(v);
+                if (k === 'url' && v && !actionUrl) actionUrl = decodeURIComponent(v);
+                if (k === 'type' && v) actionType = v as any;
+                if (k === 'lbl' && v) actionLabel = decodeURIComponent(v);
+                if (k === 'cat' && v) category = decodeURIComponent(v);
+                if (k === 'code' && v && !promoCode) promoCode = decodeURIComponent(v);
+              });
+              rawDesc = rawDesc.replace(metaMatch[0], '').trim();
             }
+
+            return {
+              id: String(d.id),
+              title: d.title,
+              partnerName: partnerName || d.title,
+              highlightBadge,
+              description: rawDesc,
+              condition: d.condition || 'Válido presentando la app',
+              expiryTime: d.expiry_time || d.expiryTime,
+              tag: d.tag || 'BARRA',
+              onlyMembers: Boolean(d.only_members ?? d.onlyMembers),
+              active: d.active ?? true,
+              actionUrl,
+              actionLabel,
+              actionType,
+              category,
+              imageUrl: d.image_url || d.imageUrl || '',
+              promoCode,
+            };
           });
 
-          // 2. Preservar beneficios locales activos que aún no estén en Supabase y subirlos
-          localBenefits.forEach((localBen) => {
-            const titleKey = localBen.title.trim().toLowerCase();
-            const existsInRemote = mergedMap.has(localBen.id) || (titleKey && mergedMap.has(titleKey));
-
-            if (!existsInRemote) {
-              mergedMap.set(localBen.id, localBen);
-              // Ponerlo en Supabase para persistirlo en la nube
-              syncSingleBenefitToSupabase(localBen);
-            }
-          });
-
-          const finalBenefits = Array.from(mergedMap.values())
-            .filter((b, idx, arr) => arr.findIndex((x) => x.id === b.id) === idx);
-
-          this.saveBenefits(finalBenefits);
-          return finalBenefits;
+          // Supabase es la fuente de verdad definitiva de beneficios:
+          this.saveBenefits(remoteBenefits);
+          return remoteBenefits;
         }
       } catch (err) {
         console.warn('Notice querying Supabase benefits:', err);

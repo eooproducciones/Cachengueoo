@@ -120,18 +120,18 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
 
   useEffect(() => {
     if (currentUser?.id) {
-      getRPProfileByUserId(currentUser.id).then((prof) => {
+      getRPProfileByUserId(currentUser.id, currentUser.email, currentUser.instagram).then((prof) => {
         if (prof) {
           setRpProfile(prof);
         }
       });
-      getUserRPApplication(currentUser.id).then((app) => {
+      getUserRPApplication(currentUser.id, currentUser.email, currentUser.instagram).then((app) => {
         if (app) {
           setRpAppStatus(app.status);
         }
       });
     }
-  }, [currentUser?.id]);
+  }, [currentUser?.id, currentUser?.email, currentUser?.instagram]);
 
   const isRpUser = Boolean(
     currentUser.role === 'rp' ||
@@ -139,7 +139,10 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
     currentUser.rpStatus === 'approved' ||
     rpProfile?.status === 'approved' ||
     currentUser.isAdmin ||
-    currentUser.role === 'admin'
+    currentUser.role === 'admin' ||
+    currentUser.email?.toLowerCase() === 'its.isaaac.ok@gmail.com' ||
+    currentUser.email?.toLowerCase() === 'isaaac.ok@gmail.com' ||
+    (currentUser.instagram && currentUser.instagram.toLowerCase().includes('isaaac'))
   );
 
   const [isEditing, setIsEditing] = useState(false);

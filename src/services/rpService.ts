@@ -174,11 +174,19 @@ export async function submitRPApplication(
   }
 }
 
-export async function getUserRPApplication(userId: string): Promise<RPApplication | null> {
+export async function getUserRPApplication(
+  userId: string,
+  userEmail?: string,
+  userInstagram?: string
+): Promise<RPApplication | null> {
+  const cleanEmail = userEmail?.trim().toLowerCase();
+  const cleanIg = userInstagram?.trim().replace(/^@/, '').toLowerCase();
+
   // 1. Try Supabase
   const supabase = getSupabaseClient();
   if (supabase) {
     try {
+      // Intento A: Por user_id exacto
       const { data, error } = await supabase
         .from('rp_applications')
         .select('*')
@@ -202,6 +210,62 @@ export async function getUserRPApplication(userId: string): Promise<RPApplicatio
           createdAt: data.created_at,
           updatedAt: data.updated_at,
         };
+      }
+
+      // Intento B: Por user_email
+      if (cleanEmail) {
+        const { data: dataEmail } = await supabase
+          .from('rp_applications')
+          .select('*')
+          .eq('user_email', cleanEmail)
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+
+        if (dataEmail) {
+          return {
+            id: dataEmail.id,
+            userId: dataEmail.user_id,
+            userEmail: dataEmail.user_email,
+            fullName: dataEmail.full_name,
+            whatsapp: dataEmail.whatsapp,
+            instagram: dataEmail.instagram || undefined,
+            notes: dataEmail.notes || undefined,
+            status: dataEmail.status as RPStatus,
+            reviewedBy: dataEmail.reviewed_by || undefined,
+            reviewedAt: dataEmail.reviewed_at || undefined,
+            createdAt: dataEmail.created_at,
+            updatedAt: dataEmail.updated_at,
+          };
+        }
+      }
+
+      // Intento C: Por instagram
+      if (cleanIg) {
+        const { data: dataIg } = await supabase
+          .from('rp_applications')
+          .select('*')
+          .ilike('instagram', cleanIg)
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+
+        if (dataIg) {
+          return {
+            id: dataIg.id,
+            userId: dataIg.user_id,
+            userEmail: dataIg.user_email,
+            fullName: dataIg.full_name,
+            whatsapp: dataIg.whatsapp,
+            instagram: dataIg.instagram || undefined,
+            notes: dataIg.notes || undefined,
+            status: dataIg.status as RPStatus,
+            reviewedBy: dataIg.reviewed_by || undefined,
+            reviewedAt: dataIg.reviewed_at || undefined,
+            createdAt: dataIg.created_at,
+            updatedAt: dataIg.updated_at,
+          };
+        }
       }
     } catch (e) {
       console.warn('Supabase getUserRPApplication fallback to Firestore:', e);
@@ -228,7 +292,7 @@ export async function getUserRPApplication(userId: string): Promise<RPApplicatio
     const stored = localStorage.getItem(STORAGE_CACHED_APPLICATIONS);
     if (stored) {
       const list: RPApplication[] = JSON.parse(stored);
-      const found = list.find(a => a.userId === userId);
+      const found = list.find(a => a.userId === userId || (cleanEmail && a.userEmail === cleanEmail));
       if (found) return found;
     }
   } catch (e) {
@@ -514,7 +578,11 @@ export async function checkSlugTaken(slug: string, excludeUserId?: string): Prom
   return false;
 }
 
-export async function getRPProfileByUserId(userId: string): Promise<RPProfile | null> {
+export async function getRPProfileByUserId(
+  userId: string,
+  userEmail?: string,
+  userInstagram?: string
+): Promise<RPProfile | null> {
   // 1. Memoria rápida (< 60s)
   const cachedMem = rpProfileMemoryCache.get(userId);
   if (cachedMem && Date.now() - cachedMem.timestamp < 60000) {
@@ -526,11 +594,14 @@ export async function getRPProfileByUserId(userId: string): Promise<RPProfile | 
     const stored = localStorage.getItem(STORAGE_CACHED_RP_PROFILES);
     if (stored) {
       const list: RPProfile[] = JSON.parse(stored);
-      const found = list.find(p => p.userId === userId);
+      const cleanIg = userInstagram?.trim().replace(/^@/, '').toLowerCase();
+      const found = list.find(
+        p => p.userId === userId || (cleanIg && p.instagram?.toLowerCase() === cleanIg)
+      );
       if (found) {
         rpProfileMemoryCache.set(userId, { data: found, timestamp: Date.now() });
         // Sincronizar en segundo plano sin demorar la respuesta
-        fetchProfileFromNetwork(userId).catch(() => {});
+        fetchProfileFromNetwork(userId, userEmail, userInstagram).catch(() => {});
         return found;
       }
     }
@@ -538,14 +609,22 @@ export async function getRPProfileByUserId(userId: string): Promise<RPProfile | 
     // ignore
   }
 
-  return await fetchProfileFromNetwork(userId);
+  return await fetchProfileFromNetwork(userId, userEmail, userInstagram);
 }
 
-async function fetchProfileFromNetwork(userId: string): Promise<RPProfile | null> {
-  // 1. Supabase con timeout de 1 segundo
+async function fetchProfileFromNetwork(
+  userId: string,
+  userEmail?: string,
+  userInstagram?: string
+): Promise<RPProfile | null> {
+  const cleanEmail = userEmail?.trim().toLowerCase();
+  const cleanIg = userInstagram?.trim().replace(/^@/, '').toLowerCase();
+
+  // 1. Supabase con timeout seguro de 6 segundos
   const supabase = getSupabaseClient();
   if (supabase) {
     try {
+      // Intento A: Por user_id exacto
       const queryPromise = supabase
         .from('rp_profiles')
         .select('*')
@@ -554,25 +633,83 @@ async function fetchProfileFromNetwork(userId: string): Promise<RPProfile | null
 
       const { data, error } = await withTimeout<{ data: any; error: any }>(
         queryPromise as any,
-        1000,
+        6000,
         { data: null, error: null }
       );
 
-      if (!error && data) {
+      let matchedData = (!error && data) ? data : null;
+
+      // Intento B: Si no se encontró y hay instagram, buscar por instagram
+      if (!matchedData && cleanIg) {
+        const { data: dataByIg } = await supabase
+          .from('rp_profiles')
+          .select('*')
+          .ilike('instagram', cleanIg)
+          .maybeSingle();
+
+        if (dataByIg) {
+          matchedData = dataByIg;
+          // Auto-vincular en segundo plano
+          supabase
+            .from('rp_profiles')
+            .update({ user_id: userId })
+            .eq('id', dataByIg.id)
+            .then(() => {});
+        }
+      }
+
+      // Intento C: Si no se encontró y hay email, buscar en solicitudes
+      if (!matchedData && cleanEmail) {
+        const { data: appData } = await supabase
+          .from('rp_applications')
+          .select('*')
+          .eq('user_email', cleanEmail)
+          .eq('status', 'approved')
+          .maybeSingle();
+
+        if (appData) {
+          const { data: profileByApp } = await supabase
+            .from('rp_profiles')
+            .select('*')
+            .eq('user_id', appData.user_id)
+            .maybeSingle();
+
+          if (profileByApp) {
+            matchedData = profileByApp;
+            supabase
+              .from('rp_profiles')
+              .update({ user_id: userId })
+              .eq('id', profileByApp.id)
+              .then(() => {});
+          }
+        }
+      }
+
+      if (matchedData) {
         const profile: RPProfile = {
-          id: data.id,
-          userId: data.user_id,
-          publicName: data.public_name,
-          slug: data.slug,
-          whatsapp: data.whatsapp,
-          instagram: data.instagram || undefined,
-          status: data.status as RPStatus,
-          approvedBy: data.approved_by || undefined,
-          approvedAt: data.approved_at || undefined,
-          createdAt: data.created_at,
-          updatedAt: data.updated_at,
+          id: matchedData.id,
+          userId: matchedData.user_id || userId,
+          publicName: matchedData.public_name,
+          slug: matchedData.slug,
+          whatsapp: matchedData.whatsapp,
+          instagram: matchedData.instagram || undefined,
+          status: matchedData.status as RPStatus,
+          approvedBy: matchedData.approved_by || undefined,
+          approvedAt: matchedData.approved_at || undefined,
+          createdAt: matchedData.created_at,
+          updatedAt: matchedData.updated_at,
         };
         rpProfileMemoryCache.set(userId, { data: profile, timestamp: Date.now() });
+
+        // Guardar en cache local para acceso instantáneo
+        try {
+          const stored = localStorage.getItem(STORAGE_CACHED_RP_PROFILES);
+          const list: RPProfile[] = stored ? JSON.parse(stored) : [];
+          const filtered = list.filter(p => p.id !== profile.id && p.userId !== profile.userId);
+          filtered.push(profile);
+          localStorage.setItem(STORAGE_CACHED_RP_PROFILES, JSON.stringify(filtered));
+        } catch {}
+
         return profile;
       }
     } catch (e) {
@@ -580,7 +717,7 @@ async function fetchProfileFromNetwork(userId: string): Promise<RPProfile | null
     }
   }
 
-  // 2. Firestore con timeout de 1 segundo
+  // 2. Firestore con timeout de 3 segundos
   try {
     const q = query(
       collection(db, 'rp_profiles'),
@@ -589,7 +726,7 @@ async function fetchProfileFromNetwork(userId: string): Promise<RPProfile | null
     );
     const snap = await withTimeout(
       getDocs(q),
-      1000,
+      3000,
       { empty: true, docs: [] } as any
     );
     if (!snap.empty && snap.docs && snap.docs.length > 0) {

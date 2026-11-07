@@ -54,6 +54,7 @@ import { passlineParser, FOUR_PRESET_FLYERS } from '../../services/passlineParse
 import { VenueMapEditor } from './VenueMapEditor';
 import { unpackProfileInterests } from '../../utils/profileMetadata';
 import { AdminRPManager } from './AdminRPManager';
+import { compressImageFile } from '../../utils/imageCompressor';
 
 // Imágenes de alta resolución predeterminadas para aliados comerciales
 export const PRESET_BENEFIT_IMAGES = [
@@ -136,9 +137,19 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onExitAdmin, onL
   const [birthdays, setBirthdays] = useState<BirthdayRequest[]>(() => birthdayService.getRequests());
 
   // Registered Users state (real users from Supabase or authService)
-  const [registeredUsers, setRegisteredUsers] = useState<any[]>([]);
+  const [registeredUsers, setRegisteredUsers] = useState<any[]>(() => {
+    try {
+      const cached = localStorage.getItem('cachengueoo_admin_cached_users');
+      if (cached) return JSON.parse(cached);
+    } catch {}
+    return [];
+  });
+  const [isLoadingUsers, setIsLoadingUsers] = useState<boolean>(false);
+  const [usersSyncError, setUsersSyncError] = useState<string | null>(null);
+  const [visibleUsersCount, setVisibleUsersCount] = useState<number>(30);
   const [userSearchQuery, setUserSearchQuery] = useState<string>('');
   const [selectedUserDetail, setSelectedUserDetail] = useState<any | null>(null);
+  const [isLoadingDetailPhotos, setIsLoadingDetailPhotos] = useState<boolean>(false);
   const [blockedMatchUsers, setBlockedMatchUsers] = useState<string[]>(() => {
     try {
       return JSON.parse(localStorage.getItem('cachengueoo_blocked_match_users') || '[]');
@@ -205,22 +216,80 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onExitAdmin, onL
     }
   };
 
-  React.useEffect(() => {
-    const fetchUsers = async () => {
+  const handleOpenUserDetail = async (usr: any) => {
+    setSelectedUserDetail(usr);
+    const supabase = getSupabaseClient();
+    const uid = usr.id || usr.userId;
+    // Si el usuario no tiene fotos detalladas cargadas, las traemos en demanda de Supabase
+    if (supabase && uid && (!usr.photos || usr.photos.length <= 1)) {
+      setIsLoadingDetailPhotos(true);
+      try {
+        const { data } = await supabase
+          .from('profiles')
+          .select('photos')
+          .eq('id', uid)
+          .maybeSingle();
+        if (data && Array.isArray(data.photos) && data.photos.length > 0) {
+          const validPhotos = data.photos.filter((p: string) => Boolean(p) && !p.includes('images.unsplash.com'));
+          if (validPhotos.length > 0) {
+            setSelectedUserDetail((prev: any) => (prev && (prev.id === uid || prev.userId === uid) ? { ...prev, photos: validPhotos } : prev));
+          }
+        }
+      } catch (err) {
+        console.warn('Notice loading full photos for user detail:', err);
+      } finally {
+        setIsLoadingDetailPhotos(false);
+      }
+    }
+  };
+
+  const fetchUsers = React.useCallback(async (showLoading = true) => {
+    if (showLoading) setIsLoadingUsers(true);
+    setUsersSyncError(null);
+    try {
       const localUsers = authService.getAllUsers();
       const supabase = getSupabaseClient();
       let dbUsers: any[] = [];
+      const USER_COLS = 'id, email, full_name, nickname, birth_date, age, gender, preference, bio, drink_favorite, drinks, zodiac_sign, music_preferences, instagram, is_verified_in_venue, created_at, updated_at, avatar_url';
+
       if (supabase) {
         try {
+          // 1. Intento principal con columnas optimizadas (evita transferir 20MB de fotos base64 de golpe)
           const { data, error } = await supabase
             .from('profiles')
-            .select('*')
+            .select(USER_COLS)
             .order('created_at', { ascending: false });
-          if (!error && data) {
+
+          if (!error && Array.isArray(data) && data.length > 0) {
             dbUsers = data;
+          } else {
+            if (error) {
+              console.warn('Intento con order(created_at) falló, reintentando sin order:', error);
+            }
+            // 2. Fallback sin order por si falta índice o timeout en Postgres
+            const fallbackRes = await supabase
+              .from('profiles')
+              .select(USER_COLS)
+              .limit(500);
+
+            if (!fallbackRes.error && Array.isArray(fallbackRes.data) && fallbackRes.data.length > 0) {
+              dbUsers = fallbackRes.data;
+            } else if (fallbackRes.error) {
+              // 3. Fallback adicional si la tabla fue creada como singular 'profile'
+              const singularRes = await supabase
+                .from('profile')
+                .select('*')
+                .limit(500);
+              if (!singularRes.error && Array.isArray(singularRes.data) && singularRes.data.length > 0) {
+                dbUsers = singularRes.data;
+              } else {
+                setUsersSyncError('No se pudieron obtener perfiles de Supabase. Verificá permisos o políticas de acceso.');
+              }
+            }
           }
-        } catch (e) {
-          console.warn('Error loading users from Supabase:', e);
+        } catch (e: any) {
+          console.warn('Error fetching users from Supabase:', e);
+          setUsersSyncError(e?.message || 'Error al conectar con Supabase');
         }
       }
 
@@ -243,20 +312,23 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onExitAdmin, onL
           (u.drink_favorite && u.drink_favorite !== 'Fernet con Coca' ? u.drink_favorite : null) ||
           'Fernet con Coca';
 
-        mergedMap.set(u.id || u.email, {
-          ...u,
-          fullName: u.full_name || u.fullName,
-          nickname: u.nickname || u.full_name,
-          avatarUrl: avatar,
-          zodiacSign: u.zodiac_sign || unpacked.zodiacSign,
-          musicPreferences: Array.isArray(u.music_preferences) && u.music_preferences.length > 0 ? u.music_preferences : unpacked.musicPreferences,
-          drinks,
-          drinkFavorite,
-          photos,
-        });
+        const userKey = u.id || u.email;
+        if (userKey) {
+          mergedMap.set(userKey, {
+            ...u,
+            fullName: u.full_name || u.fullName,
+            nickname: u.nickname || u.full_name,
+            avatarUrl: avatar,
+            zodiacSign: u.zodiac_sign || unpacked.zodiacSign,
+            musicPreferences: Array.isArray(u.music_preferences) && u.music_preferences.length > 0 ? u.music_preferences : unpacked.musicPreferences,
+            drinks,
+            drinkFavorite,
+            photos,
+          });
+        }
       });
 
-      // Consultar también Firestore profiles
+      // Consultar también Firestore profiles por si existen cuentas adicionales
       try {
         const snap = await getDocs(collection(db, 'profiles'));
         if (!snap.empty) {
@@ -309,20 +381,38 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onExitAdmin, onL
         console.warn('Notice loading users from Firestore in admin:', e);
       }
 
+      // Merge local users sin sobreescribir datos reales de la base de datos
       localUsers.forEach((u) => {
         const key = u.id || u.email;
-        if (mergedMap.has(key)) {
-          const existing = mergedMap.get(key);
-          mergedMap.set(key, { ...existing, ...u });
-        } else {
-          mergedMap.set(key, u);
+        if (key) {
+          if (mergedMap.has(key)) {
+            const existing = mergedMap.get(key);
+            mergedMap.set(key, { ...existing, ...u });
+          } else {
+            mergedMap.set(key, u);
+          }
         }
       });
 
-      setRegisteredUsers(Array.from(mergedMap.values()));
-    };
-    fetchUsers();
-  }, [adminTab]);
+      // Ordenar cronológicamente descendente (más nuevos primero)
+      const sortedUsers = Array.from(mergedMap.values()).sort((a, b) => {
+        const timeA = new Date(a.created_at || a.createdAt || a.updated_at || a.updatedAt || 0).getTime();
+        const timeB = new Date(b.created_at || b.createdAt || b.updated_at || b.updatedAt || 0).getTime();
+        return timeB - timeA;
+      });
+
+      setRegisteredUsers(sortedUsers);
+      try {
+        localStorage.setItem('cachengueoo_admin_cached_users', JSON.stringify(sortedUsers));
+      } catch {}
+    } finally {
+      setIsLoadingUsers(false);
+    }
+  }, []);
+
+  React.useEffect(() => {
+    fetchUsers(registeredUsers.length === 0);
+  }, [adminTab, fetchUsers]);
 
   React.useEffect(() => {
     eventService.syncEventsFromCloud(true).then(setEvents).catch(() => {});
@@ -402,19 +492,27 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onExitAdmin, onL
     setNewEventDateStr(formatted);
   };
 
-  // Carga de archivo de imagen desde el dispositivo
-  const handleImageFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  // Carga de archivo de imagen desde el dispositivo con compresión inteligente para móviles
+  const handleImageFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    const reader = new FileReader();
-    reader.onload = (uploadEvent) => {
-      const result = uploadEvent.target?.result as string;
-      if (result) {
-        setNewEventFlyerUrl(result);
+    try {
+      // Comprimir a máximo 1000px y calidad 82% (pesa ~100-150KB en vez de 4MB)
+      const compressed = await compressImageFile(file, 1000, 0.82);
+      if (compressed) {
+        setNewEventFlyerUrl(compressed);
       }
-    };
-    reader.readAsDataURL(file);
+    } catch {
+      const reader = new FileReader();
+      reader.onload = (uploadEvent) => {
+        const result = uploadEvent.target?.result as string;
+        if (result) {
+          setNewEventFlyerUrl(result);
+        }
+      };
+      reader.readAsDataURL(file);
+    }
   };
 
   // Manejador del link de Passline (primer campo): recopila el nombre de la fiesta pero deja editarlo libremente
@@ -1302,15 +1400,44 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onExitAdmin, onL
         <div className="p-6 rounded-3xl bg-[#121217] border border-zinc-800 space-y-5">
           <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
             <div>
-              <h3 className="text-base font-bold text-white font-display">Usuarios Registrados</h3>
-              <p className="text-xs text-zinc-400">
-                Control de perfiles reales, historial y moderación de acceso a Match.
+              <div className="flex items-center gap-2 flex-wrap">
+                <h3 className="text-base font-bold text-white font-display">Usuarios Registrados</h3>
+                <span className="text-xs font-mono px-2.5 py-0.5 rounded-full bg-emerald-950/70 border border-emerald-500/40 text-emerald-300 font-bold flex items-center gap-1.5 shadow-sm">
+                  <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                  {registeredUsers.length} en Supabase
+                </span>
+              </div>
+              <p className="text-xs text-zinc-400 mt-0.5">
+                Cuentas reales registradas en la base de datos Supabase (<code className="text-[#F39200]">profiles</code>).
               </p>
             </div>
-            <span className="text-xs font-mono px-3 py-1 rounded-full bg-zinc-900 border border-zinc-800 text-[#F39200]">
-              {registeredUsers.length} perfiles en sistema
-            </span>
+
+            <div className="flex items-center gap-2 shrink-0">
+              <button
+                type="button"
+                onClick={() => fetchUsers(true)}
+                disabled={isLoadingUsers}
+                className="h-9 px-3.5 rounded-xl bg-zinc-900 hover:bg-zinc-800 border border-zinc-700 hover:border-[#F39200] text-zinc-200 hover:text-white font-bold text-xs flex items-center gap-1.5 transition-all cursor-pointer shadow-sm disabled:opacity-50"
+                title="Consultar Supabase en tiempo real"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 text-[#F39200] ${isLoadingUsers ? 'animate-spin' : ''}`} />
+                <span>{isLoadingUsers ? 'Sincronizando...' : 'Sincronizar Supabase'}</span>
+              </button>
+            </div>
           </div>
+
+          {usersSyncError && (
+            <div className="p-4 rounded-2xl bg-amber-950/40 border border-amber-500/40 text-amber-200 text-xs flex items-start gap-3">
+              <AlertTriangle className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" />
+              <div className="space-y-1">
+                <p className="font-bold text-white">Aviso de sincronización</p>
+                <p className="text-[11px] text-amber-300/90">{usersSyncError}</p>
+                <p className="text-[10px] text-zinc-400">
+                  Si tu tabla tiene RLS activado en Supabase, ejecutá en el SQL Editor: <code className="text-[#F39200]">ALTER TABLE profiles DISABLE ROW LEVEL SECURITY;</code>
+                </p>
+              </div>
+            </div>
+          )}
 
           {/* BUSCADOR DE USUARIOS */}
           <div className="relative">
@@ -1319,13 +1446,19 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onExitAdmin, onL
               type="text"
               placeholder="Buscar por nombre, apodo, email o instagram..."
               value={userSearchQuery}
-              onChange={(e) => setUserSearchQuery(e.target.value)}
+              onChange={(e) => {
+                setUserSearchQuery(e.target.value);
+                setVisibleUsersCount(30);
+              }}
               className="w-full h-11 pl-10 pr-10 rounded-2xl bg-zinc-900/90 border border-zinc-700/80 text-white placeholder-zinc-500 text-xs focus:outline-none focus:border-[#F39200] transition-colors"
             />
             {userSearchQuery && (
               <button
                 type="button"
-                onClick={() => setUserSearchQuery('')}
+                onClick={() => {
+                  setUserSearchQuery('');
+                  setVisibleUsersCount(30);
+                }}
                 className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-white p-1"
               >
                 <X className="w-3.5 h-3.5" />
@@ -1369,148 +1502,167 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onExitAdmin, onL
                 );
               }
 
-              return filtered.map((usr: any) => {
-                const id = usr.id || usr.userId;
-                const name = usr.full_name || usr.fullName || usr.nickname || 'Usuario';
-                const nick = usr.nickname || usr.full_name || '';
-                const age = usr.age || 23;
-                const email = usr.email || '';
-                const ig = usr.instagram ? usr.instagram.replace(/^@/, '') : '';
-                const drink = usr.drink_favorite || usr.drinkFavorite || 'Fernet con Coca';
-                const avatar =
-                  (usr.avatar_url && !usr.avatar_url.includes('images.unsplash.com'))
-                    ? usr.avatar_url
-                    : (usr.avatarUrl && !usr.avatarUrl.includes('images.unsplash.com'))
-                    ? usr.avatarUrl
-                    : (Array.isArray(usr.photos) && usr.photos.length > 0 && !usr.photos[0].includes('images.unsplash.com'))
-                    ? usr.photos[0]
-                    : `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(name)}&backgroundColor=f39200&textColor=000000`;
-                const isVerified = Boolean(usr.is_verified_in_venue ?? usr.isVerified ?? false);
+              const visibleUsers = filtered.slice(0, visibleUsersCount);
 
-                const isBlockedFromMatch =
-                  blockedMatchUsers.includes(id) ||
-                  (email ? blockedMatchUsers.includes(email.toLowerCase()) : false);
+              return (
+                <>
+                  {visibleUsers.map((usr: any) => {
+                    const id = usr.id || usr.userId;
+                    const name = usr.full_name || usr.fullName || usr.nickname || 'Usuario';
+                    const nick = usr.nickname || usr.full_name || '';
+                    const age = usr.age || 23;
+                    const email = usr.email || '';
+                    const ig = usr.instagram ? usr.instagram.replace(/^@/, '') : '';
+                    const drink = usr.drink_favorite || usr.drinkFavorite || 'Fernet con Coca';
+                    const avatar =
+                      (usr.avatar_url && !usr.avatar_url.includes('images.unsplash.com'))
+                        ? usr.avatar_url
+                        : (usr.avatarUrl && !usr.avatarUrl.includes('images.unsplash.com'))
+                        ? usr.avatarUrl
+                        : (Array.isArray(usr.photos) && usr.photos.length > 0 && !usr.photos[0].includes('images.unsplash.com'))
+                        ? usr.photos[0]
+                        : `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(name)}&backgroundColor=f39200&textColor=000000`;
+                    const isVerified = Boolean(usr.is_verified_in_venue ?? usr.isVerified ?? false);
 
-                const unpacked = unpackProfileInterests(usr.interests);
-                const zodiac = unpacked.zodiacSign || usr.zodiac_sign || usr.zodiacSign;
+                    const isBlockedFromMatch =
+                      blockedMatchUsers.includes(id) ||
+                      (email ? blockedMatchUsers.includes(email.toLowerCase()) : false);
 
-                return (
-                  <div
-                    key={id}
-                    className="py-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs"
-                  >
-                    <div className="flex items-center gap-3 min-w-0">
-                      <img
-                        src={avatar}
-                        alt={name}
-                        className="w-12 h-12 rounded-2xl object-cover border border-zinc-700 shrink-0"
-                        referrerPolicy="no-referrer"
-                      />
-                      <div className="min-w-0">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <h4 className="font-bold text-white font-display text-sm truncate">
-                            {name}
-                          </h4>
-                          {nick && nick !== name && (
-                            <span className="px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-300 text-[10px] font-mono">
-                              "{nick}"
-                            </span>
-                          )}
-                          {isBlockedFromMatch ? (
-                            <span className="px-2 py-0.5 rounded-full bg-red-950/80 border border-red-500/50 text-red-400 text-[10px] font-bold uppercase tracking-wider flex items-center gap-1">
-                              <Ban className="w-3 h-3" />
-                              Bloqueado de Match
-                            </span>
-                          ) : (
-                            <span className="px-2 py-0.5 rounded-full bg-emerald-950/80 border border-emerald-500/40 text-emerald-400 text-[10px] font-bold uppercase tracking-wider flex items-center gap-1">
-                              <UserCheck className="w-3 h-3" />
-                              Activo en Match
-                            </span>
-                          )}
+                    const unpacked = unpackProfileInterests(usr.interests);
+                    const zodiac = unpacked.zodiacSign || usr.zodiac_sign || usr.zodiacSign;
+
+                    return (
+                      <div
+                        key={id}
+                        className="py-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs"
+                      >
+                        <div className="flex items-center gap-3 min-w-0">
+                          <img
+                            src={avatar}
+                            alt={name}
+                            className="w-12 h-12 rounded-2xl object-cover border border-zinc-700 shrink-0"
+                            referrerPolicy="no-referrer"
+                          />
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <h4 className="font-bold text-white font-display text-sm truncate">
+                                {name}
+                              </h4>
+                              {nick && nick !== name && (
+                                <span className="px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-300 text-[10px] font-mono">
+                                  "{nick}"
+                                </span>
+                              )}
+                              {isBlockedFromMatch ? (
+                                <span className="px-2 py-0.5 rounded-full bg-red-950/80 border border-red-500/50 text-red-400 text-[10px] font-bold uppercase tracking-wider flex items-center gap-1">
+                                  <Ban className="w-3 h-3" />
+                                  Bloqueado de Match
+                                </span>
+                              ) : (
+                                <span className="px-2 py-0.5 rounded-full bg-emerald-950/80 border border-emerald-500/40 text-emerald-400 text-[10px] font-bold uppercase tracking-wider flex items-center gap-1">
+                                  <UserCheck className="w-3 h-3" />
+                                  Activo en Match
+                                </span>
+                              )}
+                            </div>
+
+                            <p className="text-[11px] text-zinc-400 mt-0.5 truncate">
+                              {age} años {zodiac ? `· ${zodiac}` : ''} · Trago: <span className="text-zinc-300">{drink}</span>
+                            </p>
+
+                            <div className="flex items-center gap-2 mt-1 text-[10px] text-zinc-400 flex-wrap">
+                              {email && (
+                                <span className="text-zinc-400 font-mono truncate max-w-[200px]">
+                                  {email}
+                                </span>
+                              )}
+                              {ig && (
+                                <span className="text-[#F39200] font-bold flex items-center gap-0.5">
+                                  <Instagram className="w-3 h-3" />@{ig}
+                                </span>
+                              )}
+                              <span
+                                className={`flex items-center gap-1 font-medium ${
+                                  isVerified ? 'text-emerald-400' : 'text-zinc-500'
+                                }`}
+                              >
+                                <span
+                                  className={`w-1.5 h-1.5 rounded-full ${
+                                    isVerified ? 'bg-emerald-400' : 'bg-zinc-600'
+                                  }`}
+                                />
+                                {isVerified ? 'Adentro' : 'Sin presencia'}
+                              </span>
+                            </div>
+                          </div>
                         </div>
 
-                        <p className="text-[11px] text-zinc-400 mt-0.5 truncate">
-                          {age} años {zodiac ? `· ${zodiac}` : ''} · Trago: <span className="text-zinc-300">{drink}</span>
-                        </p>
-
-                        <div className="flex items-center gap-2 mt-1 text-[10px] text-zinc-400 flex-wrap">
-                          {email && (
-                            <span className="text-zinc-400 font-mono truncate max-w-[200px]">
-                              {email}
-                            </span>
-                          )}
-                          {ig && (
-                            <span className="text-[#F39200] font-bold flex items-center gap-0.5">
-                              <Instagram className="w-3 h-3" />@{ig}
-                            </span>
-                          )}
-                          <span
-                            className={`flex items-center gap-1 font-medium ${
-                              isVerified ? 'text-emerald-400' : 'text-zinc-500'
-                            }`}
+                        {/* BOTONES DE ACCIÓN */}
+                        <div className="flex items-center gap-2 shrink-0 self-end sm:self-center">
+                          <button
+                            type="button"
+                            onClick={() => handleOpenUserDetail(usr)}
+                            className="h-8 px-3 rounded-xl bg-zinc-900 hover:bg-zinc-800 border border-zinc-700 hover:border-[#F39200] text-zinc-200 hover:text-white font-bold text-xs flex items-center gap-1.5 transition-all cursor-pointer"
+                            title="Ver ficha completa y fotos"
                           >
-                            <span
-                              className={`w-1.5 h-1.5 rounded-full ${
-                                isVerified ? 'bg-emerald-400' : 'bg-zinc-600'
-                              }`}
-                            />
-                            {isVerified ? 'Adentro' : 'Sin presencia'}
-                          </span>
+                            <Eye className="w-3.5 h-3.5 text-[#F39200]" />
+                            <span>Ver Detalle</span>
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => handleToggleBlockMatch(id, email)}
+                            className={`h-8 px-3 rounded-xl border text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
+                              isBlockedFromMatch
+                                ? 'bg-emerald-950/60 border-emerald-500/50 text-emerald-300 hover:bg-emerald-900/60'
+                                : 'bg-red-950/50 border-red-500/40 text-red-300 hover:bg-red-900/60'
+                            }`}
+                            title={
+                              isBlockedFromMatch
+                                ? 'Habilitar a este usuario en Match'
+                                : 'Bloquear permanentemente de Match'
+                            }
+                          >
+                            {isBlockedFromMatch ? (
+                              <>
+                                <UserCheck className="w-3.5 h-3.5" />
+                                <span>Desbloquear</span>
+                              </>
+                            ) : (
+                              <>
+                                <Ban className="w-3.5 h-3.5 text-red-400" />
+                                <span>Bloquear</span>
+                              </>
+                            )}
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => setUserToDelete(usr)}
+                            className="h-8 px-2.5 rounded-xl bg-red-950/40 hover:bg-red-900/60 border border-red-500/30 hover:border-red-500 text-red-400 hover:text-white transition-all cursor-pointer flex items-center justify-center shadow-sm"
+                            title="Eliminar usuario definitivamente del sistema"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
                         </div>
                       </div>
-                    </div>
+                    );
+                  })}
 
-                    {/* BOTONES DE ACCIÓN */}
-                    <div className="flex items-center gap-2 shrink-0 self-end sm:self-center">
+                  {filtered.length > visibleUsersCount && (
+                    <div className="pt-6 pb-2 text-center">
                       <button
                         type="button"
-                        onClick={() => setSelectedUserDetail(usr)}
-                        className="h-8 px-3 rounded-xl bg-zinc-900 hover:bg-zinc-800 border border-zinc-700 hover:border-[#F39200] text-zinc-200 hover:text-white font-bold text-xs flex items-center gap-1.5 transition-all cursor-pointer"
-                        title="Ver ficha completa y fotos"
+                        onClick={() => setVisibleUsersCount((prev) => prev + 40)}
+                        className="px-6 py-2.5 rounded-xl bg-zinc-900 hover:bg-zinc-800 border border-zinc-700 hover:border-[#F39200] text-zinc-200 hover:text-white font-bold text-xs inline-flex items-center gap-2 cursor-pointer transition-colors shadow-sm"
                       >
-                        <Eye className="w-3.5 h-3.5 text-[#F39200]" />
-                        <span>Ver Detalle</span>
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() => handleToggleBlockMatch(id, email)}
-                        className={`h-8 px-3 rounded-xl border text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
-                          isBlockedFromMatch
-                            ? 'bg-emerald-950/60 border-emerald-500/50 text-emerald-300 hover:bg-emerald-900/60'
-                            : 'bg-red-950/50 border-red-500/40 text-red-300 hover:bg-red-900/60'
-                        }`}
-                        title={
-                          isBlockedFromMatch
-                            ? 'Habilitar a este usuario en Match'
-                            : 'Bloquear permanentemente de Match'
-                        }
-                      >
-                        {isBlockedFromMatch ? (
-                          <>
-                            <UserCheck className="w-3.5 h-3.5" />
-                            <span>Desbloquear</span>
-                          </>
-                        ) : (
-                          <>
-                            <Ban className="w-3.5 h-3.5 text-red-400" />
-                            <span>Bloquear</span>
-                          </>
-                        )}
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() => setUserToDelete(usr)}
-                        className="h-8 px-2.5 rounded-xl bg-red-950/40 hover:bg-red-900/60 border border-red-500/30 hover:border-red-500 text-red-400 hover:text-white transition-all cursor-pointer flex items-center justify-center shadow-sm"
-                        title="Eliminar usuario definitivamente del sistema"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
+                        <Users className="w-4 h-4 text-[#F39200]" />
+                        <span>Mostrar 40 más (mostrando {visibleUsers.length} de {filtered.length} perfiles)</span>
                       </button>
                     </div>
-                  </div>
-                );
-              });
+                  )}
+                </>
+              );
             })()}
           </div>
         </div>
@@ -1558,9 +1710,16 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({ onExitAdmin, onL
               return (
                 <div className="space-y-2">
                   <div className="flex items-center justify-between">
-                    <span className="text-xs font-bold text-zinc-300">
-                      Fotos de Perfil ({photos.length}/3)
-                    </span>
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-bold text-zinc-300">
+                        Fotos de Perfil ({photos.length}/3)
+                      </span>
+                      {isLoadingDetailPhotos && (
+                        <span className="text-[10px] text-[#F39200] flex items-center gap-1 font-medium animate-pulse">
+                          <RefreshCw className="w-2.5 h-2.5 animate-spin" /> Cargando fotos...
+                        </span>
+                      )}
+                    </div>
                     <span className="text-[10px] text-zinc-500">
                       Subidas por el usuario
                     </span>

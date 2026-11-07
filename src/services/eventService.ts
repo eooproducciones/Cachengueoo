@@ -49,12 +49,11 @@ export function isEventPast(event: ClubEvent): boolean {
   if (isEventToday(event)) return false;
 
   const now = new Date();
-  const currentYear = now.getFullYear();
-  const currentMonth = String(now.getMonth() + 1).padStart(2, '0');
-  const currentDay = String(now.getDate()).padStart(2, '0');
-  const todayIso = `${currentYear}-${currentMonth}-${currentDay}`;
+  // Un evento solo se considera pasado si finalizó hace más de 7 días
+  const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+  const cutoffIso = sevenDaysAgo.toISOString().split('T')[0];
 
-  return event.dateIso < todayIso;
+  return event.dateIso < cutoffIso;
 }
 
 /**
@@ -64,7 +63,7 @@ export function isEventExpired(event: ClubEvent): boolean {
   if (event.expiresAtIso) {
     return Date.now() > new Date(event.expiresAtIso).getTime();
   }
-  return isEventPast(event);
+  return false;
 }
 
 let lastEventsSyncTime = 0;
@@ -72,49 +71,82 @@ const EVENTS_SYNC_COOLDOWN_MS = 10 * 1000;
 let realtimeChannel: any = null;
 
 /**
- * Guarda o actualiza de manera segura un evento en Supabase con auto-recuperación de ID
+ * Guarda o actualiza de manera segura un evento en Supabase con auto-recuperación de ID y fallback de columnas
  */
 async function syncSingleEventToSupabase(event: ClubEvent): Promise<string | null> {
   const supabase = getSupabaseClient();
   if (!supabase) return null;
 
-  const payload: Record<string, any> = {
+  // Metadata pack para garantizar compatibilidad total aunque las columnas aún no existan en Supabase
+  const metaTag = `[CACHE_META:passline=${encodeURIComponent(event.passlineUrl || '')};feat=${event.isFeatured ? '1' : '0'};rp=${event.isAvailableForRp !== false ? '1' : '0'}]`;
+  const cleanDescription = (event.description || '').replace(/\[CACHE_META:[^\]]+\]/g, '').trim();
+  const packedDescription = cleanDescription ? `${cleanDescription}\n${metaTag}` : metaTag;
+
+  const fullPayload: Record<string, any> = {
     title: event.title,
     subtitle: event.subtitle || '',
     date_str: event.dateStr,
     date_iso: event.dateIso,
     time_range: event.timeRange,
     location_name: event.locationName,
-    description: event.description || '',
+    description: packedDescription,
     flyer_url: event.flyerUrl || null,
     is_active_tonight: event.isActiveTonight,
     validation_mode: event.validationMode || 'GPS_OR_QR',
     djs: event.djs || [],
     passline_url: event.passlineUrl || 'https://www.passline.com',
+    is_featured: Boolean(event.isFeatured),
+    is_available_for_rp: event.isAvailableForRp !== false,
   };
 
-  if (event.isFeatured !== undefined) payload.is_featured = Boolean(event.isFeatured);
-  if (event.isAvailableForRp !== undefined) payload.is_available_for_rp = event.isAvailableForRp;
-
   if (event.id) {
-    payload.id = event.id;
+    fullPayload.id = event.id;
+  }
+
+  // Columnas base mínimas que sabemos que existen siempre en Supabase
+  const basePayload: Record<string, any> = {
+    title: event.title,
+    subtitle: event.subtitle || '',
+    date_str: event.dateStr,
+    date_iso: event.dateIso,
+    time_range: event.timeRange,
+    location_name: event.locationName,
+    description: packedDescription,
+    flyer_url: event.flyerUrl || null,
+    is_active_tonight: event.isActiveTonight,
+    validation_mode: event.validationMode || 'GPS_OR_QR',
+    djs: event.djs || [],
+  };
+  if (event.id) {
+    basePayload.id = event.id;
   }
 
   try {
+    // 1. Intentar con todas las columnas
     const { data, error } = await supabase
       .from('events')
-      .upsert(payload, { onConflict: 'id' })
+      .upsert(fullPayload, { onConflict: 'id' })
       .select('*');
 
-    if (error) {
-      console.warn('Upsert event con ID falló en Supabase, reintentando inserción directa:', error.message);
-      delete payload.id;
-      const res2 = await supabase.from('events').insert(payload).select('*');
-      if (res2.data && res2.data[0]) {
-        return String(res2.data[0].id);
-      }
-    } else if (data && data[0]) {
+    if (!error && data && data[0]) {
       return String(data[0].id);
+    }
+
+    // 2. Si falló por columnas faltantes (PGRST204), usar basePayload resiliente
+    const fallbackRes = await supabase
+      .from('events')
+      .upsert(basePayload, { onConflict: 'id' })
+      .select('*');
+
+    if (!fallbackRes.error && fallbackRes.data && fallbackRes.data[0]) {
+      return String(fallbackRes.data[0].id);
+    }
+
+    // 3. Si upsert con ID falla, reintentar inserción directa
+    delete basePayload.id;
+    const res3 = await supabase.from('events').insert(basePayload).select('*');
+    if (res3.data && res3.data[0]) {
+      return String(res3.data[0].id);
     }
   } catch (err) {
     console.warn('Error al guardar evento en Supabase:', err);
@@ -142,15 +174,8 @@ export const eventService = {
       list = [];
     }
 
-    // Auto-borrado estricto: eliminar automáticamente cualquier evento que ya haya pasado
-    const activeEvents = list.filter((event) => !isEventPast(event) && !isEventExpired(event));
-
-    // Si se eliminaron eventos pasados, persistir inmediatamente la lista depurada
-    if (activeEvents.length !== list.length) {
-      this.saveEvents(activeEvents);
-    }
-
-    return activeEvents
+    // Conservar todos los eventos registrados y ordenarlos cronológicamente
+    return list
       .map((evt) => ({
         ...evt,
         isActiveTonight: isEventToday(evt),
@@ -181,7 +206,20 @@ export const eventService = {
         window.dispatchEvent(new CustomEvent('cachengueoo_events_updated', { detail: events }));
       }
     } catch (e) {
-      console.error('Error saving events', e);
+      console.warn('Notice saving events to localStorage (retrying lightweight):', e);
+      try {
+        // Fallback contra QuotaExceededError en Safari iOS
+        const lightweight = events.map((ev) => ({
+          ...ev,
+          flyerUrl: ev.flyerUrl && ev.flyerUrl.length > 50000 ? '' : ev.flyerUrl,
+        }));
+        localStorage.setItem(EVENTS_STORAGE_KEY, JSON.stringify(lightweight));
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new CustomEvent('cachengueoo_events_updated', { detail: events }));
+        }
+      } catch (innerErr) {
+        console.error('Critical localStorage save failure:', innerErr);
+      }
     }
   },
 
@@ -409,55 +447,49 @@ export const eventService = {
           .order('date_iso', { ascending: true });
 
         if (!error && Array.isArray(data)) {
-          const remoteEvents: ClubEvent[] = data.map((d: any) => ({
-            id: String(d.id),
-            title: d.title,
-            subtitle: d.subtitle || '',
-            dateStr: d.date_str || d.dateStr || '',
-            dateIso: d.date_iso || d.dateIso || '',
-            timeRange: d.time_range || d.timeRange || '23:00 — 06:00 hs',
-            locationName: d.location_name || d.locationName || 'Cachengueoo Boliche · Mendoza',
-            description: d.description || '',
-            flyerUrl: d.flyer_url || d.flyerUrl || '',
-            isActiveTonight: isEventToday({ ...d, dateIso: d.date_iso || d.dateIso } as any),
-            isFeatured: Boolean(d.is_featured ?? d.isFeatured),
-            validationMode: d.validation_mode || d.validationMode || 'GPS_OR_QR',
-            djs: Array.isArray(d.djs) ? d.djs : [],
-            passlineUrl: d.passline_url || d.passlineUrl || 'https://www.passline.com',
-            ticketTypes: [],
-            isAvailableForRp: d.is_available_for_rp !== false && d.isAvailableForRp !== false,
-          }));
+          const remoteEvents: ClubEvent[] = data.map((d: any) => {
+            let passlineUrl = d.passline_url || d.passlineUrl || '';
+            let isFeatured = d.is_featured !== undefined ? Boolean(d.is_featured) : Boolean(d.isFeatured);
+            let isAvailableForRp = d.is_available_for_rp !== undefined ? (d.is_available_for_rp !== false) : true;
+            let rawDesc = d.description || '';
 
-          // MERGE INTELIGENTE NO DESTRUCTIVO:
-          const mergedMap = new Map<string, ClubEvent>();
-
-          // 1. Añadir eventos remotos de Supabase
-          remoteEvents.forEach((re) => {
-            mergedMap.set(re.id, re);
-            if (re.title && re.dateIso) {
-              mergedMap.set(`${re.title.trim().toLowerCase()}_${re.dateIso}`, re);
+            // Desempaquetar tag de metadata si existe en la descripción
+            const metaMatch = rawDesc.match(/\[CACHE_META:([^\]]+)\]/);
+            if (metaMatch) {
+              const metaStr = metaMatch[1];
+              metaStr.split(';').forEach((part: string) => {
+                const [k, v] = part.split('=');
+                if (k === 'passline' && v && !passlineUrl) passlineUrl = decodeURIComponent(v);
+                if (k === 'feat' && d.is_featured === undefined) isFeatured = v === '1';
+                if (k === 'rp' && d.is_available_for_rp === undefined) isAvailableForRp = v === '1';
+              });
+              rawDesc = rawDesc.replace(metaMatch[0], '').trim();
             }
+
+            return {
+              id: String(d.id),
+              title: d.title,
+              subtitle: d.subtitle || '',
+              dateStr: d.date_str || d.dateStr || '',
+              dateIso: d.date_iso || d.dateIso || '',
+              timeRange: d.time_range || d.timeRange || '23:00 — 06:00 hs',
+              locationName: d.location_name || d.locationName || 'Cachengueoo Boliche · Mendoza',
+              description: rawDesc,
+              flyerUrl: d.flyer_url || d.flyerUrl || '',
+              isActiveTonight: isEventToday({ ...d, dateIso: d.date_iso || d.dateIso } as any),
+              isFeatured,
+              validationMode: d.validation_mode || d.validationMode || 'GPS_OR_QR',
+              djs: Array.isArray(d.djs) ? d.djs : [],
+              passlineUrl: passlineUrl || 'https://www.passline.com',
+              ticketTypes: [],
+              isAvailableForRp,
+            };
           });
 
-          // 2. Preservar eventos locales que no hayan pasado y subirlos si faltan
-          localEvents.forEach((localEv) => {
-            const compositeKey = `${localEv.title.trim().toLowerCase()}_${localEv.dateIso}`;
-            const existsInRemote = mergedMap.has(localEv.id) || (compositeKey && mergedMap.has(compositeKey));
-
-            if (!existsInRemote && !isEventPast(localEv) && !isEventExpired(localEv)) {
-              // Mantener en el estado local para que JAMÁS se borre
-              mergedMap.set(localEv.id, localEv);
-              // Ponerlo en Supabase para persistirlo en la nube
-              syncSingleEventToSupabase(localEv);
-            }
-          });
-
-          const finalEvents = Array.from(mergedMap.values())
-            .filter((e, idx, arr) => arr.findIndex((x) => x.id === e.id) === idx)
-            .filter((e) => !isEventPast(e) && !isEventExpired(e));
-
-          this.saveEvents(finalEvents);
-          return finalEvents;
+          // Supabase es la fuente de verdad definitiva en la nube:
+          // Si el administrador eliminó un evento, este no vuelve a reaparecer.
+          this.saveEvents(remoteEvents);
+          return remoteEvents;
         }
       } catch (err) {
         console.warn('Notice querying Supabase events:', err);

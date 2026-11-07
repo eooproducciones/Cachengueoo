@@ -303,6 +303,41 @@ export const authService = {
           currentLocal?.id === data.user.id ? currentLocal : null
         );
 
+        // Consultar si es Relación Pública (RP) aprobado en Supabase
+        try {
+          let rpRecord = null;
+          const { data: rpByUserId } = await client
+            .from('rp_profiles')
+            .select('*')
+            .eq('user_id', data.user.id)
+            .maybeSingle();
+
+          if (rpByUserId) {
+            rpRecord = rpByUserId;
+          } else if (u.instagram) {
+            const cleanIg = u.instagram.trim().replace(/^@/, '');
+            const { data: rpByIg } = await client
+              .from('rp_profiles')
+              .select('*')
+              .ilike('instagram', cleanIg)
+              .maybeSingle();
+
+            if (rpByIg) {
+              rpRecord = rpByIg;
+              client.from('rp_profiles').update({ user_id: data.user.id }).eq('id', rpByIg.id).then(() => {});
+            }
+          }
+
+          if (rpRecord && rpRecord.status === 'approved') {
+            u.role = 'rp';
+            u.isRp = true;
+            u.rpStatus = 'approved';
+            u.rpSlug = rpRecord.slug;
+          }
+        } catch (e) {
+          // ignore
+        }
+
         localStorage.setItem(USER_STORAGE_KEY, JSON.stringify(u));
         sessionStorage.setItem(USER_STORAGE_KEY, JSON.stringify(u));
         localStorage.setItem('cachengueoo_cache_id_created', 'true');
